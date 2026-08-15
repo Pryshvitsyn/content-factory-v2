@@ -31,20 +31,25 @@ test('each stage declares inputs and outputs', () => {
   }
 });
 
-test('SCRIPT depends on the canonical IDEA artifact, not a regenerated creative interpretation', () => {
+test('SCRIPT requires both the canonical IDEA source and the completed CONCEPT stage', () => {
   assert.throws(
     () => assertStageDependenciesSatisfied('SCRIPT', []),
     /missing required artifacts/
   );
 
-  assert.equal(
-    assertStageDependenciesSatisfied('SCRIPT', ['IDEA_SET']),
-    true
+  assert.throws(
+    () => assertStageDependenciesSatisfied('SCRIPT', ['IDEA_SET']),
+    /missing required artifacts/
   );
 
   assert.throws(
     () => assertStageDependenciesSatisfied('SCRIPT', ['CONCEPT']),
     /missing required artifacts/
+  );
+
+  assert.equal(
+    assertStageDependenciesSatisfied('SCRIPT', ['IDEA_SET', 'CONCEPT']),
+    true
   );
 });
 
