@@ -97,7 +97,9 @@ BEGIN
     END IF;
   END IF;
 
-  IF NEW.document_hash IS NOT NULL AND NEW.document IS DISTINCT FROM '{}'::jsonb THEN
+  IF NEW.document_hash IS NULL AND NEW.document IS DISTINCT FROM '{}'::jsonb THEN
+    NEW.document_hash := encode(digest(NEW.document::text, 'sha256'), 'hex');
+  ELSIF NEW.document_hash IS NOT NULL AND NEW.document IS DISTINCT FROM '{}'::jsonb THEN
     IF encode(digest(NEW.document::text, 'sha256'), 'hex') IS DISTINCT FROM NEW.document_hash THEN
       RAISE EXCEPTION 'Production Bible document_hash does not match document';
     END IF;
