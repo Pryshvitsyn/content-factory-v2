@@ -1,277 +1,265 @@
-# Content Factory V2
+# 🏭 Content Factory
 
-A controlled V2 architecture for the Content Factory.
+Cross-platform video production system for creating TikTok, Instagram, and YouTube videos.
 
-Content Factory V2 separates content production into explicit stages with persistent pipeline tracking, artifacts, validation, continuity data, provider configuration, retries, and idempotency.
+## 🌍 Supported Platforms
 
-## Current Status
+- ✅ **Mac** (macOS 12+)
+- ✅ **Windows** (Windows 10/11)
+- ✅ **Linux** (Ubuntu 20.04+, Debian 11+)
+- ✅ **iPhone** (iOS 14+, Safari/Chrome)
+- ✅ **Android** (Android 8+, Chrome/Samsung Browser)
+- ✅ **iPad** (iPadOS 14+)
 
-**Version:** 2.0.0-prep
-**Status:** Working V2 baseline
-**Primary text provider:** NVIDIA
-**Database:** PostgreSQL
-**Runtime:** Node.js
+## 🚀 Quick Start
 
-The current V2 build has been successfully smoke-tested through:
+### Option 1: Docker (Recommended for Windows/Linux)
 
-NVIDIA → SCRIPT → PRODUCTION_BIBLE → SHOTS → CONTINUITY → ARTIFACTS → VALIDATION
+```bash
+# Clone repository
+git clone https://github.com/Pryshvitsyn/content-factory-v2.git
+cd content-factory-v2
+git checkout feature/perplexity-multi-tenant
 
-The current system stops before actual image, video, voice, audio generation, final editing, and publishing. Asset requirements are prepared for downstream generation providers.
+# Copy environment file
+cp .env.example .env
 
-## What Changed in V2
+# Edit .env with your NVIDIA_API_KEY, BUSINESS_ID, BRAND_ID
 
-V2 adds:
+# Start everything
+docker-compose up
+```
 
-- transactional and idempotent database migration
-- build journal
-- persistent pipeline runs
-- deterministic pipeline stages
-- stage attempt history
-- retry support
-- dead-letter job handling
-- artifact persistence
-- artifact versioning
-- per-stage validation records
-- character and location continuity snapshots
-- shot planning
-- asset requirements
-- provider capability registry
-- NVIDIA-first provider registration
-- preservation of the existing NVIDIA script-generation path
-- end-to-end smoke testing
+Open http://localhost:3000
 
-## Architecture
+### Option 2: Native Setup (Mac/Linux)
 
-A production job moves through explicit stages.
+```bash
+# Clone repository
+git clone https://github.com/Pryshvitsyn/content-factory-v2.git
+cd content-factory-v2
+git checkout feature/perplexity-multi-tenant
 
-```text
-Generation Job
-      |
-      v
-Pipeline Run
-      |
-      +-- Script
-      |
-      +-- Production Bible
-      |
-      +-- Shots
-      |
-      +-- Continuity
-      |
-      +-- Asset Requirements
-      |
-      +-- Artifacts
-      |
-      +-- Validation
+# Run setup script
+chmod +x setup.sh
+./setup.sh
 
-     The architecture separates:
-job execution
-pipeline state
-stage execution
-production artifacts
-validation
-provider configuration
-Pipeline Stages
-Script
-Generates and persists the structured script using the existing NVIDIA-first text-generation path.
-Production Bible
-Converts the script into a structured production plan for downstream production.
-Shots
-Breaks scenes into individual shots and stores shot-level production information.
-Continuity
-Tracks continuity information across characters, locations, scenes, and shots.
-Asset Requirements
-Defines the assets required to produce the planned shots and provides the interface to future generation providers.
-Artifacts
-Persists production outputs independently from execution state and supports artifact versioning.
-Validation
-Stores validation results separately from production outputs.
-Database Architecture
-V2 introduces or extends the following structures:
-factory_v2_builds
-pipeline_runs
-job_stages
-stage_attempts
-artifacts
-artifact_versions
-dead_letter_jobs
-provider_capabilities
-continuity_snapshots
-shots
-asset_requirements
-validation_results
-Existing Content Factory data is migrated into the V2 architecture rather than discarded.
-Provider Architecture
-The current text-generation provider is NVIDIA.
-The worker currently requires the configured provider to be:
-nvidia
-The NVIDIA API is accessed through its OpenAI-compatible API interface.
-Provider configuration is stored in PostgreSQL.
-API credentials are supplied through environment variables and must never be committed to Git.
-The architecture is designed to support additional providers later.
-Environment
-Create a local .env file based on .env.example.
-Example:
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/content_os
-NVIDIA_API_KEY=your_nvidia_api_key_here
-Never commit .env.
-The repository contains .env.example as a safe template.
-Installation
-Install project dependencies:
-npm install
-Database Migration
-The main V2 migration is:
-migrations/001_v2.sql
-The migration creates the V2 structures and migrates existing Content Factory data into the V2 architecture.
-The migration includes idempotency protections for migrated records.
-Build Script
-The controlled V2 build script is:
-build-v2.sh
-The build process:
-verifies PostgreSQL connectivity
-creates a backup
-installs required dependencies
-applies the V2 database migration
-verifies the database structures
-verifies NVIDIA provider configuration
-verifies the enabled NVIDIA model
-installs the V2 worker
-runs the smoke test
-reports the final build result
-The build creates a backup before modifying the working Content Factory.
-Backups are kept outside the Git-tracked source tree.
-Worker
-The V2 worker is:
-worker/factory-worker-v2.js
-The worker can be run directly with:
-node worker/factory-worker-v2.js
-Testing
-Run:
-npm test
-The smoke test verifies the working V2 pipeline:
-NVIDIA
-|
-v
-SCRIPT
-|
-v
-PRODUCTION_BIBLE
-|
-v
-SHOTS
-|
-v
-CONTINUITY
-|
-v
-ARTIFACTS
-|
-v
-VALIDATION
-A successful test ends with:
-SMOKE TEST PASSED.
-The smoke test creates temporary test data and cleans it after completion.
-Idempotency
-V2 introduces idempotency protections for important operations.
-They prevent repeated execution from unintentionally creating duplicate:
-pipeline runs
-stages
-generation jobs
-asset requirements
-migrated legacy records
-This is important because production systems must be safe to retry after failures or interruptions.
-Retry and Failure Handling
-V2 tracks stage attempts separately from the logical stage.
-Example:
-Stage
-|
-+-- Attempt 1
-+-- Attempt 2
-+-- Attempt 3
-Failed jobs can eventually be moved into dead-letter handling instead of being retried indefinitely.
-Artifact Versioning
-Production outputs are stored separately from execution state.
-This allows multiple versions of an artifact to exist while retaining the logical identity of the production output.
-The goal is to make future regeneration and revision safe rather than destructive.
-Continuity
-Continuity is treated as structured production data.
-The system provides a foundation for maintaining consistency across:
-characters
-locations
-visual properties
-scene relationships
-production constraints
-This becomes particularly important when one character or location is reused across multiple videos or scenes.
-Current Limitations
-V2 currently provides the text, planning, production-package, tracking, and validation foundation.
-It does not yet provide:
-image generation
-video generation
-voice generation
-music/audio generation
-final editing
-rendering
-social publishing
-These capabilities are intended to consume the structured V2 production package and asset requirements.
-Repository Structure
-content-factory-v2/
-|
-+-- build-v2.sh
-+-- migrations/
-| +-- 001_v2.sql
-+-- tests/
-| +-- smoke-test.js
-+-- worker/
-| +-- factory-worker-v2.js
-+-- package.json
-+-- package-lock.json
-+-- .env.example
-+-- .gitignore
-+-- README.md
-Development Workflow
-The stable release line is:
-main
-Development should happen on dedicated branches.
-Examples:
-release/v2.0.0-prep
-feature/v2.1-asset-generation
-feature/v2.1-provider-system
-fix/stage-retry
-Changes should be:
-developed on a branch
-tested locally
-reviewed
-committed intentionally
-merged into main
-tagged when a release is created
-Database changes must be represented by migrations.
-Do not make undocumented production database changes.
-Release Baseline
-The current working V2 baseline is being prepared for the v2.0.0 release.
-The intended stable release tag is:
-v2.0.0
-After the release baseline is verified, V2.1 development will continue on a separate branch.
-V2.1 Roadmap
-Planned V2.1 work includes:
-provider abstraction
-image generation providers
-video generation providers
-voice generation
-asset generation orchestration
-stronger continuity enforcement
-asset reuse
-generation retries
-final media assembly
-publishing workflows
-These are planned capabilities and are not represented as completed functionality in V2.0.0.
-Security Rules
-Never commit:
-.env
-API keys
-database passwords
-production credentials
-generated secrets
-local backups
-Use .env.example to document required environment variables.
-License
-Private project.
+# Edit configuration files
+nano apps/api/.env  # Add NVIDIA_API_KEY
+nano apps/dashboard/.env  # Add BUSINESS_ID, BRAND_ID
+
+# Start all services
+./start.sh
+```
+
+Open http://localhost:3000
+
+### Option 3: Native Setup (Windows)
+
+```powershell
+# Clone repository
+git clone https://github.com/Pryshvitsyn/content-factory-v2.git
+cd content-factory-v2
+git checkout feature/perplexity-multi-tenant
+
+# Run setup script
+.\setup.bat
+
+# Edit configuration files
+notepad apps\api\.env  # Add NVIDIA_API_KEY
+notepad apps\dashboard\.env  # Add BUSINESS_ID, BRAND_ID
+
+# Start all services
+.\start.bat
+```
+
+Open http://localhost:3000
+
+## 📱 Mobile Usage
+
+### iPhone (Safari)
+
+1. Open http://your-ip:3000
+2. Tap **Share** button
+3. Tap **Add to Home Screen**
+4. App installs as PWA
+5. Open from home screen (full-screen, no browser UI)
+
+### Android (Chrome)
+
+1. Open http://your-ip:3000
+2. Tap **⋮** menu
+3. Tap **Add to Home screen**
+4. App installs as PWA
+5. Open from home screen (full-screen, no browser UI)
+
+### Access from Mobile
+
+**On same network:**
+
+1. Find your computer's IP:
+   - Mac: `ipconfig getifaddr en0`
+   - Windows: `ipconfig` (look for IPv4)
+   - Linux: `ip addr show`
+
+2. Update `apps/dashboard/.env`:
+   ```env
+   NEXT_PUBLIC_API_URL=http://YOUR_IP:3001
+   ```
+
+3. Restart dashboard
+
+4. On mobile, open: `http://YOUR_IP:3000`
+
+## 📋 Prerequisites
+
+### Native Setup (All Platforms)
+
+- **Node.js 18+** — https://nodejs.org
+- **PostgreSQL 15+** — https://www.postgresql.org
+- **Git** — https://git-scm.com
+
+### Docker Setup (All Platforms)
+
+- **Docker Desktop** — https://www.docker.com
+  - Windows: Enable WSL2
+  - Mac: Docker Desktop for Mac
+  - Linux: Docker Engine + Compose
+
+## 🔧 Configuration
+
+### API Configuration (apps/api/.env)
+
+```env
+DATABASE_URL=postgresql://content_factory:content_factory@localhost:5432/content_factory
+NVIDIA_API_KEY=your-nvidia-api-key
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+PORT=3001
+NODE_ENV=development
+```
+
+### Dashboard Configuration (apps/dashboard/.env)
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_BUSINESS_ID=your-business-uuid
+NEXT_PUBLIC_BRAND_ID=your-brand-uuid
+```
+
+### Docker Configuration (.env)
+
+```env
+NVIDIA_API_KEY=your-nvidia-api-key
+NEXT_PUBLIC_BUSINESS_ID=your-business-uuid
+NEXT_PUBLIC_BRAND_ID=your-brand-uuid
+```
+
+## 🎯 Features
+
+1. **Create Videos** — Fill form with topic and platforms
+2. **Auto-Generate Scripts** — Worker uses NVIDIA Nemotron
+3. **Video Preview** — Watch generated videos in dashboard
+4. **Approve & Publish** — One-click approval and publishing
+5. **Multi-Platform** — TikTok, Instagram, YouTube
+6. **Mobile-First** — Works perfectly on iPhone/Android
+7. **PWA Support** — Install as native app on mobile
+8. **Cross-Platform** — Mac, Windows, Linux support
+
+## 📊 Architecture
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│  Dashboard  │────▶│     API      │────▶│  Database   │
+│  (Next.js)  │     │  (Express)   │     │ (PostgreSQL)│
+└─────────────┘     └──────────────┘     └─────────────┘
+                           │
+                           ▼
+                     ┌──────────────┐
+                     │    Worker     │
+                     │   (Node.js)   │
+                     └──────────────┘
+                           │
+                           ▼
+                  ┌────────────────┐
+                  │ NVIDIA Nemotron │
+                  │     (API)       │
+                  └────────────────┘
+```
+
+## 🐛 Troubleshooting
+
+### Port Already in Use
+
+```bash
+# Mac/Linux
+lsof -i :3000  # Find process
+kill -9 <PID>  # Kill process
+
+# Windows
+netstat -ano | findstr :3000
+taskkill /PID <PID> /F
+```
+
+### PostgreSQL Connection Error
+
+```bash
+# Check if PostgreSQL is running
+# Mac/Linux
+pg_isready
+
+# Windows
+pg_isready -h localhost
+
+# Start PostgreSQL
+# Mac (Homebrew)
+brew services start postgresql@15
+
+# Windows
+net start postgresql-x64-15
+
+# Linux
+sudo systemctl start postgresql
+```
+
+### Docker Issues
+
+```bash
+# Check Docker is running
+docker ps
+
+# Rebuild containers
+docker-compose down
+docker-compose up --build
+
+# View logs
+docker-compose logs -f
+```
+
+### Mobile Can't Connect
+
+1. Ensure computer and mobile are on same WiFi network
+2. Check firewall allows port 3000 and 3001
+3. Use computer's local IP (not localhost)
+4. Restart dashboard after changing .env
+
+## 📖 Documentation
+
+- **API Usage** — See `HOW_TO_USE_API.md`
+- **Complete Guide** — See `HOW_TO_USE_API_FULL.md`
+- **Architecture** — See `ARCHITECTURE_CONTRACT_V2.1_MULTI_TENANT.md`
+
+## 🎉 Next Steps
+
+1. Create your first video from dashboard
+2. Watch worker generate script
+3. Preview video in dashboard
+4. Approve and publish to TikTok
+5. Add authentication for team access
+6. Deploy to cloud (Vercel + Railway)
+
+## 📞 Support
+
+For issues or questions:
+- Check troubleshooting section above
+- Review documentation files
+- Open GitHub issue

@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: content_factory
+      POSTGRES_PASSWORD: content_factory
+      POSTGRES_DB: content_factory
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U content_factory"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      DATABASE_URL: postgresql://content_factory:content_factory@db:5432/content_factory
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+      NVIDIA_BASE_URL: https://integrate.api.nvidia.com/v1
+      PORT: 3001
+      NODE_ENV: production
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm install && npm start"
+
+  # Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql://content_factory:content_factory@db:5432/content_factory
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+      NVIDIA_BASE_URL: https://integrate.api.nvidia.com/v1
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm install && node worker/factory-worker-v2.js"
+
+  # Dashboard
+  dashboard:
+    build:
+      context: ./apps/dashboard
+      dockerfile: Dockerfile.dashboard
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_BUSINESS_ID: ${NEXT_PUBLIC_BUSINESS_ID}
+      NEXT_PUBLIC_BRAND_ID: ${NEXT_PUBLIC_BRAND_ID}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
