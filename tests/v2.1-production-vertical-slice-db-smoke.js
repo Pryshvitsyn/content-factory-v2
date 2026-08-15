@@ -5,7 +5,8 @@ require('dotenv').config();
 process.env.NVIDIA_MODEL ||= 'smoke-test-model';
 
 const { fingerprint, allStageNames } = require('../worker/v2.1-execution-engine');
-const { runProductionThroughScript } = require('../worker/v2.1-production-orchestrator');
+const { resolveContext } = require('../worker/v2.1-bible-engine');
+const { runProductionThroughBible } = require('../worker/v2.1-production-orchestrator');
 
 const config = {
   host: process.env.PGHOST || '127.0.0.1',
@@ -58,12 +59,37 @@ const SCRIPT = {
   })),
 };
 
+const BIBLE = {
+  creativeTruth: {
+    concept: 'A small observation changes a decision before the character explains why.',
+    narrative: { arc: ['setup', 'recognition', 'decision'] },
+    brandRules: { forbiddenClaims: ['unsupported claims'] },
+    style: { visual: 'naturalistic everyday environments' },
+    characters: [{ id: 'character-main', version: 1, invariants: ['same identity'], definition: { role: 'main' } }],
+    locations: [{ id: 'location-main', version: 1, definition: { role: 'primary setting' } }],
+    styles: [{ id: 'style-main', version: 1, definition: { camera: 'observational' } }],
+  },
+  productionPlan: {
+    objective: { cta: 'Take the next step.' },
+    shots: [1, 2, 3].map((number) => ({
+      number,
+      description: `Production shot ${number}`,
+      durationMs: 4000,
+      action: `Film action ${number}`,
+      assetRefs: [{ id: 'character-main', type: 'CHARACTER', version: 1 }],
+    })),
+    assetRequirements: [{ role: 'main-character', type: 'CHARACTER', id: 'character-main' }],
+    editions: [{ platform: 'TIKTOK', constraints: { aspectRatio: '9:16', maxDurationSec: 60 } }],
+  },
+};
+
 function fakeProvider({ request }) {
   const type = request.outputContract.type;
   if (type === 'IDEA_SET') return { parsed: IDEA_SET };
   if (type === 'CONTENT_BRIEF') return { parsed: BRIEF };
   if (type === 'CONCEPT') return { parsed: CONCEPT };
   if (type === 'SCRIPT') return { parsed: SCRIPT };
+  if (type === 'PRODUCTION_BIBLE') return { parsed: BIBLE };
   throw new Error(`Unexpected provider contract: ${type}`);
 }
 
@@ -105,7 +131,7 @@ async function main() {
       strategy: { id: strategy.rows[0].id, objective: { primary: 'conversion' } },
       universe: { id: universe.rows[0].id, rules: { world: 'grounded' } },
     };
-    const contextFingerprint = fingerprint(contextSnapshot);
+    const contextFingerprint = resolveContext(contextSnapshot).fingerprint;
     const requestSnapshot = { signal: { topic: 'notice', source: 'vertical-smoke' }, objective: 'conversion' };
 
     const production = await client.query(
@@ -117,9 +143,6 @@ async function main() {
     );
     const productionId = production.rows[0].id;
 
-    // Deliberately create a decoy job first. A generic queue claim would take
-    // this older job; the production orchestrator must claim the exact target
-    // job through the database-scoped production boundary instead.
     const decoy = await client.query(
       `INSERT INTO v2_1.jobs(production_id,job_type,status,idempotency_key,input)
        VALUES($1,'PRODUCTION','QUEUED',$2,$3::jsonb) RETURNING id`,
@@ -144,7 +167,7 @@ async function main() {
 
     await client.query('COMMIT');
 
-    const result = await runProductionThroughScript(client, {
+    const result = await runProductionThroughBible(client, {
       productionId,
       jobId,
       workerId: `vertical-worker-${suffix}`,
@@ -154,15 +177,13 @@ async function main() {
       recover: true,
     });
 
-    if (result.status !== 'SCRIPT_COMPLETED') throw new Error('Vertical slice did not stop at SCRIPT as designed');
-    if (result.completedStages.join(',') !== 'SIGNAL,IDEA,BRIEF,CONCEPT,SCRIPT') throw new Error(`Unexpected completed stage order: ${result.completedStages.join(',')}`);
+    if (result.status !== 'BIBLE_COMPLETED') throw new Error('Vertical slice did not stop at BIBLE as designed');
+    if (result.completedStages.join(',') !== 'SIGNAL,IDEA,BRIEF,CONCEPT,SCRIPT,BIBLE') throw new Error(`Unexpected completed stage order: ${result.completedStages.join(',')}`);
     if (result.provenance.contextFingerprint !== contextFingerprint) throw new Error('Returned provenance fingerprint is incorrect');
-    if (result.provenance.stages.length !== 5) throw new Error('Vertical provenance graph is incomplete');
+    if (result.provenance.stages.length !== 6) throw new Error('Vertical provenance graph is incomplete');
 
     const claimedDecoy = await client.query(`SELECT status, worker_id FROM v2_1.jobs WHERE id = $1`, [decoyJobId]);
-    if (claimedDecoy.rows[0].status !== 'QUEUED' || claimedDecoy.rows[0].worker_id !== null) {
-      throw new Error('Orchestrator claimed a job outside the requested production job id');
-    }
+    if (claimedDecoy.rows[0].status !== 'QUEUED' || claimedDecoy.rows[0].worker_id !== null) throw new Error('Orchestrator claimed a job outside the requested production job id');
 
     const audit = await client.query(
       `SELECT COUNT(*)::int AS count
@@ -176,7 +197,10 @@ async function main() {
           )`,
       [jobId]
     );
-    if (audit.rows[0].count < 8) throw new Error(`Expected generation audit events were not recorded; got ${audit.rows[0].count}`);
+    if (audit.rows[0].count < 10) throw new Error(`Expected generation audit events were not recorded; got ${audit.rows[0].count}`);
+
+    const bible = await client.query(`SELECT context_fingerprint, source_script_artifact_id, bible_id FROM v2_1.production_bibles WHERE production_id=$1 ORDER BY version DESC LIMIT 1`, [productionId]);
+    if (bible.rowCount !== 1 || bible.rows[0].context_fingerprint !== contextFingerprint || !bible.rows[0].source_script_artifact_id || !bible.rows[0].bible_id) throw new Error('Durable BIBLE provenance is incomplete');
 
     const jobState = await client.query(`SELECT status, worker_id FROM v2_1.jobs WHERE id=$1`, [jobId]);
     if (jobState.rows[0].status !== 'RUNNING' || jobState.rows[0].worker_id !== result.workerId) throw new Error('Job lease was not retained after vertical slice');
@@ -186,10 +210,11 @@ async function main() {
     if (productionState.rows[0].context_fingerprint !== contextFingerprint) throw new Error('Production context fingerprint changed');
 
     console.log('V2.1 PRODUCTION VERTICAL SLICE DATABASE SMOKE TEST PASSED.');
-    console.log('PRODUCTION -> JOB -> SIGNAL -> IDEA -> BRIEF -> CONCEPT -> SCRIPT VERIFIED.');
+    console.log('PRODUCTION -> JOB -> SIGNAL -> IDEA -> BRIEF -> CONCEPT -> SCRIPT -> BIBLE VERIFIED.');
     console.log('PRODUCTION-SCOPED JOB OWNERSHIP VERIFIED.');
     console.log('IMMUTABLE CONTEXT CONTINUITY VERIFIED ACROSS ALL GENERATION REQUESTS.');
     console.log('CANONICAL ARTIFACT PROVENANCE CHAIN VERIFIED.');
+    console.log('DURABLE PRODUCTION BIBLE RECORD VERIFIED.');
     console.log('GENERATION AUDIT LEDGER VERIFIED.');
     console.log('PRODUCTION REMAINS RUNNING UNTIL THE FULL CONTRACTUAL PIPELINE REACHES LEARN.');
     console.log('TEST DATA CLEANED UP.');
