@@ -138,7 +138,9 @@ async function main() {
       if (refs[key].id !== expected) throw new Error(`${key} resolution failed`);
     }
 
-    if (loaded.context.effective.brandRule !== 'brand-wins') throw new Error('Brand rules were not resolved');
+    // Rules remain namespaced by their owning creative layer. The resolver's
+    // contract intentionally preserves that structure rather than flattening it.
+    if (loaded.context.effective.rules.brandRule !== 'brand-wins') throw new Error('Brand rules were not resolved');
     if (loaded.context.effective.objective.primary !== 'conversion') throw new Error('Strategy objective was not resolved');
     if (loaded.context.effective.profile.intent !== 'buy') throw new Error('Audience profile was not resolved');
 
