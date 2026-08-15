@@ -22,6 +22,16 @@ const clientConfig = {
   password: process.env.PGPASSWORD,
 };
 
+async function waitForClaim(client, options, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const claimed = await claimNextStage(client, options);
+    if (claimed) return claimed;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
+
 async function main() {
   const clientA = new Client(clientConfig);
   const clientB = new Client(clientConfig);
@@ -94,8 +104,18 @@ async function main() {
     if (competingStage) throw new Error('Unowned worker claimed a stage');
 
     await failStage(clientA, { stageRunId: idea.id, workerId: 'worker-A', retryable: true, error: { code: 'SIMULATED_TRANSIENT' } });
-    const retried = await claimNextStage(clientA, { jobId, workerId: 'worker-A', leaseSeconds: 60 });
-    if (!retried || retried.stage !== 'IDEA' || retried.attempt !== 2) throw new Error('Retry did not create a new IDEA attempt');
+
+    const retryRecord = await clientA.query(
+      `SELECT id, stage, attempt, status, next_attempt_at
+         FROM v2_1.stage_runs
+        WHERE job_id = $1 AND stage = 'IDEA' AND attempt = 2`,
+      [jobId]
+    );
+    if (retryRecord.rowCount !== 1) throw new Error('Retry did not create exactly one new IDEA attempt');
+    if (retryRecord.rows[0].status !== 'RETRYING') throw new Error('New IDEA attempt is not scheduled for retry');
+
+    const retried = await waitForClaim(clientA, { jobId, workerId: 'worker-A', leaseSeconds: 60 });
+    if (!retried || retried.stage !== 'IDEA' || retried.attempt !== 2) throw new Error('Scheduled IDEA retry did not become claimable');
     await completeStage(clientA, { stageRunId: retried.id, workerId: 'worker-A', outputArtifacts: ['IDEA_SET'], outputFingerprint: fingerprint({ idea: suffix }) });
 
     await clientA.query(`UPDATE v2_1.jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1`, [jobId]);
