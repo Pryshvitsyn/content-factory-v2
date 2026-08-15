@@ -30,14 +30,25 @@ jobs:
       - name: Check worker syntax
         run: node --check worker/factory-worker-v2.js
 
+      - name: Check V2.1 contract syntax
+        run: node --check worker/v2.1-contracts.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
+
+      - name: Check V2.1 foundation test syntax
+        run: node --check tests/v2.1-foundation.test.js
+
+      - name: Run V2.1 foundation tests
+        run: node --test tests/v2.1-foundation.test.js
 
       - name: Check build script syntax
         run: bash -n build-v2.sh
 
-      - name: Check migration exists
-        run: test -s migrations/001_v2.sql
+      - name: Check migrations exist
+        run: |
+          test -s migrations/001_v2.sql
+          test -s migrations/20260815_v2_1_foundation.sql
 
       - name: Check required project files
         run: |
