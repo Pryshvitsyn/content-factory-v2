@@ -102,17 +102,7 @@ async function insertFixture(suffix, businessName, industry) {
     ]
   );
 
-  return {
-    tenantId,
-    businessId,
-    brandId,
-    audienceId,
-    offeringId,
-    strategyId,
-    universeId,
-    seriesId,
-    projectId: project.rows[0].id,
-  };
+  return { tenantId, businessId, brandId, audienceId, offeringId, strategyId, universeId, seriesId, projectId: project.rows[0].id };
 }
 
 async function main() {
@@ -123,34 +113,33 @@ async function main() {
     await q('BEGIN');
 
     const fixture = await insertFixture(suffix, 'Business A', 'RETAIL');
-
-    const loaded = await loadProductionContext({
+    const loadArgs = {
       client,
       projectId: fixture.projectId,
       tenantId: fixture.tenantId,
       businessId: fixture.businessId,
-    });
+      manageTransaction: false,
+    };
 
+    const loaded = await loadProductionContext(loadArgs);
     const refs = loaded.context.references;
 
-    if (refs.tenant.id !== fixture.tenantId) throw new Error('Tenant resolution failed');
-    if (refs.business.id !== fixture.businessId) throw new Error('Business resolution failed');
-    if (refs.brand.id !== fixture.brandId) throw new Error('Brand resolution failed');
-    if (refs.audience.id !== fixture.audienceId) throw new Error('Audience resolution failed');
-    if (refs.offering.id !== fixture.offeringId) throw new Error('Offering resolution failed');
-    if (refs.strategy.id !== fixture.strategyId) throw new Error('Strategy resolution failed');
-    if (refs.universe.id !== fixture.universeId) throw new Error('Universe resolution failed');
-    if (refs.series.id !== fixture.seriesId) throw new Error('Series resolution failed');
+    for (const [key, expected] of Object.entries({
+      tenant: fixture.tenantId,
+      business: fixture.businessId,
+      brand: fixture.brandId,
+      audience: fixture.audienceId,
+      offering: fixture.offeringId,
+      strategy: fixture.strategyId,
+      universe: fixture.universeId,
+      series: fixture.seriesId,
+    })) {
+      if (refs[key].id !== expected) throw new Error(`${key} resolution failed`);
+    }
 
-    if (loaded.context.effective.brandRule !== 'brand-wins') {
-      throw new Error('Brand rules were not resolved');
-    }
-    if (loaded.context.effective.objective.primary !== 'conversion') {
-      throw new Error('Strategy objective was not resolved');
-    }
-    if (loaded.context.effective.profile.intent !== 'buy') {
-      throw new Error('Audience profile was not resolved');
-    }
+    if (loaded.context.effective.brandRule !== 'brand-wins') throw new Error('Brand rules were not resolved');
+    if (loaded.context.effective.objective.primary !== 'conversion') throw new Error('Strategy objective was not resolved');
+    if (loaded.context.effective.profile.intent !== 'buy') throw new Error('Audience profile was not resolved');
 
     const wrongBusiness = await q(
       `INSERT INTO v2_1.businesses (tenant_id, name, industry)
@@ -165,22 +154,15 @@ async function main() {
         projectId: fixture.projectId,
         tenantId: fixture.tenantId,
         businessId: wrongBusiness.rows[0].id,
+        manageTransaction: false,
       });
     } catch (error) {
       rejected = /does not belong to business/.test(error.message);
     }
-
     if (!rejected) throw new Error('Cross-business project access was not rejected');
 
-    const before = loaded.context.fingerprint;
-    const loadedAgain = await loadProductionContext({
-      client,
-      projectId: fixture.projectId,
-      tenantId: fixture.tenantId,
-      businessId: fixture.businessId,
-    });
-
-    if (loadedAgain.context.fingerprint !== before) {
+    const loadedAgain = await loadProductionContext(loadArgs);
+    if (loadedAgain.context.fingerprint !== loaded.context.fingerprint) {
       throw new Error('Identical database context produced different fingerprints');
     }
 
