@@ -27,37 +27,27 @@ ALTER TABLE v2_1.production_bibles
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'production_bibles_artifact_fk'
-      AND connamespace = 'v2_1'::regnamespace
-  ) THEN
-    ALTER TABLE v2_1.production_bibles
-      ADD CONSTRAINT production_bibles_artifact_fk
-      FOREIGN KEY (artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE RESTRICT;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'production_bibles_artifact_fk' AND connamespace = 'v2_1'::regnamespace) THEN
+    ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_artifact_fk FOREIGN KEY (artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE RESTRICT;
   END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'production_bibles_source_script_fk'
-      AND connamespace = 'v2_1'::regnamespace
-  ) THEN
-    ALTER TABLE v2_1.production_bibles
-      ADD CONSTRAINT production_bibles_source_script_fk
-      FOREIGN KEY (source_script_artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE RESTRICT;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'production_bibles_source_script_fk' AND connamespace = 'v2_1'::regnamespace) THEN
+    ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_source_script_fk FOREIGN KEY (source_script_artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE RESTRICT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'production_bibles_contract_check' AND connamespace = 'v2_1'::regnamespace) THEN
+    ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_contract_check CHECK (
+      contract_version IS NULL OR
+      (contract_version > 0 AND bible_id IS NOT NULL AND btrim(bible_id) <> '' AND context_fingerprint IS NOT NULL AND btrim(context_fingerprint) <> ''
+       AND jsonb_typeof(context_snapshot) = 'object' AND jsonb_typeof(document) = 'object'
+       AND artifact_id IS NOT NULL AND source_script_artifact_id IS NOT NULL
+       AND source_script_version IS NOT NULL AND source_script_version > 0
+       AND source_script_hash IS NOT NULL AND btrim(source_script_hash) <> '')
+    ) NOT VALID;
   END IF;
 END $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_production_bibles_bible_id
-  ON v2_1.production_bibles(bible_id)
-  WHERE bible_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_production_bibles_artifact
-  ON v2_1.production_bibles(artifact_id)
-  WHERE artifact_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_v21_production_bibles_context
-  ON v2_1.production_bibles(production_id, context_fingerprint, version);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_production_bibles_bible_id ON v2_1.production_bibles(bible_id) WHERE bible_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_production_bibles_artifact ON v2_1.production_bibles(artifact_id) WHERE artifact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_v21_production_bibles_context ON v2_1.production_bibles(production_id, context_fingerprint, version);
 
 CREATE OR REPLACE FUNCTION v2_1.enforce_production_bible_boundary()
 RETURNS trigger
@@ -70,11 +60,7 @@ DECLARE
   script_artifact_production uuid;
 BEGIN
   IF NEW.artifact_id IS NOT NULL THEN
-    SELECT artifact_type, production_id
-      INTO bible_artifact_type, bible_artifact_production
-      FROM v2_1.artifacts
-     WHERE id = NEW.artifact_id;
-
+    SELECT artifact_type, production_id INTO bible_artifact_type, bible_artifact_production FROM v2_1.artifacts WHERE id = NEW.artifact_id;
     IF bible_artifact_type IS DISTINCT FROM 'PRODUCTION_BIBLE' THEN
       RAISE EXCEPTION 'Production Bible artifact % must have artifact_type PRODUCTION_BIBLE', NEW.artifact_id;
     END IF;
@@ -84,11 +70,7 @@ BEGIN
   END IF;
 
   IF NEW.source_script_artifact_id IS NOT NULL THEN
-    SELECT artifact_type, production_id
-      INTO script_artifact_type, script_artifact_production
-      FROM v2_1.artifacts
-     WHERE id = NEW.source_script_artifact_id;
-
+    SELECT artifact_type, production_id INTO script_artifact_type, script_artifact_production FROM v2_1.artifacts WHERE id = NEW.source_script_artifact_id;
     IF script_artifact_type IS DISTINCT FROM 'SCRIPT' THEN
       RAISE EXCEPTION 'Production Bible source artifact % must have artifact_type SCRIPT', NEW.source_script_artifact_id;
     END IF;
@@ -110,32 +92,21 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_production_bible_boundary ON v2_1.production_bibles;
-CREATE TRIGGER trg_production_bible_boundary
-BEFORE INSERT OR UPDATE ON v2_1.production_bibles
-FOR EACH ROW
-EXECUTE FUNCTION v2_1.enforce_production_bible_boundary();
+CREATE TRIGGER trg_production_bible_boundary BEFORE INSERT OR UPDATE ON v2_1.production_bibles FOR EACH ROW EXECUTE FUNCTION v2_1.enforce_production_bible_boundary();
 
 CREATE OR REPLACE FUNCTION v2_1.prevent_production_bible_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  IF TG_OP = 'UPDATE' THEN
-    RAISE EXCEPTION 'Resolved production bibles are immutable; create a new version instead';
-  END IF;
+  IF TG_OP = 'UPDATE' THEN RAISE EXCEPTION 'Resolved production bibles are immutable; create a new version instead'; END IF;
   RETURN OLD;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_production_bible_immutable ON v2_1.production_bibles;
-CREATE TRIGGER trg_production_bible_immutable
-BEFORE UPDATE ON v2_1.production_bibles
-FOR EACH ROW
-EXECUTE FUNCTION v2_1.prevent_production_bible_mutation();
+CREATE TRIGGER trg_production_bible_immutable BEFORE UPDATE ON v2_1.production_bibles FOR EACH ROW EXECUTE FUNCTION v2_1.prevent_production_bible_mutation();
 
-COMMENT ON TABLE v2_1.production_bibles IS
-  'Immutable, production-scoped canonical BIBLE. Each version is a durable creative/production specification with exact SCRIPT provenance.';
-COMMENT ON FUNCTION v2_1.enforce_production_bible_boundary() IS
-  'Database-enforced BIBLE ownership, artifact type, source SCRIPT ownership, and document hash boundary.';
-COMMENT ON FUNCTION v2_1.prevent_production_bible_mutation() IS
-  'Resolved BIBLE rows cannot be updated; deleting an entire production remains allowed for lifecycle cleanup.';
+COMMENT ON TABLE v2_1.production_bibles IS 'Immutable, production-scoped canonical BIBLE. Each version is a durable creative/production specification with exact SCRIPT provenance.';
+COMMENT ON FUNCTION v2_1.enforce_production_bible_boundary() IS 'Database-enforced BIBLE ownership, artifact type, source SCRIPT ownership, and document hash boundary.';
+COMMENT ON FUNCTION v2_1.prevent_production_bible_mutation() IS 'Resolved BIBLE rows cannot be updated; deleting an entire production remains allowed for lifecycle cleanup.';
