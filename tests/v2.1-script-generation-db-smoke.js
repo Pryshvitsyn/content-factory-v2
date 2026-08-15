@@ -89,8 +89,19 @@ async function main() {
       );
     }
 
-    const provider = await client.query(`INSERT INTO v2_1.providers(name,capabilities) VALUES('nvidia','["TEXT_GENERATION"]'::jsonb) RETURNING id`);
-    const model = await client.query(`INSERT INTO v2_1.models(provider_id,name,capability) VALUES($1,'smoke-test-model','TEXT_GENERATION') RETURNING id`, [provider.rows[0].id]);
+    const provider = await client.query(
+      `INSERT INTO v2_1.providers(name,capabilities)
+       VALUES('nvidia','["TEXT_GENERATION"]'::jsonb)
+       ON CONFLICT (name) DO UPDATE SET enabled = true
+       RETURNING id`
+    );
+    const model = await client.query(
+      `INSERT INTO v2_1.models(provider_id,name,capability)
+       VALUES($1,'smoke-test-model','TEXT_GENERATION')
+       ON CONFLICT (provider_id,name) DO UPDATE SET enabled = true
+       RETURNING id`,
+      [provider.rows[0].id]
+    );
     const ideaArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('IDEA_SET',$1,'VALID') RETURNING id`, [productionId]);
     const ideaArtifactId = ideaArtifact.rows[0].id;
     await client.query(
