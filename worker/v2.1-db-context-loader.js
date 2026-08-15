@@ -60,12 +60,24 @@ async function loadProductionContext({ client, projectId, tenantId, businessId, 
     const offeringId = config.offeringId || config.offering_id || null;
     const strategyId = config.strategyId || config.strategy_id || null;
 
-    const [tenantResult, businessResult, brandResult, seriesResult] = await Promise.all([
-      client.query(`SELECT id, name, status, metadata FROM v2_1.tenants WHERE id = $1`, [project.tenant_id]),
-      client.query(`SELECT id, tenant_id, name, industry, status, rules FROM v2_1.businesses WHERE id = $1`, [project.business_id]),
-      client.query(`SELECT id, business_id, name, voice, visual_identity, rules, compliance_rules, status FROM v2_1.brands WHERE id = $1`, [project.brand_id]),
-      client.query(`SELECT id, universe_id, name, format_rules, narrative_rules, status FROM v2_1.series WHERE id = $1`, [project.series_id]),
-    ]);
+    // A single pg Client cannot execute concurrent queries. Keep these reads sequential
+    // so the repeatable-read transaction remains valid and pg@9-safe.
+    const tenantResult = await client.query(
+      `SELECT id, name, status, metadata FROM v2_1.tenants WHERE id = $1`,
+      [project.tenant_id]
+    );
+    const businessResult = await client.query(
+      `SELECT id, tenant_id, name, industry, status, rules FROM v2_1.businesses WHERE id = $1`,
+      [project.business_id]
+    );
+    const brandResult = await client.query(
+      `SELECT id, business_id, name, voice, visual_identity, rules, compliance_rules, status FROM v2_1.brands WHERE id = $1`,
+      [project.brand_id]
+    );
+    const seriesResult = await client.query(
+      `SELECT id, universe_id, name, format_rules, narrative_rules, status FROM v2_1.series WHERE id = $1`,
+      [project.series_id]
+    );
 
     const tenant = tenantResult.rows[0];
     const business = businessResult.rows[0];
