@@ -1,6 +1,11 @@
+'use client';
+
+import { useLanguage } from '../lib/i18n';
 import ProductionCard from './ProductionCard';
 
 export default function ProductionsList({ productions, onRefresh }) {
+  const { t } = useLanguage();
+
   if (!productions || productions.length === 0) {
     return null;
   }
