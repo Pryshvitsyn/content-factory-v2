@@ -40,7 +40,7 @@ test('terminal states cannot transition back into work', () => {
 
 test('idempotency keys are deterministic for identical requests', () => {
   const input = {
-    stage: 'IMAGE',
+    stage: 'ASSET_GENERATION',
     inputHash: 'abc123',
     promptVersion: 'image_prompt_v1',
     provider: 'NVIDIA',
