@@ -36,6 +36,9 @@ jobs:
       - name: Check V2.1 production contract syntax
         run: node --check worker/v2.1-production-contract.js
 
+      - name: Check V2.1 execution engine syntax
+        run: node --check worker/v2.1-execution-engine.js
+
       - name: Check V2.1 Bible contract syntax
         run: node --check worker/v2.1-bible-contract.js
 
@@ -53,6 +56,12 @@ jobs:
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
+
+      - name: Check V2.1 execution engine test syntax
+        run: node --check tests/v2.1-execution-engine.test.js
+
+      - name: Check V2.1 execution engine DB smoke syntax
+        run: node --check tests/v2.1-execution-engine-db-smoke.js
 
       - name: Check V2.1 foundation test syntax
         run: node --check tests/v2.1-foundation.test.js
@@ -75,6 +84,9 @@ jobs:
       - name: Run V2.1 production contract tests
         run: node --test tests/v2.1-production-contract.test.js
 
+      - name: Run V2.1 execution engine tests
+        run: node --test tests/v2.1-execution-engine.test.js
+
       - name: Run V2.1 Bible engine tests
         run: node --test tests/v2.1-bible-engine.test.js
 
@@ -88,6 +100,7 @@ jobs:
           test -s migrations/20260815_v2_1_multi_business.sql
           test -s migrations/20260815_v2_1_production_boundary.sql
           test -s migrations/20260815_v2_1_production_boundary_patch.sql
+          test -s migrations/20260815_v2_1_execution_engine.sql
 
       - name: Check required project files
         run: |
