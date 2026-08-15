@@ -8,8 +8,8 @@ const {
   normalizeSignal,
 } = require('../worker/v2.1-production-orchestrator');
 
-test('vertical slice is explicit and ordered from signal through script', () => {
-  assert.deepEqual(FIRST_VERTICAL_SLICE, ['SIGNAL', 'IDEA', 'BRIEF', 'CONCEPT', 'SCRIPT']);
+test('vertical slice is explicit and ordered from signal through durable BIBLE', () => {
+  assert.deepEqual(FIRST_VERTICAL_SLICE, ['SIGNAL', 'IDEA', 'BRIEF', 'CONCEPT', 'SCRIPT', 'BIBLE']);
 });
 
 test('AI stages have real production handlers and signal remains deterministic', () => {
@@ -17,6 +17,7 @@ test('AI stages have real production handlers and signal remains deterministic',
   assert.equal(typeof HANDLERS.BRIEF, 'function');
   assert.equal(typeof HANDLERS.CONCEPT, 'function');
   assert.equal(typeof HANDLERS.SCRIPT, 'function');
+  assert.equal(typeof HANDLERS.BIBLE, 'function');
   assert.equal(HANDLERS.SIGNAL, undefined);
 });
 
