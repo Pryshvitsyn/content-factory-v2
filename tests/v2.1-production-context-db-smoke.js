@@ -13,19 +13,20 @@ const client = new Client({
 });
 
 const q = (text, values = []) => client.query(text, values);
+const json = (value) => JSON.stringify(value);
 
 async function insertFixture(suffix, businessName, industry) {
   const tenant = await q(
     `INSERT INTO v2_1.tenants (name, metadata)
      VALUES ($1, $2) RETURNING id`,
-    [`DB Context Tenant ${suffix}`, { test: true }]
+    [`DB Context Tenant ${suffix}`, json({ test: true })]
   );
   const tenantId = tenant.rows[0].id;
 
   const business = await q(
     `INSERT INTO v2_1.businesses (tenant_id, name, industry, rules)
      VALUES ($1, $2, $3, $4) RETURNING id`,
-    [tenantId, `${businessName} ${suffix}`, industry, { businessRule: 'keep' }]
+    [tenantId, `${businessName} ${suffix}`, industry, json({ businessRule: 'keep' })]
   );
   const businessId = business.rows[0].id;
 
@@ -36,10 +37,10 @@ async function insertFixture(suffix, businessName, industry) {
     [
       businessId,
       `Brand ${businessName} ${suffix}`,
-      { tone: 'confident' },
-      { palette: 'canonical' },
-      { brandRule: 'brand-wins' },
-      { claims: 'must-be-true' },
+      json({ tone: 'confident' }),
+      json({ palette: 'canonical' }),
+      json({ brandRule: 'brand-wins' }),
+      json({ claims: 'must-be-true' }),
     ]
   );
   const brandId = brand.rows[0].id;
@@ -47,7 +48,7 @@ async function insertFixture(suffix, businessName, industry) {
   const audience = await q(
     `INSERT INTO v2_1.audiences (business_id, brand_id, name, profile)
      VALUES ($1, $2, $3, $4) RETURNING id`,
-    [businessId, brandId, `Audience ${suffix}`, { age: '25-34', intent: 'buy' }]
+    [businessId, brandId, `Audience ${suffix}`, json({ age: '25-34', intent: 'buy' })]
   );
   const audienceId = audience.rows[0].id;
 
@@ -55,7 +56,7 @@ async function insertFixture(suffix, businessName, industry) {
     `INSERT INTO v2_1.offerings
       (business_id, brand_id, offering_type, name, description, claims)
      VALUES ($1, $2, 'PRODUCT', $3, $4, $5) RETURNING id`,
-    [businessId, brandId, `Offering ${suffix}`, 'Canonical product', ['approved claim']]
+    [businessId, brandId, `Offering ${suffix}`, 'Canonical product', json(['approved claim'])]
   );
   const offeringId = offering.rows[0].id;
 
@@ -65,11 +66,11 @@ async function insertFixture(suffix, businessName, industry) {
      VALUES ($1, 1, $2, $3, $4, $5, $6) RETURNING id`,
     [
       brandId,
-      { primary: 'conversion' },
-      ['education', 'proof'],
-      { TIKTOK: { maxSeconds: 30 } },
-      { freshnessWindowDays: 7 },
-      { retainWinners: true },
+      json({ primary: 'conversion' }),
+      json(['education', 'proof']),
+      json({ TIKTOK: { maxSeconds: 30 } }),
+      json({ freshnessWindowDays: 7 }),
+      json({ retainWinners: true }),
     ]
   );
   const strategyId = strategy.rows[0].id;
@@ -77,14 +78,14 @@ async function insertFixture(suffix, businessName, industry) {
   const universe = await q(
     `INSERT INTO v2_1.content_universes (brand_id, name, premise, rules)
      VALUES ($1, $2, $3, $4) RETURNING id`,
-    [brandId, `Universe ${suffix}`, 'A stable creative world', { universeRule: 'consistent' }]
+    [brandId, `Universe ${suffix}`, 'A stable creative world', json({ universeRule: 'consistent' })]
   );
   const universeId = universe.rows[0].id;
 
   const series = await q(
     `INSERT INTO v2_1.series (universe_id, name, format_rules, narrative_rules)
      VALUES ($1, $2, $3, $4) RETURNING id`,
-    [universeId, `Series ${suffix}`, { recurring: true }, { arc: 'episodic' }]
+    [universeId, `Series ${suffix}`, json({ recurring: true }), json({ arc: 'episodic' })]
   );
   const seriesId = series.rows[0].id;
 
@@ -98,7 +99,7 @@ async function insertFixture(suffix, businessName, industry) {
       businessId,
       brandId,
       seriesId,
-      { audienceId, offeringId, strategyId },
+      json({ audienceId, offeringId, strategyId }),
     ]
   );
 
