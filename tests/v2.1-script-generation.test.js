@@ -12,8 +12,8 @@ const {
 const ideaArtifact = {
   id: 'idea-artifact-1',
   version: 1,
-  outputFingerprint: 'idea-output-hash',
-  output: {
+  outputHash: 'idea-output-hash',
+  value: {
     ideas: [
       { id: 'idea-1', title: 'One', premise: 'A', hook: 'H', angle: 'A1', rationale: 'R' },
       { id: 'idea-2', title: 'Two', premise: 'B', hook: 'H', angle: 'A2', rationale: 'R' },
@@ -26,13 +26,13 @@ test('SCRIPT request fingerprint is stable across object key order', () => {
   const a = buildScriptRequest({
     production: { id: 'p1', context_fingerprint: 'ctx', request_snapshot: { b: 2, a: 1 } },
     context: { brand: { rules: { x: true } } },
-    ideaArtifact,
+    idea: ideaArtifact,
     signal: { topic: 'x' },
   });
   const b = buildScriptRequest({
     production: { context_fingerprint: 'ctx', request_snapshot: { a: 1, b: 2 }, id: 'p1' },
     context: { brand: { rules: { x: true } } },
-    ideaArtifact: { ...ideaArtifact, output: { ideas: [...ideaArtifact.output.ideas] } },
+    idea: { ...ideaArtifact, value: { ideas: [...ideaArtifact.value.ideas] } },
     signal: { topic: 'x' },
   });
   assert.equal(fingerprint(a), fingerprint(b));
@@ -43,14 +43,14 @@ test('SCRIPT request carries the immutable production context and exact IDEA art
   const request = buildScriptRequest({
     production: { id: 'p1', context_fingerprint: 'immutable-context', request_snapshot: { objective: 'conversion' } },
     context: { business: { id: 'b1' }, brand: { id: 'brand1' } },
-    ideaArtifact,
+    idea: ideaArtifact,
   });
   assert.equal(request.production.contextFingerprint, 'immutable-context');
   assert.equal(request.production.request.objective, 'conversion');
-  assert.equal(request.source.artifactId, 'idea-artifact-1');
-  assert.equal(request.source.artifactVersion, 1);
-  assert.equal(request.source.outputFingerprint, 'idea-output-hash');
-  assert.equal(request.source.ideaSet.ideas[0].id, 'idea-1');
+  assert.equal(request.sources.ideaArtifactId, 'idea-artifact-1');
+  assert.equal(request.sources.ideaArtifactVersion, 1);
+  assert.equal(request.sources.ideaOutputHash, 'idea-output-hash');
+  assert.equal(request.sources.idea.ideas[0].id, 'idea-1');
 });
 
 test('SCRIPT validator rejects malformed provider output before accepting cardinality', () => {
