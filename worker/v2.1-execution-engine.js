@@ -37,6 +37,17 @@ async function claimJob(client, { workerId, leaseSeconds = 120 } = {}) {
   return result.rows[0] || null;
 }
 
+async function claimJobForProduction(client, { jobId, productionId, workerId, leaseSeconds = 120 } = {}) {
+  requireClient(client);
+  requireWorker(workerId);
+  if (!jobId || !productionId) throw new Error('jobId and productionId are required');
+  const result = await client.query(
+    'SELECT * FROM v2_1.claim_job_for_production($1, $2, $3, $4)',
+    [jobId, productionId, workerId, Math.max(5, leaseSeconds)]
+  );
+  return result.rows[0] || null;
+}
+
 async function heartbeatJob(client, { jobId, workerId, leaseSeconds = 120 } = {}) {
   requireClient(client);
   requireWorker(workerId);
@@ -222,6 +233,7 @@ module.exports = {
   stableStringify,
   recoverExpiredWork,
   claimJob,
+  claimJobForProduction,
   heartbeatJob,
   claimNextStage,
   heartbeatStage,
