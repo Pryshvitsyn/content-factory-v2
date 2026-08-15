@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+      - "develop/**"
 
 jobs:
   validate:
@@ -38,6 +39,9 @@ jobs:
 
       - name: Check V2.1 execution engine syntax
         run: node --check worker/v2.1-execution-engine.js
+
+      - name: Check V2.1 production orchestrator syntax
+        run: node --check worker/v2.1-production-orchestrator.js
 
       - name: Check V2.1 IDEA generation syntax
         run: node --check worker/v2.1-idea-generation.js
@@ -69,6 +73,9 @@ jobs:
       - name: Check V2.1 database contract hardening smoke syntax
         run: node --check tests/v2.1-database-contract-hardening-db-smoke.js
 
+      - name: Check V2.1 production vertical slice syntax
+        run: node --check tests/v2.1-production-vertical-slice-db-smoke.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -77,6 +84,9 @@ jobs:
 
       - name: Check V2.1 execution engine DB smoke syntax
         run: node --check tests/v2.1-execution-engine-db-smoke.js
+
+      - name: Check V2.1 production orchestrator test syntax
+        run: node --check tests/v2.1-production-orchestrator.test.js
 
       - name: Check V2.1 IDEA generation test syntax
         run: node --check tests/v2.1-idea-generation.test.js
@@ -125,6 +135,9 @@ jobs:
 
       - name: Run V2.1 execution engine tests
         run: node --test tests/v2.1-execution-engine.test.js
+
+      - name: Run V2.1 production orchestrator tests
+        run: node --test tests/v2.1-production-orchestrator.test.js
 
       - name: Run V2.1 IDEA generation tests
         run: node --test tests/v2.1-idea-generation.test.js
