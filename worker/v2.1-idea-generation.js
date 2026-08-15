@@ -65,13 +65,14 @@ async function callNvidia({ request, client, model }) {
 
 function validateIdeaSet(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('IDEA_SET must be an object');
-  if (!Array.isArray(value.ideas) || value.ideas.length < 3) throw new Error('IDEA_SET must contain at least 3 ideas');
+  if (!Array.isArray(value.ideas)) throw new Error('IDEA_SET.ideas must be an array');
   for (const [index, idea] of value.ideas.entries()) {
-    if (!idea || typeof idea !== 'object') throw new Error(`Idea ${index + 1} is invalid`);
+    if (!idea || typeof idea !== 'object' || Array.isArray(idea)) throw new Error(`Idea ${index + 1} is invalid`);
     for (const field of ['id', 'title', 'premise', 'hook', 'angle', 'rationale']) {
       if (typeof idea[field] !== 'string' || !idea[field].trim()) throw new Error(`Idea ${index + 1} is missing ${field}`);
     }
   }
+  if (value.ideas.length < 3 || value.ideas.length > 5) throw new Error('IDEA_SET must contain 3-5 ideas');
   return true;
 }
 
