@@ -117,6 +117,16 @@ async function main() {
     );
     const productionId = production.rows[0].id;
 
+    // Deliberately create a decoy job first. A generic queue claim would take
+    // this older job; the production orchestrator must claim the exact target
+    // job through the database-scoped production boundary instead.
+    const decoy = await client.query(
+      `INSERT INTO v2_1.jobs(production_id,job_type,status,idempotency_key,input)
+       VALUES($1,'PRODUCTION','QUEUED',$2,$3::jsonb) RETURNING id`,
+      [productionId, `vertical-decoy-${suffix}`, JSON.stringify(requestSnapshot)]
+    );
+    const decoyJobId = decoy.rows[0].id;
+
     const job = await client.query(
       `INSERT INTO v2_1.jobs(production_id,job_type,status,idempotency_key,input)
        VALUES($1,'PRODUCTION','QUEUED',$2,$3::jsonb) RETURNING id`,
@@ -149,6 +159,11 @@ async function main() {
     if (result.provenance.contextFingerprint !== contextFingerprint) throw new Error('Returned provenance fingerprint is incorrect');
     if (result.provenance.stages.length !== 5) throw new Error('Vertical provenance graph is incomplete');
 
+    const claimedDecoy = await client.query(`SELECT status, worker_id FROM v2_1.jobs WHERE id = $1`, [decoyJobId]);
+    if (claimedDecoy.rows[0].status !== 'QUEUED' || claimedDecoy.rows[0].worker_id !== null) {
+      throw new Error('Orchestrator claimed a job outside the requested production job id');
+    }
+
     const audit = await client.query(
       `SELECT COUNT(*)::int AS count
          FROM v2_1.events
@@ -172,6 +187,7 @@ async function main() {
 
     console.log('V2.1 PRODUCTION VERTICAL SLICE DATABASE SMOKE TEST PASSED.');
     console.log('PRODUCTION -> JOB -> SIGNAL -> IDEA -> BRIEF -> CONCEPT -> SCRIPT VERIFIED.');
+    console.log('PRODUCTION-SCOPED JOB OWNERSHIP VERIFIED.');
     console.log('IMMUTABLE CONTEXT CONTINUITY VERIFIED ACROSS ALL GENERATION REQUESTS.');
     console.log('CANONICAL ARTIFACT PROVENANCE CHAIN VERIFIED.');
     console.log('GENERATION AUDIT LEDGER VERIFIED.');
