@@ -1,0 +1,60 @@
+name: Content Factory V2.1 CONCEPT Generation
+
+on:
+  push:
+    branches:
+      - 'develop/**'
+  pull_request:
+    branches:
+      - main
+      - 'develop/**'
+
+jobs:
+  concept-generation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: n8n
+          POSTGRES_PASSWORD: n8n
+          POSTGRES_DB: content_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U n8n -d content_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: content_os
+      PGUSER: n8n
+      PGPASSWORD: n8n
+      NVIDIA_MODEL: smoke-test-model
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate CONCEPT worker syntax
+        run: node --check worker/v2.1-concept-generation.js
+
+      - name: Run CONCEPT unit tests
+        run: node --test tests/v2.1-concept-generation.test.js
+
+      - name: Run CONCEPT database smoke test
+        run: |
+          psql -h 127.0.0.1 -U n8n -d content_os -f migrations/20260816_v2_1_concept_artifact_type_patch.sql
+          node tests/v2.1-concept-generation-db-smoke.js
