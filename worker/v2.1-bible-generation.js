@@ -16,10 +16,6 @@ function fingerprint(value) {
   return crypto.createHash('sha256').update(stableStringify(value)).digest('hex');
 }
 
-function rawJsonHash(value) {
-  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
 function extractJson(text) {
   if (!text) throw new Error('NVIDIA returned an empty response');
   try { return JSON.parse(text); } catch {}
@@ -90,6 +86,8 @@ function validateProviderBible(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('BIBLE provider output must be an object');
   if (Object.prototype.hasOwnProperty.call(value, 'context')) throw new Error('BIBLE provider output must not contain context');
   if (Object.prototype.hasOwnProperty.call(value, 'providerConfig')) throw new Error('BIBLE provider output must not contain providerConfig');
+  if (Object.prototype.hasOwnProperty.call(value, 'provider')) throw new Error('BIBLE provider output must not contain provider');
+  if (Object.prototype.hasOwnProperty.call(value, 'model')) throw new Error('BIBLE provider output must not contain model');
   if (!value.creativeTruth || typeof value.creativeTruth !== 'object' || Array.isArray(value.creativeTruth)) throw new Error('BIBLE output is missing creativeTruth');
   if (!value.productionPlan || typeof value.productionPlan !== 'object' || Array.isArray(value.productionPlan)) throw new Error('BIBLE output is missing productionPlan');
   return true;
@@ -212,7 +210,6 @@ async function executeBibleStage({ client, productionId, stageRunId, workerId, s
     validateBible(bible);
 
     const outputHash = fingerprint(bible);
-    const documentHash = rawJsonHash(bible);
 
     await client.query('BEGIN');
     try {
@@ -241,9 +238,9 @@ async function executeBibleStage({ client, productionId, stageRunId, workerId, s
       const productionBible = await client.query(
         `INSERT INTO v2_1.production_bibles
           (production_id, version, rules, negative_constraints, contract_version, bible_id,
-           context_fingerprint, context_snapshot, document, document_hash, artifact_id,
+           context_fingerprint, context_snapshot, document, artifact_id,
            source_script_artifact_id, source_script_version, source_script_hash)
-         VALUES ($1,1,$2::jsonb,$3::jsonb,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
+         VALUES ($1,1,$2::jsonb,$3::jsonb,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12)
          RETURNING id`,
         [
           productionId,
@@ -254,7 +251,6 @@ async function executeBibleStage({ client, productionId, stageRunId, workerId, s
           production.context_fingerprint,
           JSON.stringify(bible.context),
           canonicalJson(bible),
-          documentHash,
           artifactId,
           script.id,
           script.version,
