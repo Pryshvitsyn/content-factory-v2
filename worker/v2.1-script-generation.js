@@ -34,8 +34,7 @@ function createNvidiaClient() {
   return new OpenAI({ apiKey: requireEnv('NVIDIA_API_KEY'), baseURL: 'https://integrate.api.nvidia.com/v1' });
 }
 
-function buildScriptRequest({ production, context, ideaArtifact, signal = {} }) {
-  if (!ideaArtifact || !ideaArtifact.id || !ideaArtifact.output) throw new Error('IDEA artifact is required');
+function buildScriptRequest({ production, context, idea, signal, concept }) {
   return {
     capability: 'TEXT_GENERATION',
     production: {
@@ -43,19 +42,19 @@ function buildScriptRequest({ production, context, ideaArtifact, signal = {} }) 
       request: production.request_snapshot || {},
       contextFingerprint: production.context_fingerprint,
     },
-    source: {
-      artifactId: ideaArtifact.id,
-      artifactType: 'IDEA_SET',
-      artifactVersion: ideaArtifact.version,
-      outputFingerprint: ideaArtifact.outputFingerprint,
-      ideaSet: ideaArtifact.output,
-    },
     context,
-    input: { signal },
+    sources: {
+      ideaArtifactId: idea.id,
+      ideaArtifactVersion: idea.version,
+      ideaOutputHash: idea.outputHash,
+      idea: idea.value,
+      concept: concept || null,
+    },
+    input: { signal: signal || {} },
     outputContract: {
       type: 'SCRIPT',
       required: ['title', 'logline', 'hook', 'scenes'],
-      scenes: 'array of 3-12 ordered scenes; each has sceneNumber, purpose, visual, action, dialogue, audio',
+      scenes: 'array of 3-12 scenes with contiguous sceneNumber values; each scene has purpose, visual, action, dialogue, audio',
     },
   };
 }
@@ -64,7 +63,7 @@ function buildMessages(request) {
   return [
     {
       role: 'system',
-      content: 'You are the SCRIPT stage of a production content factory. The supplied IDEA_SET is the canonical creative source for this stage. Preserve the selected idea\'s premise and intent while turning it into a production-ready script. Creative truth is authoritative: tenant, business, brand, audience, offering, strategy, universe and compliance rules must be respected. Return JSON only. Do not mention providers, models, APIs or implementation details. Do not invent claims that conflict with compliance rules. Write concrete, filmable scenes rather than abstract prose.',
+      content: 'You are the SCRIPT stage of a production content factory. Creative truth is authoritative: tenant, business, brand, audience, offering, strategy, universe, canonical IDEA and completed CONCEPT must be respected. Return JSON only. Do not mention providers, models, APIs or implementation details. Do not invent claims that conflict with compliance rules. Develop the canonical IDEA into a coherent, filmable script rather than replacing it with an unrelated concept.',
     },
     { role: 'user', content: JSON.stringify(request) },
   ];
@@ -88,8 +87,10 @@ function validateScript(value) {
     if (typeof value[field] !== 'string' || !value[field].trim()) throw new Error(`SCRIPT is missing ${field}`);
   }
   if (!Array.isArray(value.scenes)) throw new Error('SCRIPT.scenes must be an array');
-  if (value.scenes.length < 3 || value.scenes.length > 12) throw new Error('SCRIPT must contain 3-12 scenes');
 
+  // Validate the shape of supplied scenes before applying the cardinality contract.
+  // This produces the actionable schema error when a provider returns a malformed
+  // scene payload, instead of hiding it behind the 3-12 scene cardinality error.
   let expectedNumber = 1;
   for (const [index, scene] of value.scenes.entries()) {
     if (!scene || typeof scene !== 'object' || Array.isArray(scene)) throw new Error(`Scene ${index + 1} is invalid`);
@@ -99,6 +100,8 @@ function validateScript(value) {
     }
     expectedNumber += 1;
   }
+
+  if (value.scenes.length < 3 || value.scenes.length > 12) throw new Error('SCRIPT must contain 3-12 scenes');
   return true;
 }
 
@@ -123,10 +126,30 @@ async function loadIdeaArtifact(client, productionId) {
   if (!row) throw new Error('Completed IDEA artifact is required before SCRIPT generation');
   return {
     id: row.artifact_id,
-    version: row.version,
-    outputFingerprint: row.output_hash,
-    output: row.response,
     generationRunId: row.generation_run_id,
+    version: row.version,
+    outputHash: row.output_hash,
+    value: row.response,
+  };
+}
+
+async function loadConceptOutput(client, productionId) {
+  const result = await client.query(
+    `SELECT sr.output_artifacts, sr.output_fingerprint
+       FROM v2_1.stage_runs sr
+       JOIN v2_1.jobs j ON j.id = sr.job_id
+      WHERE j.production_id = $1
+        AND sr.stage = 'CONCEPT'
+        AND sr.status = 'COMPLETED'
+      ORDER BY sr.completed_at DESC
+      LIMIT 1`,
+    [productionId]
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('Completed CONCEPT stage is required before SCRIPT generation');
+  return {
+    outputArtifacts: row.output_artifacts,
+    outputFingerprint: row.output_fingerprint,
   };
 }
 
@@ -137,7 +160,9 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
 
   const productionResult = await client.query(
     `SELECT id, business_id, brand_id, context_fingerprint, context_snapshot, request_snapshot, status
-       FROM v2_1.productions WHERE id = $1 FOR SHARE`,
+       FROM v2_1.productions
+      WHERE id = $1
+      FOR SHARE`,
     [productionId]
   );
   const production = productionResult.rows[0];
@@ -155,13 +180,9 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
   if (!stage || stage.stage !== 'SCRIPT') throw new Error('Stage run is not a SCRIPT stage for this production');
   if (stage.status !== 'RUNNING' || stage.worker_id !== workerId) throw new Error('SCRIPT stage lease is not owned by this worker');
 
-  const ideaArtifact = await loadIdeaArtifact(client, productionId);
-  const request = buildScriptRequest({
-    production,
-    context: production.context_snapshot,
-    ideaArtifact,
-    signal,
-  });
+  const idea = await loadIdeaArtifact(client, productionId);
+  const concept = await loadConceptOutput(client, productionId);
+  const request = buildScriptRequest({ production, context: production.context_snapshot, idea, signal, concept });
   const requestHash = fingerprint(request);
 
   const existing = await client.query(
@@ -174,7 +195,7 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
   );
   if (existing.rowCount) {
     const row = existing.rows[0];
-    if (row.status === 'COMPLETED' && row.artifact_id) return { generationRunId: row.id, artifactId: row.artifact_id, reused: true };
+    if (row.status === 'COMPLETED' && row.artifact_id) return { generationRunId: row.id, artifactId: row.artifact_id, sourceArtifactId: idea.id, reused: true };
     if (row.status === 'RUNNING') throw new Error('Identical SCRIPT generation is already running');
   }
 
@@ -182,8 +203,7 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
     `INSERT INTO v2_1.providers(name, capabilities)
      VALUES ('nvidia', '["TEXT_GENERATION"]'::jsonb)
      ON CONFLICT (name) DO UPDATE SET enabled = true
-     RETURNING id`,
-    []
+     RETURNING id`
   );
   const providerId = providerRow.rows[0].id;
   const modelName = requireEnv('NVIDIA_MODEL');
@@ -200,8 +220,7 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
     `INSERT INTO v2_1.generation_runs
       (stage_run_id, provider_id, model_id, capability, request_hash, request, status)
      VALUES ($1,$2,$3,'TEXT_GENERATION',$4,$5::jsonb,'RUNNING')
-     ON CONFLICT (request_hash) WHERE status IN ('QUEUED','RUNNING','COMPLETED')
-     DO NOTHING
+     ON CONFLICT (request_hash) WHERE status IN ('QUEUED','RUNNING','COMPLETED') DO NOTHING
      RETURNING id`,
     [stageRunId, providerId, modelId, requestHash, JSON.stringify(request)]
   );
@@ -209,9 +228,7 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
   const generationRunId = generation.rows[0].id;
 
   try {
-    const result = await (providerCall
-      ? providerCall({ request, model: modelName })
-      : callNvidia({ request, model: modelName }));
+    const result = await (providerCall ? providerCall({ request, model: modelName }) : callNvidia({ request, model: modelName }));
     validateScript(result.parsed);
     const outputHash = fingerprint(result.parsed);
 
@@ -222,20 +239,12 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
       [productionId]
     );
     const artifactId = artifact.rows[0].id;
-
     await client.query(
       `INSERT INTO v2_1.artifact_versions
         (artifact_id, version, provider_id, model_id, input_hash, output_hash, metadata)
        VALUES ($1,1,$2,$3,$4,$5,$6::jsonb)`,
-      [artifactId, providerId, modelId, requestHash, outputHash, JSON.stringify({
-        capability: 'TEXT_GENERATION',
-        generationRunId,
-        sourceArtifactId: ideaArtifact.id,
-        sourceArtifactVersion: ideaArtifact.version,
-        sourceOutputFingerprint: ideaArtifact.outputFingerprint,
-      })]
+      [artifactId, providerId, modelId, requestHash, outputHash, JSON.stringify({ capability: 'TEXT_GENERATION', generationRunId, sourceArtifactId: idea.id, sourceArtifactVersion: idea.version, sourceArtifactHash: idea.outputHash })]
     );
-
     await client.query(
       `UPDATE v2_1.generation_runs
           SET status='COMPLETED', response=$1::jsonb, artifact_id=$2, completed_at=now()
@@ -245,20 +254,13 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
 
     const stageUpdated = await client.query(
       `UPDATE v2_1.stage_runs
-          SET output_artifacts=$1::jsonb,
-              output_fingerprint=$2,
-              completed_at=now(),
-              heartbeat_at=now(),
-              lease_expires_at=NULL,
-              worker_id=NULL,
-              status='COMPLETED'
+          SET output_artifacts=$1::jsonb, output_fingerprint=$2, completed_at=now(), heartbeat_at=now(), lease_expires_at=NULL, worker_id=NULL, status='COMPLETED'
         WHERE id=$3 AND status='RUNNING' AND worker_id=$4
         RETURNING id`,
       [JSON.stringify(['SCRIPT']), outputHash, stageRunId, workerId]
     );
     if (!stageUpdated.rowCount) throw new Error('SCRIPT generation succeeded but stage lease was lost before completion');
-
-    return { generationRunId, artifactId, reused: false, sourceArtifactId: ideaArtifact.id };
+    return { generationRunId, artifactId, sourceArtifactId: idea.id, reused: false };
   } catch (error) {
     await client.query(
       `UPDATE v2_1.generation_runs
@@ -270,13 +272,4 @@ async function executeScriptStage({ client, productionId, stageRunId, workerId, 
   }
 }
 
-module.exports = {
-  stableStringify,
-  fingerprint,
-  extractJson,
-  buildScriptRequest,
-  validateScript,
-  loadIdeaArtifact,
-  callNvidia,
-  executeScriptStage,
-};
+module.exports = { stableStringify, fingerprint, buildScriptRequest, validateScript, callNvidia, executeScriptStage };
