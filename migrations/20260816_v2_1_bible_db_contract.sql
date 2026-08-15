@@ -120,13 +120,16 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  RAISE EXCEPTION 'Resolved production bibles are immutable; create a new version instead';
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'Resolved production bibles are immutable; create a new version instead';
+  END IF;
+  RETURN OLD;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_production_bible_immutable ON v2_1.production_bibles;
 CREATE TRIGGER trg_production_bible_immutable
-BEFORE UPDATE OR DELETE ON v2_1.production_bibles
+BEFORE UPDATE ON v2_1.production_bibles
 FOR EACH ROW
 EXECUTE FUNCTION v2_1.prevent_production_bible_mutation();
 
@@ -135,4 +138,4 @@ COMMENT ON TABLE v2_1.production_bibles IS
 COMMENT ON FUNCTION v2_1.enforce_production_bible_boundary() IS
   'Database-enforced BIBLE ownership, artifact type, source SCRIPT ownership, and document hash boundary.';
 COMMENT ON FUNCTION v2_1.prevent_production_bible_mutation() IS
-  'Resolved BIBLE rows cannot be updated or deleted; revisions require a new version.';
+  'Resolved BIBLE rows cannot be updated; deleting an entire production remains allowed for lifecycle cleanup.';
