@@ -71,8 +71,11 @@ function createBible(input) {
   assertObject(input.productionPlan, 'input.productionPlan');
 
   const context = resolveContext(input.context);
-  const inherited = context.inheritedRules;
+  if (input.expectedContextFingerprint && context.fingerprint !== input.expectedContextFingerprint) {
+    throw new Error('Resolved BIBLE context fingerprint does not match the immutable production context');
+  }
 
+  const inherited = context.inheritedRules;
   const creativeTruth = {
     concept: input.creativeTruth.concept,
     narrative: merge(inherited.narrative || {}, input.creativeTruth.narrative || {}),
