@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -36,6 +36,15 @@ jobs:
       - name: Check V2.1 production contract syntax
         run: node --check worker/v2.1-production-contract.js
 
+      - name: Check V2.1 Bible contract syntax
+        run: node --check worker/v2.1-bible-contract.js
+
+      - name: Check V2.1 Bible validator syntax
+        run: node --check worker/v2.1-bible-validator.js
+
+      - name: Check V2.1 Bible engine syntax
+        run: node --check worker/v2.1-bible-engine.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -45,11 +54,17 @@ jobs:
       - name: Check V2.1 production contract test syntax
         run: node --check tests/v2.1-production-contract.test.js
 
+      - name: Check V2.1 Bible engine test syntax
+        run: node --check tests/v2.1-bible-engine.test.js
+
       - name: Run V2.1 foundation tests
         run: node --test tests/v2.1-foundation.test.js
 
       - name: Run V2.1 production contract tests
         run: node --test tests/v2.1-production-contract.test.js
+
+      - name: Run V2.1 Bible engine tests
+        run: node --test tests/v2.1-bible-engine.test.js
 
       - name: Check build script syntax
         run: bash -n build-v2.sh
@@ -58,6 +73,7 @@ jobs:
         run: |
           test -s migrations/001_v2.sql
           test -s migrations/20260815_v2_1_foundation.sql
+          test -s migrations/20260815_v2_1_multi_business.sql
 
       - name: Check required project files
         run: |
