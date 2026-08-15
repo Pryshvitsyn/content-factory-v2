@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { BIBLE_CONTRACT_VERSION, PLATFORMS } = require('./v2.1-bible-contract');
 const { validateBible } = require('./v2.1-bible-validator');
+const { resolveContext: resolveProductionContext } = require('./v2.1-context-resolver');
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -52,35 +53,31 @@ function identity(input, type) {
 }
 
 function resolveContext(input) {
-  assertObject(input, 'context');
-  const layers = ['tenant', 'business', 'brand', 'audience', 'offering', 'strategy', 'universe', 'series', 'production'];
-  const resolved = {};
-  let accumulated = {};
-
-  for (const layer of layers) {
-    if (!input[layer]) continue;
-    assertObject(input[layer], `context.${layer}`);
-    if (!input[layer].id) throw new Error(`context.${layer}.id is required`);
-    accumulated = merge(accumulated, input[layer].rules || input[layer].profile || input[layer].objective || {});
-    resolved[layer] = {
-      id: input[layer].id,
-      version: input[layer].version || 1,
-      name: input[layer].name || null,
-    };
-  }
-
-  return { references: resolved, inheritedRules: accumulated };
+  const resolved = resolveProductionContext(input);
+  return {
+    resolverVersion: resolved.resolverVersion,
+    fingerprint: resolved.fingerprint,
+    references: resolved.references,
+    sources: resolved.sources,
+    effective: resolved.effective,
+    inheritedRules: resolved.effective.rules || {},
+  };
 }
 
 function createBible(input) {
   assertObject(input, 'input');
+  assertObject(input.context, 'input.context');
+  assertObject(input.creativeTruth, 'input.creativeTruth');
+  assertObject(input.productionPlan, 'input.productionPlan');
+
   const context = resolveContext(input.context);
+  const inherited = context.inheritedRules;
 
   const creativeTruth = {
     concept: input.creativeTruth.concept,
-    narrative: merge(context.inheritedRules.narrative || {}, input.creativeTruth.narrative || {}),
-    brandRules: merge(context.inheritedRules.brandRules || {}, input.creativeTruth.brandRules || {}),
-    style: merge(context.inheritedRules.style || {}, input.creativeTruth.style || {}),
+    narrative: merge(inherited.narrative || {}, input.creativeTruth.narrative || {}),
+    brandRules: merge(inherited.brandRules || {}, input.creativeTruth.brandRules || {}),
+    style: merge(inherited.style || {}, input.creativeTruth.style || {}),
     characters: (input.creativeTruth.characters || []).map(x => identity(x, 'CHARACTER')),
     locations: (input.creativeTruth.locations || []).map(x => identity(x, 'LOCATION')),
     styles: (input.creativeTruth.styles || []).map(x => identity(x, 'STYLE')),
