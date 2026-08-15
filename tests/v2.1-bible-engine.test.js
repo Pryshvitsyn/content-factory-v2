@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const { BIBLE_CONTRACT_VERSION } = require('../worker/v2.1-bible-contract');
 const { validateBible } = require('../worker/v2.1-bible-validator');
-const { createBible, deriveEdition, canonicalJson } = require('../worker/v2.1-bible-engine');
+const { createBible, deriveEdition, canonicalJson, resolveContext } = require('../worker/v2.1-bible-engine');
 
 function sample(overrides = {}) {
   return {
@@ -52,6 +52,12 @@ test('contract version is tenant-aware and stable', () => {
   assert.equal(bible.context.references.tenant.id, 'tenant-1');
   assert.equal(bible.context.references.business.id, 'business-1');
   assert.equal(bible.context.references.brand.id, 'brand-1');
+});
+
+test('production cannot silently accept a different resolved context fingerprint', () => {
+  const resolved = resolveContext(sample().context);
+  assert.throws(() => createBible({ ...sample(), expectedContextFingerprint: 'ctx_not_this_production' }), /immutable production context/);
+  assert.doesNotThrow(() => createBible({ ...sample(), expectedContextFingerprint: resolved.fingerprint }));
 });
 
 test('business rules are inherited while production rules can override them', () => {
