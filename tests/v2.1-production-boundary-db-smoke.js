@@ -29,6 +29,19 @@ async function cleanup(ids) {
   }
 }
 
+async function expectRejected(sql, values, pattern, label) {
+  await q('BEGIN');
+  try {
+    await q(sql, values);
+  } catch (error) {
+    await q('ROLLBACK');
+    if (!pattern.test(error.message)) throw new Error(`${label}: unexpected error: ${error.message}`);
+    return;
+  }
+  await q('ROLLBACK');
+  throw new Error(`${label}: database accepted an invalid mutation`);
+}
+
 async function main() {
   await client.connect();
   const suffix = Date.now().toString();
@@ -162,27 +175,31 @@ async function main() {
 
     await q(`UPDATE v2_1.productions SET status = 'RUNNING', started_at = now() WHERE id = $1`, [first.id]);
 
-    let immutableRejected = false;
-    try {
-      await q(`UPDATE v2_1.productions SET context_snapshot = jsonb_build_object('tampered', true) WHERE id = $1`, [first.id]);
-    } catch (error) {
-      immutableRejected = /immutable|snapshot|context/i.test(error.message);
-    }
-    if (!immutableRejected) throw new Error('Database did not reject context snapshot mutation');
+    await expectRejected(
+      `UPDATE v2_1.productions SET context_snapshot = jsonb_build_object('tampered', true) WHERE id = $1`,
+      [first.id],
+      /immutable|snapshot|context/i,
+      'context immutability'
+    );
 
-    let ownershipRejected = false;
-    await q(`INSERT INTO v2_1.businesses (tenant_id, name, industry) VALUES ($1, $2, 'OTHER') RETURNING id`, [ids.tenant, `Other Business ${suffix}`])
-      .then((result) => { ids.otherBusiness = result.rows[0].id; });
-    await q(
+    const otherBusiness = await q(
+      `INSERT INTO v2_1.businesses (tenant_id, name, industry) VALUES ($1, $2, 'OTHER') RETURNING id`,
+      [ids.tenant, `Other Business ${suffix}`]
+    );
+    ids.otherBusiness = otherBusiness.rows[0].id;
+
+    const otherBrand = await q(
       `INSERT INTO v2_1.brands (business_id, name) VALUES ($1, $2) RETURNING id`,
       [ids.otherBusiness, `Other Brand ${suffix}`]
-    ).then((result) => { ids.otherBrand = result.rows[0].id; });
-    try {
-      await q(`UPDATE v2_1.productions SET brand_id = $1 WHERE id = $2`, [ids.otherBrand, first.id]);
-    } catch (error) {
-      ownershipRejected = /ownership|business|immutable|context/i.test(error.message);
-    }
-    if (!ownershipRejected) throw new Error('Database did not reject cross-business production ownership');
+    );
+    ids.otherBrand = otherBrand.rows[0].id;
+
+    await expectRejected(
+      `UPDATE v2_1.productions SET brand_id = $1 WHERE id = $2`,
+      [ids.otherBrand, first.id],
+      /ownership|business|immutable|context/i,
+      'cross-business ownership'
+    );
 
     await cleanup(ids);
     console.log('V2.1 PRODUCTION BOUNDARY DATABASE SMOKE TEST PASSED.');
