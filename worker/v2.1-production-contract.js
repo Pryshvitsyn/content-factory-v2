@@ -3,7 +3,7 @@ const STAGE_DEFINITIONS = Object.freeze({
   IDEA: Object.freeze({ requires: ['SIGNAL_SET'], outputs: ['IDEA_SET'], parallelGroup: null }),
   BRIEF: Object.freeze({ requires: ['IDEA_SET'], outputs: ['CONTENT_BRIEF'], parallelGroup: null }),
   CONCEPT: Object.freeze({ requires: ['CONTENT_BRIEF'], outputs: ['CONCEPT'], parallelGroup: null }),
-  SCRIPT: Object.freeze({ requires: ['CONCEPT'], outputs: ['SCRIPT'], parallelGroup: null }),
+  SCRIPT: Object.freeze({ requires: ['IDEA_SET'], outputs: ['SCRIPT'], parallelGroup: null }),
   BIBLE: Object.freeze({ requires: ['SCRIPT'], outputs: ['PRODUCTION_BIBLE'], parallelGroup: null }),
   ASSET_PLAN: Object.freeze({ requires: ['PRODUCTION_BIBLE'], outputs: ['ASSET_REQUIREMENTS'], parallelGroup: null }),
   SHOT_PLAN: Object.freeze({ requires: ['PRODUCTION_BIBLE', 'SCRIPT'], outputs: ['SHOTS'], parallelGroup: null }),
