@@ -28,12 +28,11 @@ ALTER TABLE v2_1.production_bibles
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'production_bibles_artifact_fk' AND connamespace = 'v2_1'::regnamespace) THEN
-    ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_artifact_fk FOREIGN KEY (artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE RESTRICT;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'production_bibles_source_script_fk' AND connamespace = 'v2_1'::regnamespace) THEN
-    ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_source_script_fk FOREIGN KEY (source_script_artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE RESTRICT;
-  END IF;
+  ALTER TABLE v2_1.production_bibles DROP CONSTRAINT IF EXISTS production_bibles_artifact_fk;
+  ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_artifact_fk FOREIGN KEY (artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE CASCADE;
+  ALTER TABLE v2_1.production_bibles DROP CONSTRAINT IF EXISTS production_bibles_source_script_fk;
+  ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_source_script_fk FOREIGN KEY (source_script_artifact_id) REFERENCES v2_1.artifacts(id) ON DELETE CASCADE;
+
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'production_bibles_contract_check' AND connamespace = 'v2_1'::regnamespace) THEN
     ALTER TABLE v2_1.production_bibles ADD CONSTRAINT production_bibles_contract_check CHECK (
       contract_version IS NULL OR
