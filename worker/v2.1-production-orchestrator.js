@@ -5,6 +5,7 @@ const { executeIdeaStage } = require('./v2.1-idea-generation');
 const { executeBriefStage } = require('./v2.1-brief-generation');
 const { executeConceptStage } = require('./v2.1-concept-generation');
 const { executeScriptStage } = require('./v2.1-script-generation');
+const { executeBibleStage } = require('./v2.1-bible-generation');
 const {
   recoverExpiredWork,
   claimJobForProduction,
@@ -14,7 +15,7 @@ const {
   failStage,
 } = require('./v2.1-execution-engine');
 
-const FIRST_VERTICAL_SLICE = Object.freeze(['SIGNAL', 'IDEA', 'BRIEF', 'CONCEPT', 'SCRIPT']);
+const FIRST_VERTICAL_SLICE = Object.freeze(['SIGNAL', 'IDEA', 'BRIEF', 'CONCEPT', 'SCRIPT', 'BIBLE']);
 
 function requireClient(client) {
   if (!client || typeof client.query !== 'function') throw new Error('client is required');
@@ -67,16 +68,10 @@ const HANDLERS = Object.freeze({
   BRIEF: executeBriefStage,
   CONCEPT: executeConceptStage,
   SCRIPT: executeScriptStage,
+  BIBLE: executeBibleStage,
 });
 
-async function executeClaimedStage(client, {
-  productionId,
-  stage,
-  stageRunId,
-  workerId,
-  signal,
-  providerCall,
-}) {
+async function executeClaimedStage(client, { productionId, stage, stageRunId, workerId, signal, providerCall }) {
   if (stage === 'SIGNAL') {
     return completeSignalStage(client, { productionId, stageRunId, workerId, signal });
   }
@@ -107,7 +102,11 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
             a.artifact_type,
             av.version AS artifact_version,
             av.output_hash,
-            av.metadata
+            av.metadata,
+            pb.id AS production_bible_id,
+            pb.context_fingerprint AS bible_context_fingerprint,
+            pb.source_script_artifact_id AS bible_source_script_artifact_id,
+            pb.bible_id AS bible_id
        FROM v2_1.stage_runs sr
        LEFT JOIN LATERAL (
          SELECT gr.*
@@ -118,10 +117,18 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
        ) gr ON true
        LEFT JOIN v2_1.artifacts a ON a.id = gr.artifact_id
        LEFT JOIN v2_1.artifact_versions av ON av.artifact_id = gr.artifact_id
+       LEFT JOIN LATERAL (
+         SELECT pb.*
+           FROM v2_1.production_bibles pb
+          WHERE pb.production_id = $3
+            AND pb.artifact_id = gr.artifact_id
+          ORDER BY pb.version DESC
+          LIMIT 1
+       ) pb ON sr.stage = 'BIBLE'
       WHERE sr.job_id = $1
         AND sr.stage = ANY($2::text[])
       ORDER BY array_position($2::text[], sr.stage), av.version DESC NULLS LAST`,
-    [jobId, FIRST_VERTICAL_SLICE]
+    [jobId, FIRST_VERTICAL_SLICE, productionId]
   );
 
   const rowsByStage = new Map();
@@ -145,11 +152,13 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
   const brief = rowsByStage.get('BRIEF');
   const concept = rowsByStage.get('CONCEPT');
   const script = rowsByStage.get('SCRIPT');
+  const bible = rowsByStage.get('BIBLE');
 
   if (idea.artifact_type !== 'IDEA_SET') throw new Error('IDEA artifact type is not canonical');
   if (brief.artifact_type !== 'CONTENT_BRIEF') throw new Error('BRIEF artifact type is not canonical');
   if (concept.artifact_type !== 'CONCEPT') throw new Error('CONCEPT artifact type is not canonical');
   if (script.artifact_type !== 'SCRIPT') throw new Error('SCRIPT artifact type is not canonical');
+  if (bible.artifact_type !== 'PRODUCTION_BIBLE') throw new Error('BIBLE artifact type is not canonical');
 
   const briefSource = brief.metadata?.sourceArtifactId;
   const conceptSource = concept.metadata?.sourceArtifactId;
@@ -159,6 +168,10 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
   if (!scriptSources.includes(idea.artifact_id) || !scriptSources.includes(concept.artifact_id)) {
     throw new Error('SCRIPT provenance does not point to canonical IDEA and CONCEPT artifacts');
   }
+  if (!bible.production_bible_id) throw new Error('BIBLE has no durable production_bibles record');
+  if (bible.bible_context_fingerprint !== contextFingerprint) throw new Error('BIBLE database context fingerprint drift detected');
+  if (bible.bible_source_script_artifact_id !== script.artifact_id) throw new Error('BIBLE provenance does not point to canonical SCRIPT artifact');
+  if (!bible.bible_id) throw new Error('BIBLE durable identity is missing');
 
   return {
     productionId,
@@ -171,7 +184,7 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
   };
 }
 
-async function runProductionThroughScript(client, {
+async function runProductionThroughBible(client, {
   productionId,
   jobId,
   workerId,
@@ -190,12 +203,7 @@ async function runProductionThroughScript(client, {
 
   if (recover) await recoverExpiredWork(client);
 
-  const claimedJob = await claimJobForProduction(client, {
-    jobId,
-    productionId,
-    workerId,
-    leaseSeconds,
-  });
+  const claimedJob = await claimJobForProduction(client, { jobId, productionId, workerId, leaseSeconds });
   if (!claimedJob) throw new Error('Production job was not claimable by this worker for this production');
   if (claimedJob.id !== jobId || claimedJob.production_id !== productionId) {
     throw new Error('Database returned a job outside the requested production boundary');
@@ -207,20 +215,13 @@ async function runProductionThroughScript(client, {
     await heartbeatJob(client, { jobId, workerId, leaseSeconds });
 
     const stage = await claimNextStage(client, { jobId, workerId, leaseSeconds });
-    if (!stage) throw new Error('Execution engine returned no runnable stage before SCRIPT completed');
+    if (!stage) throw new Error('Execution engine returned no runnable stage before BIBLE completed');
     if (!FIRST_VERTICAL_SLICE.includes(stage.stage)) {
       throw new Error(`Execution engine advanced beyond the vertical slice at ${stage.stage}`);
     }
 
     try {
-      await executeClaimedStage(client, {
-        productionId,
-        stage: stage.stage,
-        stageRunId: stage.id,
-        workerId,
-        signal,
-        providerCall,
-      });
+      await executeClaimedStage(client, { productionId, stage: stage.stage, stageRunId: stage.id, workerId, signal, providerCall });
       completed.push(stage.stage);
       await heartbeatJob(client, { jobId, workerId, leaseSeconds });
     } catch (error) {
@@ -241,16 +242,19 @@ async function runProductionThroughScript(client, {
     productionId,
     jobId,
     workerId,
-    status: 'SCRIPT_COMPLETED',
+    status: 'BIBLE_COMPLETED',
     completedStages: completed,
     provenance,
   };
 }
+
+const runProductionThroughScript = runProductionThroughBible;
 
 module.exports = {
   FIRST_VERTICAL_SLICE,
   HANDLERS,
   normalizeSignal,
   verifyVerticalSliceProvenance,
+  runProductionThroughBible,
   runProductionThroughScript,
 };
