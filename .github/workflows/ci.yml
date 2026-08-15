@@ -45,6 +45,9 @@ jobs:
       - name: Check V2.1 Bible engine syntax
         run: node --check worker/v2.1-bible-engine.js
 
+      - name: Check V2.1 database context loader syntax
+        run: node --check worker/v2.1-db-context-loader.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -56,6 +59,9 @@ jobs:
 
       - name: Check V2.1 Bible engine test syntax
         run: node --check tests/v2.1-bible-engine.test.js
+
+      - name: Check V2.1 production context DB smoke syntax
+        run: node --check tests/v2.1-production-context-db-smoke.js
 
       - name: Run V2.1 foundation tests
         run: node --test tests/v2.1-foundation.test.js
