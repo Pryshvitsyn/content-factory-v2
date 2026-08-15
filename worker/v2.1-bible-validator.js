@@ -49,39 +49,37 @@ function validateContext(context) {
 function validateIdentity(identity, path) {
   object(identity, path);
   idRef(identity.id, `${path}.id`);
-  if (!Number.isInteger(identity.version) || identity.version < 1) {
-    fail(`${path}.version`, 'must be a positive integer');
-  }
-  if (identity.invariants !== undefined && !Array.isArray(identity.invariants)) {
-    fail(`${path}.invariants`, 'must be an array');
-  }
-  if (identity.allowedVariations !== undefined && !Array.isArray(identity.allowedVariations)) {
-    fail(`${path}.allowedVariations`, 'must be an array');
-  }
-  if (identity.forbiddenVariations !== undefined && !Array.isArray(identity.forbiddenVariations)) {
-    fail(`${path}.forbiddenVariations`, 'must be an array');
-  }
+  if (!Number.isInteger(identity.version) || identity.version < 1) fail(`${path}.version`, 'must be a positive integer');
+  if (identity.invariants !== undefined && !Array.isArray(identity.invariants)) fail(`${path}.invariants`, 'must be an array');
+  if (identity.allowedVariations !== undefined && !Array.isArray(identity.allowedVariations)) fail(`${path}.allowedVariations`, 'must be an array');
+  if (identity.forbiddenVariations !== undefined && !Array.isArray(identity.forbiddenVariations)) fail(`${path}.forbiddenVariations`, 'must be an array');
 }
 
 function validateAssetRef(ref, path) {
   object(ref, path);
   idRef(ref.id, `${path}.id`);
   oneOf(ref.type, ASSET_TYPES, `${path}.type`);
-  if (ref.version !== undefined && (!Number.isInteger(ref.version) || ref.version < 1)) {
-    fail(`${path}.version`, 'must be a positive integer when provided');
-  }
+  if (ref.version !== undefined && (!Number.isInteger(ref.version) || ref.version < 1)) fail(`${path}.version`, 'must be a positive integer when provided');
+}
+
+function validateAssetRequirement(requirement, path) {
+  object(requirement, path);
+  nonEmpty(requirement.role, `${path}.role`);
+  oneOf(requirement.type, ASSET_TYPES, `${path}.type`);
+  if (requirement.id !== undefined && requirement.id !== null) idRef(requirement.id, `${path}.id`);
+  if (requirement.requiredAssetId !== undefined && requirement.requiredAssetId !== null) idRef(requirement.requiredAssetId, `${path}.requiredAssetId`);
+  if (requirement.constraints !== undefined) object(requirement.constraints, `${path}.constraints`);
 }
 
 function validateBible(bible) {
   object(bible, 'bible');
-  if (bible.contractVersion !== CONTRACT.version) {
-    fail('bible.contractVersion', `must equal ${CONTRACT.version}`);
-  }
+  if (bible.contractVersion !== CONTRACT.version) fail('bible.contractVersion', `must equal ${CONTRACT.version}`);
   idRef(bible.id, 'bible.id');
   if (!Number.isInteger(bible.version) || bible.version < 1) fail('bible.version', 'must be a positive integer');
   validateContext(bible.context);
 
   object(bible.creativeTruth, 'bible.creativeTruth');
+  nonEmpty(bible.creativeTruth.concept, 'bible.creativeTruth.concept');
   object(bible.creativeTruth.narrative, 'bible.creativeTruth.narrative');
   object(bible.creativeTruth.brandRules, 'bible.creativeTruth.brandRules');
   object(bible.creativeTruth.style, 'bible.creativeTruth.style');
@@ -94,15 +92,20 @@ function validateBible(bible) {
   bible.creativeTruth.styles.forEach((x, i) => validateIdentity(x, `bible.creativeTruth.styles[${i}]`));
 
   object(bible.productionPlan, 'bible.productionPlan');
-  if (!Array.isArray(bible.productionPlan.shots) || bible.productionPlan.shots.length === 0) {
-    fail('bible.productionPlan.shots', 'must contain at least one shot');
-  }
+  object(bible.productionPlan.objective, 'bible.productionPlan.objective');
+  if (!Array.isArray(bible.productionPlan.shots) || bible.productionPlan.shots.length === 0) fail('bible.productionPlan.shots', 'must contain at least one shot');
   if (!Array.isArray(bible.productionPlan.assetRequirements)) fail('bible.productionPlan.assetRequirements', 'must be an array');
   if (!Array.isArray(bible.productionPlan.editions) || bible.productionPlan.editions.length === 0) fail('bible.productionPlan.editions', 'must contain at least one edition');
+
+  bible.productionPlan.assetRequirements.forEach((requirement, i) => validateAssetRequirement(requirement, `bible.productionPlan.assetRequirements[${i}]`));
 
   const numbers = bible.productionPlan.shots.map((shot, i) => {
     object(shot, `bible.productionPlan.shots[${i}]`);
     if (!Number.isInteger(shot.number) || shot.number < 1) fail(`bible.productionPlan.shots[${i}].number`, 'must be a positive integer');
+    nonEmpty(shot.description, `bible.productionPlan.shots[${i}].description`);
+    nonEmpty(shot.action, `bible.productionPlan.shots[${i}].action`);
+    if (shot.durationMs !== null && shot.durationMs !== undefined && (!Number.isInteger(shot.durationMs) || shot.durationMs <= 0)) fail(`bible.productionPlan.shots[${i}].durationMs`, 'must be a positive integer or null');
+    if (!Array.isArray(shot.continuityRequirements)) fail(`bible.productionPlan.shots[${i}].continuityRequirements`, 'must be an array');
     if (!Array.isArray(shot.assetRefs)) fail(`bible.productionPlan.shots[${i}].assetRefs`, 'must be an array');
     shot.assetRefs.forEach((ref, j) => validateAssetRef(ref, `bible.productionPlan.shots[${i}].assetRefs[${j}]`));
     return shot.number;
@@ -110,11 +113,13 @@ function validateBible(bible) {
   if (new Set(numbers).size !== numbers.length) fail('bible.productionPlan.shots', 'shot numbers must be unique');
   if (numbers.some((n, i) => n !== i + 1)) fail('bible.productionPlan.shots', 'shot numbers must be deterministic and contiguous from 1');
 
-  bible.productionPlan.editions.forEach((edition, i) => {
+  const platforms = bible.productionPlan.editions.map((edition, i) => {
     object(edition, `bible.productionPlan.editions[${i}]`);
     oneOf(edition.platform, PLATFORMS, `bible.productionPlan.editions[${i}].platform`);
     object(edition.constraints || {}, `bible.productionPlan.editions[${i}].constraints`);
+    return edition.platform;
   });
+  if (new Set(platforms).size !== platforms.length) fail('bible.productionPlan.editions', 'platform editions must be unique');
 
   if (bible.providerConfig !== undefined) fail('bible.providerConfig', 'provider configuration must not be part of the creative contract');
   return true;
