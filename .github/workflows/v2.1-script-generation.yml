@@ -1,0 +1,40 @@
+name: Content Factory V2.1 SCRIPT Generation
+
+on:
+  push:
+    branches:
+      - "develop/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  script-generation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check SCRIPT worker syntax
+        run: node --check worker/v2.1-script-generation.js
+
+      - name: Check SCRIPT test syntax
+        run: node --check tests/v2.1-script-generation.test.js
+
+      - name: Check SCRIPT DB smoke syntax
+        run: node --check tests/v2.1-script-generation-db-smoke.js
+
+      - name: Run production contract tests
+        run: node --test tests/v2.1-production-contract.test.js
+
+      - name: Run SCRIPT generation tests
+        run: node --test tests/v2.1-script-generation.test.js
