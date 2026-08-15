@@ -5,9 +5,7 @@ const { resolveContext } = require('./v2.1-context-resolver');
 const ACTIVE_STATUS = new Set(['ACTIVE']);
 
 function assertUuid(value, name) {
-  if (!value || typeof value !== 'string') {
-    throw new Error(`${name} is required`);
-  }
+  if (!value || typeof value !== 'string') throw new Error(`${name} is required`);
 }
 
 function parseConfig(config) {
@@ -25,33 +23,23 @@ function layer(row, fields = {}, version = 1) {
 
 function requireActive(row, type) {
   if (!row) throw new Error(`${type} was not found`);
-  if (!ACTIVE_STATUS.has(row.status)) {
-    throw new Error(`${type} ${row.id} is not ACTIVE`);
-  }
+  if (!ACTIVE_STATUS.has(row.status)) throw new Error(`${type} ${row.id} is not ACTIVE`);
 }
 
-async function loadProductionContext({ client, projectId, tenantId, businessId } = {}) {
+async function loadProductionContext({ client, projectId, tenantId, businessId, manageTransaction = true } = {}) {
   if (!client || typeof client.query !== 'function') throw new Error('client is required');
   assertUuid(projectId, 'projectId');
 
-  await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  if (manageTransaction) {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  }
 
   try {
     const projectResult = await client.query(
-      `SELECT
-         p.id,
-         p.name,
-         p.status,
-         p.config,
-         p.tenant_id,
-         p.business_id,
-         p.brand_id,
-         p.series_id
-       FROM v2_1.projects p
-       WHERE p.id = $1`,
+      `SELECT id, name, status, config, tenant_id, business_id, brand_id, series_id
+       FROM v2_1.projects WHERE id = $1`,
       [projectId]
     );
-
     const project = projectResult.rows[0];
     if (!project) throw new Error(`Project ${projectId} was not found`);
     if (!ACTIVE_STATUS.has(project.status)) throw new Error(`Project ${project.id} is not ACTIVE`);
@@ -62,40 +50,22 @@ async function loadProductionContext({ client, projectId, tenantId, businessId }
     if (businessId && project.business_id !== businessId) {
       throw new Error(`Project ${project.id} does not belong to business ${businessId}`);
     }
-
     if (!project.tenant_id || !project.business_id || !project.brand_id) {
       throw new Error('Project must have tenant_id, business_id and brand_id before production context can be resolved');
     }
-
-    if (!project.series_id) {
-      throw new Error('Project must have series_id before production context can be resolved');
-    }
+    if (!project.series_id) throw new Error('Project must have series_id before production context can be resolved');
 
     const config = parseConfig(project.config);
     const audienceId = config.audienceId || config.audience_id || null;
     const offeringId = config.offeringId || config.offering_id || null;
     const strategyId = config.strategyId || config.strategy_id || null;
 
-    const tenantResult = await client.query(
-      `SELECT id, name, status, metadata
-       FROM v2_1.tenants WHERE id = $1`,
-      [project.tenant_id]
-    );
-    const businessResult = await client.query(
-      `SELECT id, tenant_id, name, industry, status, rules
-       FROM v2_1.businesses WHERE id = $1`,
-      [project.business_id]
-    );
-    const brandResult = await client.query(
-      `SELECT id, business_id, name, voice, visual_identity, rules, compliance_rules, status
-       FROM v2_1.brands WHERE id = $1`,
-      [project.brand_id]
-    );
-    const seriesResult = await client.query(
-      `SELECT id, universe_id, name, format_rules, narrative_rules, status
-       FROM v2_1.series WHERE id = $1`,
-      [project.series_id]
-    );
+    const [tenantResult, businessResult, brandResult, seriesResult] = await Promise.all([
+      client.query(`SELECT id, name, status, metadata FROM v2_1.tenants WHERE id = $1`, [project.tenant_id]),
+      client.query(`SELECT id, tenant_id, name, industry, status, rules FROM v2_1.businesses WHERE id = $1`, [project.business_id]),
+      client.query(`SELECT id, business_id, name, voice, visual_identity, rules, compliance_rules, status FROM v2_1.brands WHERE id = $1`, [project.brand_id]),
+      client.query(`SELECT id, universe_id, name, format_rules, narrative_rules, status FROM v2_1.series WHERE id = $1`, [project.series_id]),
+    ]);
 
     const tenant = tenantResult.rows[0];
     const business = businessResult.rows[0];
@@ -111,8 +81,7 @@ async function loadProductionContext({ client, projectId, tenantId, businessId }
     if (brand.business_id !== business.id) throw new Error('Brand is owned by a different business');
 
     const universeResult = await client.query(
-      `SELECT id, brand_id, name, premise, rules
-       FROM v2_1.content_universes WHERE id = $1`,
+      `SELECT id, brand_id, name, premise, rules FROM v2_1.content_universes WHERE id = $1`,
       [series.universe_id]
     );
     const universe = universeResult.rows[0];
@@ -123,8 +92,7 @@ async function loadProductionContext({ client, projectId, tenantId, businessId }
 
     if (audienceId) {
       const result = await client.query(
-        `SELECT id, business_id, brand_id, name, profile
-         FROM v2_1.audiences WHERE id = $1`,
+        `SELECT id, business_id, brand_id, name, profile FROM v2_1.audiences WHERE id = $1`,
         [audienceId]
       );
       const audience = result.rows[0];
@@ -189,16 +157,17 @@ async function loadProductionContext({ client, projectId, tenantId, businessId }
     };
 
     const resolved = resolveContext(contextInput);
-
     const result = Object.freeze({
       project: Object.freeze({ id: project.id, name: project.name }),
       context: resolved,
     });
 
-    await client.query('COMMIT');
+    if (manageTransaction) await client.query('COMMIT');
     return result;
   } catch (error) {
-    try { await client.query('ROLLBACK'); } catch {}
+    if (manageTransaction) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
     throw error;
   }
 }
