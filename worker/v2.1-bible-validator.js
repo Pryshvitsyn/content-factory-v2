@@ -24,34 +24,25 @@ function oneOf(value, values, path) {
 
 function validateContext(context) {
   object(context, 'context');
-  for (const layer of ['tenant', 'business', 'brand']) {
-    object(context[layer], `context.${layer}`);
-    idRef(context[layer].id, `context.${layer}.id`);
-    nonEmpty(context[layer].name, `context.${layer}.name`);
-  }
+  object(context.references, 'context.references');
+  object(context.inheritedRules, 'context.inheritedRules');
 
-  if (context.audience) {
-    object(context.audience, 'context.audience');
-    idRef(context.audience.id, 'context.audience.id');
-  }
-  if (context.offering) {
-    object(context.offering, 'context.offering');
-    idRef(context.offering.id, 'context.offering.id');
-  }
-  if (context.strategy) {
-    object(context.strategy, 'context.strategy');
-    idRef(context.strategy.id, 'context.strategy.id');
-    if (!Number.isInteger(context.strategy.version) || context.strategy.version < 1) {
-      fail('context.strategy.version', 'must be a positive integer');
+  for (const layer of ['tenant', 'business', 'brand']) {
+    object(context.references[layer], `context.references.${layer}`);
+    idRef(context.references[layer].id, `context.references.${layer}.id`);
+    if (!Number.isInteger(context.references[layer].version) || context.references[layer].version < 1) {
+      fail(`context.references.${layer}.version`, 'must be a positive integer');
     }
   }
-  if (context.universe) {
-    object(context.universe, 'context.universe');
-    idRef(context.universe.id, 'context.universe.id');
-  }
-  if (context.series) {
-    object(context.series, 'context.series');
-    idRef(context.series.id, 'context.series.id');
+
+  for (const layer of ['audience', 'offering', 'strategy', 'universe', 'series', 'production']) {
+    const ref = context.references[layer];
+    if (!ref) continue;
+    object(ref, `context.references.${layer}`);
+    idRef(ref.id, `context.references.${layer}.id`);
+    if (!Number.isInteger(ref.version) || ref.version < 1) {
+      fail(`context.references.${layer}.version`, 'must be a positive integer');
+    }
   }
 }
 
