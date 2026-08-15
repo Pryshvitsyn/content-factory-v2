@@ -1,0 +1,58 @@
+name: V2.1 BIBLE Generation
+
+on:
+  push:
+    branches:
+      - 'feature/v2.1-bible-*'
+      - 'develop/**'
+  pull_request:
+    branches:
+      - main
+      - 'develop/**'
+      - 'feature/v2.1-*'
+
+jobs:
+  bible-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: n8n
+          POSTGRES_PASSWORD: n8n
+          POSTGRES_DB: content_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U n8n -d content_os"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: content_os
+      PGUSER: n8n
+      PGPASSWORD: n8n
+      NVIDIA_MODEL: smoke-test-model
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply V2.1 database migrations
+        run: |
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/001_v2.sql
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_foundation.sql
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_multi_business.sql
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_production_boundary.sql
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_execution_engine.sql
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260816_v2_1_database_contract_hardening.sql
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260816_v2_1_bible_db_contract.sql
+      - run: node --check worker/v2.1-bible-engine.js
+      - run: node --check worker/v2.1-bible-generation.js
+      - run: node --check worker/v2.1-production-orchestrator.js
+      - run: node --test tests/v2.1-bible-engine.test.js tests/v2.1-bible-generation.test.js
+      - run: node tests/v2.1-bible-generation-db-smoke.js
