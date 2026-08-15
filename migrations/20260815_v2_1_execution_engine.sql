@@ -26,10 +26,7 @@ INSERT INTO v2_1.stage_definitions(stage, requires, outputs, parallel_group) VAL
   ('PUBLISH', '["VALIDATION_REPORT","EDITIONS"]'::jsonb, '["PUBLICATIONS"]'::jsonb, 'PLATFORM'),
   ('ANALYZE', '["PUBLICATIONS"]'::jsonb, '["PERFORMANCE_DATA"]'::jsonb, NULL),
   ('LEARN', '["PERFORMANCE_DATA"]'::jsonb, '["LEARNINGS"]'::jsonb, NULL)
-ON CONFLICT (stage) DO UPDATE SET
-  requires = EXCLUDED.requires,
-  outputs = EXCLUDED.outputs,
-  parallel_group = EXCLUDED.parallel_group;
+ON CONFLICT (stage) DO UPDATE SET requires = EXCLUDED.requires, outputs = EXCLUDED.outputs, parallel_group = EXCLUDED.parallel_group;
 
 ALTER TABLE v2_1.jobs
   ADD COLUMN IF NOT EXISTS worker_id text,
@@ -53,28 +50,15 @@ ALTER TABLE v2_1.jobs ADD CONSTRAINT jobs_max_attempts_check CHECK (max_attempts
 ALTER TABLE v2_1.stage_runs DROP CONSTRAINT IF EXISTS stage_runs_max_attempts_check;
 ALTER TABLE v2_1.stage_runs ADD CONSTRAINT stage_runs_max_attempts_check CHECK (max_attempts > 0);
 
-CREATE INDEX IF NOT EXISTS idx_v21_jobs_claim
-  ON v2_1.jobs(status, next_attempt_at, priority DESC, created_at)
-  WHERE status IN ('QUEUED','RETRYING');
-CREATE INDEX IF NOT EXISTS idx_v21_jobs_lease
-  ON v2_1.jobs(lease_expires_at)
-  WHERE status = 'RUNNING';
-CREATE INDEX IF NOT EXISTS idx_v21_stage_runs_claim
-  ON v2_1.stage_runs(job_id, status, next_attempt_at, stage)
-  WHERE status IN ('QUEUED','RETRYING');
-CREATE INDEX IF NOT EXISTS idx_v21_stage_runs_lease
-  ON v2_1.stage_runs(lease_expires_at)
-  WHERE status = 'RUNNING';
+CREATE INDEX IF NOT EXISTS idx_v21_jobs_claim ON v2_1.jobs(status, next_attempt_at, priority DESC, created_at) WHERE status IN ('QUEUED','RETRYING');
+CREATE INDEX IF NOT EXISTS idx_v21_jobs_lease ON v2_1.jobs(lease_expires_at) WHERE status = 'RUNNING';
+CREATE INDEX IF NOT EXISTS idx_v21_stage_runs_claim ON v2_1.stage_runs(job_id, status, next_attempt_at, stage) WHERE status IN ('QUEUED','RETRYING');
+CREATE INDEX IF NOT EXISTS idx_v21_stage_runs_lease ON v2_1.stage_runs(lease_expires_at) WHERE status = 'RUNNING';
 
 CREATE OR REPLACE FUNCTION v2_1.recover_expired_work()
 RETURNS TABLE (jobs_recovered integer, jobs_failed integer, stages_recovered integer, stages_failed integer)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  jr integer := 0;
-  jf integer := 0;
-  sr integer := 0;
-  sf integer := 0;
+LANGUAGE plpgsql AS $$
+DECLARE jr integer := 0; jf integer := 0; sr integer := 0; sf integer := 0;
 BEGIN
   WITH recovered AS (
     UPDATE v2_1.stage_runs
@@ -83,19 +67,14 @@ BEGIN
            error = CASE WHEN attempt < max_attempts THEN error ELSE COALESCE(error, jsonb_build_object('code','STAGE_LEASE_EXPIRED')) END,
            worker_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL
      WHERE status = 'RUNNING' AND lease_expires_at IS NOT NULL AND lease_expires_at < now()
-     RETURNING status, job_id
-  )
-  SELECT count(*) FILTER (WHERE status = 'RETRYING')::integer,
-         count(*) FILTER (WHERE status = 'FAILED')::integer
-    INTO sr, sf FROM recovered;
+     RETURNING status
+  ) SELECT count(*) FILTER (WHERE status = 'RETRYING')::integer, count(*) FILTER (WHERE status = 'FAILED')::integer INTO sr, sf FROM recovered;
 
   UPDATE v2_1.jobs j
-     SET status = 'FAILED',
-         error = COALESCE(j.error, jsonb_build_object('code','STAGE_RETRY_EXHAUSTED')),
+     SET status = 'FAILED', error = COALESCE(j.error, jsonb_build_object('code','STAGE_RETRY_EXHAUSTED')),
          last_error = COALESCE(j.last_error, jsonb_build_object('code','STAGE_RETRY_EXHAUSTED')),
          completed_at = now(), worker_id = NULL, lease_expires_at = NULL, heartbeat_at = now()
-   WHERE j.status = 'RUNNING'
-     AND EXISTS (SELECT 1 FROM v2_1.stage_runs srx WHERE srx.job_id = j.id AND srx.status = 'FAILED');
+   WHERE j.status = 'RUNNING' AND EXISTS (SELECT 1 FROM v2_1.stage_runs srx WHERE srx.job_id = j.id AND srx.status = 'FAILED');
 
   WITH recovered AS (
     UPDATE v2_1.jobs
@@ -105,11 +84,9 @@ BEGIN
            last_error = COALESCE(last_error, jsonb_build_object('code','JOB_LEASE_EXPIRED')),
            worker_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL
      WHERE status = 'RUNNING' AND lease_expires_at IS NOT NULL AND lease_expires_at < now()
+       AND NOT EXISTS (SELECT 1 FROM v2_1.stage_runs srx WHERE srx.job_id = j.id AND srx.status = 'RUNNING' AND (srx.lease_expires_at IS NULL OR srx.lease_expires_at > now()))
      RETURNING status
-  )
-  SELECT count(*) FILTER (WHERE status = 'RETRYING')::integer,
-         count(*) FILTER (WHERE status = 'FAILED')::integer
-    INTO jr, jf FROM recovered;
+  ) SELECT count(*) FILTER (WHERE status = 'RETRYING')::integer, count(*) FILTER (WHERE status = 'FAILED')::integer INTO jr, jf FROM recovered;
 
   RETURN QUERY SELECT jr, jf, sr, sf;
 END;
@@ -117,21 +94,15 @@ $$;
 
 CREATE OR REPLACE FUNCTION v2_1.claim_job(p_worker_id text, p_lease_seconds integer DEFAULT 120)
 RETURNS TABLE (id uuid, production_id uuid, job_type text, attempts integer, lease_expires_at timestamptz)
-LANGUAGE sql
-AS $$
+LANGUAGE sql AS $$
   WITH candidate AS (
-    SELECT j.id
-      FROM v2_1.jobs j
-     WHERE j.status IN ('QUEUED','RETRYING')
-       AND j.next_attempt_at <= now()
-       AND j.attempts < j.max_attempts
-     ORDER BY j.priority DESC, j.created_at, j.id
-     FOR UPDATE SKIP LOCKED LIMIT 1
+    SELECT j.id FROM v2_1.jobs j
+     WHERE j.status IN ('QUEUED','RETRYING') AND j.next_attempt_at <= now() AND j.attempts < j.max_attempts
+       AND NOT EXISTS (SELECT 1 FROM v2_1.stage_runs sr WHERE sr.job_id = j.id AND sr.status = 'RUNNING' AND (sr.lease_expires_at IS NULL OR sr.lease_expires_at > now()))
+     ORDER BY j.priority DESC, j.created_at, j.id FOR UPDATE SKIP LOCKED LIMIT 1
   ), claimed AS (
-    UPDATE v2_1.jobs j
-       SET status = 'RUNNING', attempts = j.attempts + 1,
-           worker_id = p_worker_id, heartbeat_at = now(),
-           lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
+    UPDATE v2_1.jobs j SET status = 'RUNNING', attempts = j.attempts + 1, worker_id = p_worker_id,
+           heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
       FROM candidate c WHERE j.id = c.id
      RETURNING j.id, j.production_id, j.job_type, j.attempts, j.lease_expires_at
   ) SELECT * FROM claimed;
@@ -139,38 +110,25 @@ $$;
 
 CREATE OR REPLACE FUNCTION v2_1.heartbeat_job(p_job_id uuid, p_worker_id text, p_lease_seconds integer DEFAULT 120)
 RETURNS boolean LANGUAGE sql AS $$
-  UPDATE v2_1.jobs
-     SET heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
-   WHERE id = p_job_id AND status = 'RUNNING' AND worker_id = p_worker_id
-  RETURNING true;
+  UPDATE v2_1.jobs SET heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
+   WHERE id = p_job_id AND status = 'RUNNING' AND worker_id = p_worker_id RETURNING true;
 $$;
 
 CREATE OR REPLACE FUNCTION v2_1.claim_stage(p_job_id uuid, p_worker_id text, p_lease_seconds integer DEFAULT 120)
 RETURNS TABLE (id uuid, stage text, attempt integer, input_artifacts jsonb, input_fingerprint text, lease_expires_at timestamptz)
-LANGUAGE sql
-AS $$
+LANGUAGE sql AS $$
   WITH candidate AS (
-    SELECT sr.id
-      FROM v2_1.stage_runs sr
-      JOIN v2_1.jobs j ON j.id = sr.job_id
-      JOIN v2_1.stage_definitions sd ON sd.stage = sr.stage
-     WHERE sr.job_id = p_job_id AND j.status = 'RUNNING' AND j.worker_id = p_worker_id
-       AND sr.status IN ('QUEUED','RETRYING') AND sr.next_attempt_at <= now()
-       AND sr.attempt < sr.max_attempts
+    SELECT sr.id FROM v2_1.stage_runs sr JOIN v2_1.jobs j ON j.id = sr.job_id JOIN v2_1.stage_definitions sd ON sd.stage = sr.stage
+     WHERE sr.job_id = p_job_id AND j.status = 'RUNNING'
+       AND sr.status IN ('QUEUED','RETRYING') AND sr.next_attempt_at <= now() AND sr.attempt < sr.max_attempts
        AND NOT EXISTS (SELECT 1 FROM v2_1.stage_runs done WHERE done.job_id = sr.job_id AND done.stage = sr.stage AND done.status = 'COMPLETED')
-       AND NOT EXISTS (
-         SELECT 1 FROM jsonb_array_elements_text(sd.requires) required_artifact
-          WHERE NOT EXISTS (
-            SELECT 1 FROM v2_1.stage_runs done
-             WHERE done.job_id = sr.job_id AND done.status = 'COMPLETED' AND done.output_artifacts ? required_artifact
-          )
-       )
+       AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(sd.requires) required_artifact WHERE NOT EXISTS (
+         SELECT 1 FROM v2_1.stage_runs done WHERE done.job_id = sr.job_id AND done.status = 'COMPLETED' AND done.output_artifacts ? required_artifact
+       ))
      ORDER BY sr.id FOR UPDATE OF sr SKIP LOCKED LIMIT 1
   ), claimed AS (
-    UPDATE v2_1.stage_runs sr
-       SET status = 'RUNNING', worker_id = p_worker_id,
-           started_at = COALESCE(sr.started_at, now()), heartbeat_at = now(),
-           lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
+    UPDATE v2_1.stage_runs sr SET status = 'RUNNING', worker_id = p_worker_id, started_at = COALESCE(sr.started_at, now()),
+           heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
       FROM candidate c WHERE sr.id = c.id
      RETURNING sr.id, sr.stage, sr.attempt, sr.input_artifacts, sr.input_fingerprint, sr.lease_expires_at
   ) SELECT * FROM claimed;
@@ -178,10 +136,8 @@ $$;
 
 CREATE OR REPLACE FUNCTION v2_1.heartbeat_stage(p_stage_run_id uuid, p_worker_id text, p_lease_seconds integer DEFAULT 120)
 RETURNS boolean LANGUAGE sql AS $$
-  UPDATE v2_1.stage_runs
-     SET heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
-   WHERE id = p_stage_run_id AND status = 'RUNNING' AND worker_id = p_worker_id
-  RETURNING true;
+  UPDATE v2_1.stage_runs SET heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => GREATEST(5, p_lease_seconds))
+   WHERE id = p_stage_run_id AND status = 'RUNNING' AND worker_id = p_worker_id RETURNING true;
 $$;
 
 COMMENT ON TABLE v2_1.stage_definitions IS 'Database execution contract: dependency readiness and stage outputs used by atomic workers.';
