@@ -7,7 +7,7 @@ const { executeConceptStage } = require('./v2.1-concept-generation');
 const { executeScriptStage } = require('./v2.1-script-generation');
 const {
   recoverExpiredWork,
-  claimJob,
+  claimJobForProduction,
   heartbeatJob,
   claimNextStage,
   completeStage,
@@ -190,8 +190,16 @@ async function runProductionThroughScript(client, {
 
   if (recover) await recoverExpiredWork(client);
 
-  const claimedJob = await claimJob(client, { workerId, leaseSeconds });
-  if (!claimedJob || claimedJob.id !== jobId) throw new Error('Production job was not claimed by this worker');
+  const claimedJob = await claimJobForProduction(client, {
+    jobId,
+    productionId,
+    workerId,
+    leaseSeconds,
+  });
+  if (!claimedJob) throw new Error('Production job was not claimable by this worker for this production');
+  if (claimedJob.id !== jobId || claimedJob.production_id !== productionId) {
+    throw new Error('Database returned a job outside the requested production boundary');
+  }
 
   const completed = [];
   while (completed.length < FIRST_VERTICAL_SLICE.length) {
