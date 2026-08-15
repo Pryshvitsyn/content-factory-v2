@@ -39,6 +39,9 @@ jobs:
       - name: Check V2.1 execution engine syntax
         run: node --check worker/v2.1-execution-engine.js
 
+      - name: Check V2.1 IDEA generation syntax
+        run: node --check worker/v2.1-idea-generation.js
+
       - name: Check V2.1 Bible contract syntax
         run: node --check worker/v2.1-bible-contract.js
 
@@ -62,6 +65,12 @@ jobs:
 
       - name: Check V2.1 execution engine DB smoke syntax
         run: node --check tests/v2.1-execution-engine-db-smoke.js
+
+      - name: Check V2.1 IDEA generation test syntax
+        run: node --check tests/v2.1-idea-generation.test.js
+
+      - name: Check V2.1 IDEA generation DB smoke syntax
+        run: node --check tests/v2.1-idea-generation-db-smoke.js
 
       - name: Check V2.1 foundation test syntax
         run: node --check tests/v2.1-foundation.test.js
@@ -87,6 +96,9 @@ jobs:
       - name: Run V2.1 execution engine tests
         run: node --test tests/v2.1-execution-engine.test.js
 
+      - name: Run V2.1 IDEA generation tests
+        run: node --test tests/v2.1-idea-generation.test.js
+
       - name: Run V2.1 Bible engine tests
         run: node --test tests/v2.1-bible-engine.test.js
 
@@ -101,6 +113,7 @@ jobs:
           test -s migrations/20260815_v2_1_production_boundary.sql
           test -s migrations/20260815_v2_1_production_boundary_patch.sql
           test -s migrations/20260815_v2_1_execution_engine.sql
+          test -s migrations/20260816_v2_1_idea_generation_vertical_slice.sql
 
       - name: Check required project files
         run: |
