@@ -5,34 +5,11 @@ const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
 
-/**
- * POST /api/productions
- * Create a new video production
- * 
- * Request body:
- * {
- *   "business_id": "uuid",
- *   "brand_id": "uuid",
- *   "topic": "Why Roman pizza is thin",
- *   "platforms": ["tiktok", "instagram"],
- *   "series_id": "uuid" (optional),
- *   "audience_id": "uuid" (optional),
- *   "product_id": "uuid" (optional)
- * }
- * 
- * Response:
- * {
- *   "id": "production-uuid",
- *   "status": "queued",
- *   "message": "Production created. Script generation started."
- * }
- */
 router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const body = req.body;
 
-    // Validate request
     const validation = validateCreateProduction(body);
     if (!validation.valid) {
       return res.status(400).json({
@@ -41,7 +18,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Validate business exists
     const businessResult = await db.query(
       'SELECT id FROM businesses WHERE id = $1',
       [body.business_id]
@@ -50,7 +26,6 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Business not found' });
     }
 
-    // Validate brand exists
     const brandResult = await db.query(
       'SELECT id FROM brands WHERE id = $1',
       [body.brand_id]
@@ -59,7 +34,6 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Brand not found' });
     }
 
-    // Create content
     const contentResult = await db.query(
       `INSERT INTO contents (business_id, title, topic, status)
        VALUES ($1, $2, $3, 'active')
@@ -68,7 +42,6 @@ router.post('/', async (req, res) => {
     );
     const contentId = contentResult.rows[0].id;
 
-    // Create content variant
     const variantResult = await db.query(
       `INSERT INTO content_variants (content_id, brand_id, hook, target_platform, status)
        VALUES ($1, $2, $3, $4, 'active')
@@ -77,7 +50,6 @@ router.post('/', async (req, res) => {
     );
     const variantId = variantResult.rows[0].id;
 
-    // Create production
     const productionResult = await db.query(
       `INSERT INTO productions (content_variant_id, universe_id, title, status)
        VALUES ($1, $2, $3, 'queued')
@@ -86,7 +58,6 @@ router.post('/', async (req, res) => {
     );
     const productionId = productionResult.rows[0].id;
 
-    // Create SCRIPT_GENERATION job
     const jobResult = await db.query(
       `INSERT INTO jobs (production_id, job_type, status, priority)
        VALUES ($1, 'SCRIPT_GENERATION', 'queued', 1)
@@ -94,10 +65,9 @@ router.post('/', async (req, res) => {
       [productionId]
     );
 
-    // Create editions for each platform
     for (const platform of body.platforms) {
       const editionType = platform === 'tiktok' ? 'vertical_short' :
-n                          platform === 'instagram' ? 'reel' :
+                          platform === 'instagram' ? 'reel' :
                           platform === 'youtube' ? 'short' : 'vertical_short';
       const aspectRatio = platform === 'youtube' ? '16:9' : '9:16';
 
@@ -125,27 +95,6 @@ n                          platform === 'instagram' ? 'reel' :
   }
 });
 
-/**
- * GET /api/productions
- * List all productions for a business
- * 
- * Query params:
- * - business_id (required)
- * - limit (optional, default 20)
- * - offset (optional, default 0)
- * 
- * Response:
- * [
- *   {
- *     "id": "uuid",
- *     "title": "Why Roman pizza is thin",
- *     "status": "completed",
- *     "created_at": "2026-08-16T00:00:00Z",
- *     "platforms": ["tiktok", "instagram"],
- *     "editions": [...]
- *   }
- * ]
- */
 router.get('/', async (req, res) => {
   try {
     const db = getDb();
@@ -189,21 +138,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**
- * GET /api/productions/:id
- * Get production details and status
- * 
- * Response:
- * {
- *   "id": "uuid",
- *   "title": "Why Roman pizza is thin",
- *   "status": "completed",
- *   "progress": 75,
- *   "stages": [...],
- *   "artifacts": [...],
- *   "editions": [...]
- * }
- */
 router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
@@ -213,7 +147,6 @@ router.get('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Invalid production ID' });
     }
 
-    // Get production details
     const productionResult = await db.query(
       `SELECT * FROM productions WHERE id = $1`,
       [id]
@@ -225,25 +158,21 @@ router.get('/:id', async (req, res) => {
 
     const production = productionResult.rows[0];
 
-    // Get jobs for this production
     const jobsResult = await db.query(
       `SELECT * FROM jobs WHERE production_id = $1 ORDER BY created_at ASC`,
       [id]
     );
 
-    // Get artifacts for this production
     const artifactsResult = await db.query(
       `SELECT * FROM artifacts WHERE production_id = $1 ORDER BY created_at ASC`,
       [id]
     );
 
-    // Get editions for this production
     const editionsResult = await db.query(
       `SELECT * FROM editions WHERE production_id = $1`,
       [id]
     );
 
-    // Calculate progress
     const totalJobs = jobsResult.rows.length;
     const completedJobs = jobsResult.rows.filter(j => j.status === 'completed').length;
     const progress = totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 100) : 0;
@@ -265,10 +194,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/**
- * POST /api/productions/:id/approve
- * Approve a production (mark as ready for publishing)
- */
 router.post('/:id/approve', async (req, res) => {
   try {
     const db = getDb();
@@ -290,16 +215,6 @@ router.post('/:id/approve', async (req, res) => {
   }
 });
 
-/**
- * POST /api/productions/:id/publish
- * Publish a production to platforms
- * 
- * Request body:
- * {
- *   "platforms": ["tiktok", "instagram"],
- *   "scheduled_at": "2026-08-16T18:00:00Z" (optional)
- * }
- */
 router.post('/:id/publish', async (req, res) => {
   try {
     const db = getDb();
@@ -310,7 +225,6 @@ router.post('/:id/publish', async (req, res) => {
       return res.status(400).json({ error: 'platforms array is required' });
     }
 
-    // Update editions status to ready
     for (const platform of platforms) {
       await db.query(
         `UPDATE editions SET status = 'ready' 
@@ -318,7 +232,6 @@ router.post('/:id/publish', async (req, res) => {
         [id, platform]
       );
 
-      // Create publication
       await db.query(
         `INSERT INTO publications (edition_id, platform, status, scheduled_at)
          SELECT id, $2, 'scheduled', $3
