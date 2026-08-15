@@ -42,6 +42,15 @@ jobs:
       - name: Check V2.1 IDEA generation syntax
         run: node --check worker/v2.1-idea-generation.js
 
+      - name: Check V2.1 BRIEF generation syntax
+        run: node --check worker/v2.1-brief-generation.js
+
+      - name: Check V2.1 CONCEPT generation syntax
+        run: node --check worker/v2.1-concept-generation.js
+
+      - name: Check V2.1 SCRIPT generation syntax
+        run: node --check worker/v2.1-script-generation.js
+
       - name: Check V2.1 Bible contract syntax
         run: node --check worker/v2.1-bible-contract.js
 
@@ -57,6 +66,9 @@ jobs:
       - name: Check V2.1 production boundary syntax
         run: node --check worker/v2.1-production-boundary.js
 
+      - name: Check V2.1 database contract hardening smoke syntax
+        run: node --check tests/v2.1-database-contract-hardening-db-smoke.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -71,6 +83,24 @@ jobs:
 
       - name: Check V2.1 IDEA generation DB smoke syntax
         run: node --check tests/v2.1-idea-generation-db-smoke.js
+
+      - name: Check V2.1 BRIEF generation test syntax
+        run: node --check tests/v2.1-brief-generation.test.js
+
+      - name: Check V2.1 BRIEF generation DB smoke syntax
+        run: node --check tests/v2.1-brief-generation-db-smoke.js
+
+      - name: Check V2.1 CONCEPT generation test syntax
+        run: node --check tests/v2.1-concept-generation.test.js
+
+      - name: Check V2.1 CONCEPT generation DB smoke syntax
+        run: node --check tests/v2.1-concept-generation-db-smoke.js
+
+      - name: Check V2.1 SCRIPT generation test syntax
+        run: node --check tests/v2.1-script-generation.test.js
+
+      - name: Check V2.1 SCRIPT generation DB smoke syntax
+        run: node --check tests/v2.1-script-generation-db-smoke.js
 
       - name: Check V2.1 foundation test syntax
         run: node --check tests/v2.1-foundation.test.js
@@ -99,6 +129,15 @@ jobs:
       - name: Run V2.1 IDEA generation tests
         run: node --test tests/v2.1-idea-generation.test.js
 
+      - name: Run V2.1 BRIEF generation tests
+        run: node --test tests/v2.1-brief-generation.test.js
+
+      - name: Run V2.1 CONCEPT generation tests
+        run: node --test tests/v2.1-concept-generation.test.js
+
+      - name: Run V2.1 SCRIPT generation tests
+        run: node --test tests/v2.1-script-generation.test.js
+
       - name: Run V2.1 Bible engine tests
         run: node --test tests/v2.1-bible-engine.test.js
 
@@ -114,6 +153,9 @@ jobs:
           test -s migrations/20260815_v2_1_production_boundary_patch.sql
           test -s migrations/20260815_v2_1_execution_engine.sql
           test -s migrations/20260816_v2_1_idea_generation_vertical_slice.sql
+          test -s migrations/20260816_v2_1_brief_artifact_type_patch.sql
+          test -s migrations/20260816_v2_1_concept_artifact_type_patch.sql
+          test -s migrations/20260816_v2_1_database_contract_hardening.sql
 
       - name: Check required project files
         run: |
