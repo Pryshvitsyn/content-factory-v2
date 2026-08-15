@@ -13,7 +13,14 @@ ALTER TABLE v2_1.artifacts
   );
 
 ALTER TABLE v2_1.generation_runs
+  DROP CONSTRAINT IF EXISTS generation_runs_request_hash_key;
+
+ALTER TABLE v2_1.generation_runs
   ADD COLUMN IF NOT EXISTS artifact_id uuid REFERENCES v2_1.artifacts(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_generation_active_request
+  ON v2_1.generation_runs(request_hash)
+  WHERE status IN ('QUEUED','RUNNING','COMPLETED');
 
 CREATE INDEX IF NOT EXISTS idx_v21_generation_stage_status
   ON v2_1.generation_runs(stage_run_id, status, created_at);
@@ -22,6 +29,6 @@ CREATE INDEX IF NOT EXISTS idx_v21_generation_artifact
   ON v2_1.generation_runs(artifact_id);
 
 COMMENT ON COLUMN v2_1.generation_runs.request_hash IS
-  'Deterministic hash of the complete provider-independent generation request; unique for idempotent generation.';
+  'Deterministic hash of the complete provider-independent generation request; active/completed requests are unique while failed attempts remain auditable.';
 COMMENT ON COLUMN v2_1.generation_runs.artifact_id IS
   'Immutable logical artifact produced by this generation run; provider execution remains separate from creative truth.';
