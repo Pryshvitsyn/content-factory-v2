@@ -48,6 +48,9 @@ jobs:
       - name: Check V2.1 database context loader syntax
         run: node --check worker/v2.1-db-context-loader.js
 
+      - name: Check V2.1 production boundary syntax
+        run: node --check worker/v2.1-production-boundary.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -62,6 +65,9 @@ jobs:
 
       - name: Check V2.1 production context DB smoke syntax
         run: node --check tests/v2.1-production-context-db-smoke.js
+
+      - name: Check V2.1 production boundary DB smoke syntax
+        run: node --check tests/v2.1-production-boundary-db-smoke.js
 
       - name: Run V2.1 foundation tests
         run: node --test tests/v2.1-foundation.test.js
@@ -80,6 +86,8 @@ jobs:
           test -s migrations/001_v2.sql
           test -s migrations/20260815_v2_1_foundation.sql
           test -s migrations/20260815_v2_1_multi_business.sql
+          test -s migrations/20260815_v2_1_production_boundary.sql
+          test -s migrations/20260815_v2_1_production_boundary_patch.sql
 
       - name: Check required project files
         run: |
