@@ -33,14 +33,23 @@ jobs:
       - name: Check V2.1 contract syntax
         run: node --check worker/v2.1-contracts.js
 
+      - name: Check V2.1 production contract syntax
+        run: node --check worker/v2.1-production-contract.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
       - name: Check V2.1 foundation test syntax
         run: node --check tests/v2.1-foundation.test.js
 
+      - name: Check V2.1 production contract test syntax
+        run: node --check tests/v2.1-production-contract.test.js
+
       - name: Run V2.1 foundation tests
         run: node --test tests/v2.1-foundation.test.js
+
+      - name: Run V2.1 production contract tests
+        run: node --test tests/v2.1-production-contract.test.js
 
       - name: Check build script syntax
         run: bash -n build-v2.sh
