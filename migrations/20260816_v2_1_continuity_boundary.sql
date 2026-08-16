@@ -29,21 +29,21 @@ DECLARE
   report_count integer;
   unresolved_count integer;
   context_count integer;
-  production_id uuid;
+  v_production_id uuid;
 BEGIN
   IF NEW.stage <> 'CONTINUITY' OR NEW.status <> 'COMPLETED' THEN
     RETURN NEW;
   END IF;
 
-  SELECT production_id INTO production_id
-    FROM v2_1.jobs
-   WHERE id = NEW.job_id;
+  SELECT j.production_id INTO v_production_id
+    FROM v2_1.jobs j
+   WHERE j.id = NEW.job_id;
 
   SELECT count(*)::integer INTO report_count
-    FROM v2_1.artifacts
-   WHERE artifacts.production_id = production_id
-     AND artifact_type = 'CONTINUITY_REPORT'
-     AND status = 'VALID';
+    FROM v2_1.artifacts a
+   WHERE a.production_id = v_production_id
+     AND a.artifact_type = 'CONTINUITY_REPORT'
+     AND a.status = 'VALID';
 
   IF report_count <> 1 THEN
     RAISE EXCEPTION 'CONTINUITY cannot complete without exactly one VALID CONTINUITY_REPORT artifact';
@@ -52,7 +52,7 @@ BEGIN
   SELECT count(*)::integer INTO unresolved_count
     FROM v2_1.asset_requirements ar
     JOIN v2_1.shots s ON s.id=ar.shot_id
-   WHERE s.production_id=production_id
+   WHERE s.production_id=v_production_id
      AND (ar.status <> 'SATISFIED' OR ar.resolved_asset_id IS NULL OR ar.resolved_asset_version_id IS NULL);
 
   IF unresolved_count <> 0 THEN
@@ -62,10 +62,10 @@ BEGIN
   SELECT count(*)::integer INTO context_count
     FROM v2_1.shots s
     JOIN v2_1.productions p ON p.id=s.production_id
-   WHERE s.production_id=production_id
+   WHERE s.production_id=v_production_id
      AND s.context_fingerprint=p.context_fingerprint;
 
-  IF context_count <> (SELECT count(*)::integer FROM v2_1.shots WHERE shots.production_id=production_id) THEN
+  IF context_count <> (SELECT count(*)::integer FROM v2_1.shots s2 WHERE s2.production_id=v_production_id) THEN
     RAISE EXCEPTION 'CONTINUITY cannot complete with SHOT_PLAN context drift';
   END IF;
 
