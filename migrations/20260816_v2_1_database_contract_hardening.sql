@@ -2,6 +2,19 @@
 -- The database is the final authority for stage dependencies, stage outputs,
 -- and generation audit events. This closes drift between JS contracts and SQL.
 
+-- 0. Complete the generation provenance schema before installing any audit
+--    trigger that references artifact_id. This is deliberately idempotent so
+--    the migration is safe against databases created by earlier V2.1 patches.
+ALTER TABLE v2_1.generation_runs
+  ADD COLUMN IF NOT EXISTS artifact_id uuid REFERENCES v2_1.artifacts(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_v21_generation_runs_artifact
+  ON v2_1.generation_runs(artifact_id)
+  WHERE artifact_id IS NOT NULL;
+
+COMMENT ON COLUMN v2_1.generation_runs.artifact_id IS
+  'Canonical output artifact produced by this generation attempt; part of durable provenance.';
+
 -- 1. Keep the database stage graph identical to the canonical production contract.
 UPDATE v2_1.stage_definitions
    SET requires = '["CONCEPT","IDEA_SET"]'::jsonb
