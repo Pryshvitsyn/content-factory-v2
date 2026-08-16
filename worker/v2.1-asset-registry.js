@@ -14,10 +14,7 @@ function fingerprint(value) {
 
 function buildResolutionFingerprint({ production, requirement, asset, assetVersion }) {
   return fingerprint({
-    production: {
-      id: production.id,
-      contextFingerprint: production.context_fingerprint,
-    },
+    production: { id: production.id, contextFingerprint: production.context_fingerprint },
     requirement: {
       id: requirement.id,
       shotId: requirement.shot_id,
@@ -39,9 +36,7 @@ function buildResolutionFingerprint({ production, requirement, asset, assetVersi
 async function loadProductionOwnership(client, productionId) {
   const result = await client.query(
     `SELECT id, tenant_id, business_id, brand_id, context_fingerprint, status
-       FROM v2_1.productions
-      WHERE id = $1
-      FOR SHARE`,
+       FROM v2_1.productions WHERE id = $1 FOR SHARE`,
     [productionId]
   );
   const production = result.rows[0];
@@ -54,24 +49,19 @@ async function loadProductionOwnership(client, productionId) {
 }
 
 function requiredAssetIdFromRequirement(requirement) {
-  const constraints = requirement.constraints && typeof requirement.constraints === 'object'
-    ? requirement.constraints : {};
+  const constraints = requirement.constraints && typeof requirement.constraints === 'object' ? requirement.constraints : {};
   return requirement.required_asset_id || constraints.requiredAssetId || null;
 }
 
 async function resolveAssetRequirement({ client, production, requirement }) {
   const requestedAssetId = requiredAssetIdFromRequirement(requirement);
-  if (!requestedAssetId) {
-    return { requirementId: requirement.id, status: 'MISSING', reason: 'No canonical asset id was declared' };
-  }
+  if (!requestedAssetId) return { requirementId: requirement.id, status: 'MISSING', reason: 'No canonical asset id was declared' };
 
-  const assetResult = await client.query(
+  const asset = (await client.query(
     `SELECT id, tenant_id, business_id, brand_id, asset_type, name, identity_fingerprint, status
-       FROM v2_1.assets
-      WHERE id = $1`,
+       FROM v2_1.assets WHERE id = $1`,
     [requestedAssetId]
-  );
-  const asset = assetResult.rows[0];
+  )).rows[0];
   if (!asset) return { requirementId: requirement.id, status: 'MISSING', reason: 'Canonical asset does not exist' };
   if (asset.status !== 'ACTIVE') return { requirementId: requirement.id, status: 'INVALID', reason: 'Canonical asset is not ACTIVE' };
   if (asset.tenant_id !== production.tenant_id || asset.business_id !== production.business_id) {
@@ -86,20 +76,8 @@ async function resolveAssetRequirement({ client, production, requirement }) {
 
   const requestedVersion = requirement.constraints?.requiredAssetVersion ?? null;
   const versionResult = requestedVersion
-    ? await client.query(
-      `SELECT id, asset_id, version, data, source_artifact_id
-         FROM v2_1.asset_versions
-        WHERE asset_id = $1 AND version = $2`,
-      [asset.id, requestedVersion]
-    )
-    : await client.query(
-      `SELECT id, asset_id, version, data, source_artifact_id
-         FROM v2_1.asset_versions
-        WHERE asset_id = $1
-        ORDER BY version DESC
-        LIMIT 1`,
-      [asset.id]
-    );
+    ? await client.query(`SELECT id, asset_id, version, data, source_artifact_id FROM v2_1.asset_versions WHERE asset_id=$1 AND version=$2`, [asset.id, requestedVersion])
+    : await client.query(`SELECT id, asset_id, version, data, source_artifact_id FROM v2_1.asset_versions WHERE asset_id=$1 ORDER BY version DESC LIMIT 1`, [asset.id]);
   const assetVersion = versionResult.rows[0];
   if (!assetVersion) return { requirementId: requirement.id, status: 'STALE', reason: 'No usable asset version exists' };
 
@@ -111,19 +89,24 @@ async function resolveAssetRequirement({ client, production, requirement }) {
     return { requirementId: requirement.id, status: 'SATISFIED', assetId: asset.id, assetVersionId: assetVersion.id, reused: true };
   }
 
-  await client.query(
+  const updated = await client.query(
     `UPDATE v2_1.asset_requirements
-        SET resolved_asset_id = $1,
-            resolved_asset_version_id = $2,
-            resolution_fingerprint = $3,
-            status = 'SATISFIED'
-      WHERE id = $4
-        AND resolved_asset_id IS NULL
+        SET resolved_asset_id=$1, resolved_asset_version_id=$2, resolution_fingerprint=$3, status='SATISFIED'
+      WHERE id=$4 AND resolved_asset_id IS NULL
       RETURNING id`,
     [asset.id, assetVersion.id, resolutionFingerprint, requirement.id]
   );
+  if (updated.rowCount) return { requirementId: requirement.id, status: 'SATISFIED', assetId: asset.id, assetVersionId: assetVersion.id, reused: false };
 
-  return { requirementId: requirement.id, status: 'SATISFIED', assetId: asset.id, assetVersionId: assetVersion.id, reused: false };
+  const winner = (await client.query(
+    `SELECT resolved_asset_id, resolved_asset_version_id, resolution_fingerprint
+       FROM v2_1.asset_requirements WHERE id=$1`,
+    [requirement.id]
+  )).rows[0];
+  if (!winner || winner.resolved_asset_id !== asset.id || winner.resolved_asset_version_id !== assetVersion.id || winner.resolution_fingerprint !== resolutionFingerprint) {
+    throw new Error(`Asset requirement ${requirement.id} was resolved concurrently to a conflicting asset/version`);
+  }
+  return { requirementId: requirement.id, status: 'SATISFIED', assetId: asset.id, assetVersionId: assetVersion.id, reused: true };
 }
 
 async function resolveProductionAssets({ client, productionId } = {}) {
@@ -134,11 +117,10 @@ async function resolveProductionAssets({ client, productionId } = {}) {
   const requirements = (await client.query(
     `SELECT ar.id, ar.shot_id, ar.asset_role, ar.required_asset_type, ar.required_asset_id,
             ar.constraints, ar.status, ar.plan_fingerprint, ar.resolved_asset_id,
-            ar.resolved_asset_version_id, ar.resolution_fingerprint,
-            s.production_id
+            ar.resolved_asset_version_id, ar.resolution_fingerprint
        FROM v2_1.asset_requirements ar
-       JOIN v2_1.shots s ON s.id = ar.shot_id
-      WHERE s.production_id = $1
+       JOIN v2_1.shots s ON s.id=ar.shot_id
+      WHERE s.production_id=$1
       ORDER BY s.shot_number, ar.asset_role, ar.id`,
     [productionId]
   )).rows;
@@ -147,9 +129,7 @@ async function resolveProductionAssets({ client, productionId } = {}) {
   const results = [];
   await client.query('BEGIN');
   try {
-    for (const requirement of requirements) {
-      results.push(await resolveAssetRequirement({ client, production, requirement }));
-    }
+    for (const requirement of requirements) results.push(await resolveAssetRequirement({ client, production, requirement }));
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -166,11 +146,4 @@ async function resolveProductionAssets({ client, productionId } = {}) {
   };
 }
 
-module.exports = {
-  stableStringify,
-  fingerprint,
-  buildResolutionFingerprint,
-  requiredAssetIdFromRequirement,
-  resolveAssetRequirement,
-  resolveProductionAssets,
-};
+module.exports = { stableStringify, fingerprint, buildResolutionFingerprint, requiredAssetIdFromRequirement, resolveAssetRequirement, resolveProductionAssets };
