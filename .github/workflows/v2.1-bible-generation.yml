@@ -36,21 +36,29 @@ jobs:
       PGPASSWORD: n8n
       NVIDIA_MODEL: smoke-test-model
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: Apply V2.1 database migrations
         run: |
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/001_v2.sql
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_foundation.sql
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_multi_business.sql
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_production_boundary.sql
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260815_v2_1_execution_engine.sql
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260816_v2_1_database_contract_hardening.sql
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f migrations/20260816_v2_1_bible_db_contract.sql
+          set -euo pipefail
+          for migration in \
+            migrations/20260815_v2_1_foundation.sql \
+            migrations/20260815_v2_1_multi_business.sql \
+            migrations/20260815_v2_1_production_boundary.sql \
+            migrations/20260815_v2_1_execution_engine.sql \
+            migrations/20260816_v2_1_production_scoped_job_claim.sql \
+            migrations/20260816_v2_1_database_contract_hardening.sql \
+            migrations/20260816_v2_1_bible_db_contract.sql
+          do
+            echo "Applying $migration"
+            psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f "$migration"
+          done
+      - name: Verify V2.1 migration contract
+        run: node tests/v2.1-migration-contract-db-smoke.js
       - run: node --check worker/v2.1-bible-engine.js
       - run: node --check worker/v2.1-bible-generation.js
       - run: node --check worker/v2.1-production-orchestrator.js
