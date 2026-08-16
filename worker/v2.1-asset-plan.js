@@ -26,12 +26,30 @@ async function executeAssetPlanStage({ client, productionId, stageRunId, workerI
   const bible = await loadCanonicalBible(client, productionId);
   assertContextContinuity(production, bible);
   const requirements = normalizeAssetRequirements(bible.value);
-  const document = { type: 'ASSET_REQUIREMENTS', version: 1, requirements };
+  const shots = (await client.query(
+    `SELECT id, shot_number, production_bible_id, context_fingerprint
+       FROM v2_1.shots
+      WHERE production_id = $1
+      ORDER BY shot_number`,
+    [productionId]
+  )).rows;
+  if (!shots.length) throw new Error('SHOT_PLAN must complete before ASSET_PLAN can materialize requirements');
+  if (shots.some((shot) => shot.production_bible_id !== bible.productionBibleId || shot.context_fingerprint !== production.context_fingerprint)) {
+    throw new Error('SHOT_PLAN provenance does not match the immutable production BIBLE/context');
+  }
+
+  const shotByNumber = new Map(shots.map((shot) => [shot.shot_number, shot]));
+  const materialized = requirements.filter((requirement) => requirement.shotNumber !== null).map((requirement) => {
+    const shot = shotByNumber.get(requirement.shotNumber);
+    if (!shot) throw new Error(`ASSET_PLAN references missing SHOT ${requirement.shotNumber}`);
+    return { ...requirement, shotId: shot.id };
+  });
+  const document = { type: 'ASSET_REQUIREMENTS', version: 1, requirements: materialized };
   const planFingerprint = buildPlanFingerprint({ production, bible, kind: 'ASSET_PLAN', document });
   const outputFingerprint = fingerprint(document);
 
   const existing = (await client.query(
-    `SELECT a.id AS artifact_id, av.output_hash, av.metadata
+    `SELECT a.id AS artifact_id
        FROM v2_1.artifacts a
        JOIN v2_1.artifact_versions av ON av.artifact_id = a.id AND av.version = 1
       WHERE a.production_id = $1 AND a.artifact_type = 'ASSET_REQUIREMENTS'
@@ -68,39 +86,27 @@ async function executeAssetPlanStage({ client, productionId, stageRunId, workerI
       );
     }
 
-    for (const requirement of requirements) {
-      const shot = requirement.shotNumber === null
-        ? null
-        : (await client.query(
-          `SELECT id FROM v2_1.shots WHERE production_id = $1 AND shot_number = $2`,
-          [productionId, requirement.shotNumber]
-        )).rows[0];
-
-      if (requirement.shotNumber !== null && !shot) {
-        // ASSET_PLAN can run in parallel with SHOT_PLAN; defer shot-bound rows until
-        // the SHOT_PLAN exists rather than inventing ownership or bypassing the graph.
-        continue;
-      }
-
-      const shotId = shot?.id || (await client.query(
-        `SELECT id FROM v2_1.shots WHERE production_id = $1 AND shot_number = $2`,
-        [productionId, requirement.shotNumber]
-      )).rows[0]?.id;
-      if (requirement.shotNumber !== null && !shotId) continue;
-
+    for (const requirement of materialized) {
       await client.query(
         `INSERT INTO v2_1.asset_requirements
           (shot_id, asset_role, required_asset_type, required_asset_id, status, constraints,
            production_bible_id, context_fingerprint, plan_fingerprint)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9)
+         VALUES ($1,$2,$3,NULL,$4,$5::jsonb,$6,$7,$8)
          ON CONFLICT (shot_id, asset_role) DO NOTHING`,
-        [shotId, requirement.assetRole, requirement.requiredAssetType, null, requirement.status, JSON.stringify({
+        [requirement.shotId, requirement.assetRole, requirement.requiredAssetType, requirement.status, JSON.stringify({
           ...requirement.constraints,
           requiredAssetId: requirement.requiredAssetId,
           requiredAssetVersion: requirement.requiredAssetVersion,
         }), bible.productionBibleId, production.context_fingerprint, planFingerprint]
       );
     }
+
+    const count = await client.query(
+      `SELECT count(*)::integer AS count FROM v2_1.asset_requirements
+        WHERE production_bible_id = $1 AND plan_fingerprint = $2`,
+      [bible.productionBibleId, planFingerprint]
+    );
+    if (count.rows[0].count !== materialized.length) throw new Error('ASSET_PLAN materialization is incomplete');
 
     const completed = await client.query(
       `UPDATE v2_1.stage_runs
@@ -114,11 +120,11 @@ async function executeAssetPlanStage({ client, productionId, stageRunId, workerI
     await client.query(
       `INSERT INTO v2_1.events(event_type, entity_type, entity_id, payload)
        VALUES ('ASSET_PLAN_COMPLETED','artifact',$1,$2::jsonb)`,
-      [artifactId, JSON.stringify({ productionId, stageRunId, planFingerprint, contextFingerprint: production.context_fingerprint })]
+      [artifactId, JSON.stringify({ productionId, stageRunId, planFingerprint, contextFingerprint: production.context_fingerprint, requirementCount: materialized.length })]
     );
 
     await client.query('COMMIT');
-    return { artifactId, planFingerprint, outputFingerprint, requirementCount: requirements.length };
+    return { artifactId, planFingerprint, outputFingerprint, requirementCount: materialized.length };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
