@@ -32,25 +32,15 @@ test('each stage declares inputs and outputs', () => {
 });
 
 test('SCRIPT requires both the canonical IDEA source and the completed CONCEPT stage', () => {
-  assert.throws(
-    () => assertStageDependenciesSatisfied('SCRIPT', []),
-    /missing required artifacts/
-  );
+  assert.throws(() => assertStageDependenciesSatisfied('SCRIPT', []), /missing required artifacts/);
+  assert.throws(() => assertStageDependenciesSatisfied('SCRIPT', ['IDEA_SET']), /missing required artifacts/);
+  assert.throws(() => assertStageDependenciesSatisfied('SCRIPT', ['CONCEPT']), /missing required artifacts/);
+  assert.equal(assertStageDependenciesSatisfied('SCRIPT', ['IDEA_SET', 'CONCEPT']), true);
+});
 
-  assert.throws(
-    () => assertStageDependenciesSatisfied('SCRIPT', ['IDEA_SET']),
-    /missing required artifacts/
-  );
-
-  assert.throws(
-    () => assertStageDependenciesSatisfied('SCRIPT', ['CONCEPT']),
-    /missing required artifacts/
-  );
-
-  assert.equal(
-    assertStageDependenciesSatisfied('SCRIPT', ['IDEA_SET', 'CONCEPT']),
-    true
-  );
+test('ASSET_PLAN cannot materialize until durable SHOTS exist', () => {
+  assert.throws(() => assertStageDependenciesSatisfied('ASSET_PLAN', ['PRODUCTION_BIBLE']), /missing required artifacts/);
+  assert.equal(assertStageDependenciesSatisfied('ASSET_PLAN', ['PRODUCTION_BIBLE', 'SHOTS']), true);
 });
 
 test('generation and platform stages expose explicit parallelization groups', () => {
@@ -60,13 +50,7 @@ test('generation and platform stages expose explicit parallelization groups', ()
 });
 
 test('production contract is versioned and platform-aware', () => {
-  const contract = createProductionContract({
-    productionId: 'production-1',
-    version: 2,
-    bibleVersion: 3,
-    platforms: EDITION_PLATFORMS,
-  });
-
+  const contract = createProductionContract({ productionId: 'production-1', version: 2, bibleVersion: 3, platforms: EDITION_PLATFORMS });
   assert.equal(contract.productionId, 'production-1');
   assert.equal(contract.version, 2);
   assert.equal(contract.bibleVersion, 3);
@@ -74,39 +58,21 @@ test('production contract is versioned and platform-aware', () => {
 });
 
 test('asset requirements are typed and explicit', () => {
-  const requirement = createAssetRequirement({
-    shotId: 'shot-1',
-    role: 'hero_character',
-    assetType: 'CHARACTER',
-    constraints: { wardrobe: 'red jacket' },
-  });
-
+  const requirement = createAssetRequirement({ shotId: 'shot-1', role: 'hero_character', assetType: 'CHARACTER', constraints: { wardrobe: 'red jacket' } });
   assert.equal(requirement.status, 'MISSING');
   assert.equal(requirement.assetType, 'CHARACTER');
   assert.equal(requirement.constraints.wardrobe, 'red jacket');
 });
 
 test('shot contract preserves deterministic shot numbering', () => {
-  const shot = createShotContract({
-    shotId: 'shot-7',
-    shotNumber: 7,
-    durationMs: 2500,
-    assetRoles: ['hero_character', 'location'],
-  });
-
+  const shot = createShotContract({ shotId: 'shot-7', shotNumber: 7, durationMs: 2500, assetRoles: ['hero_character', 'location'] });
   assert.equal(shot.shotNumber, 7);
   assert.equal(shot.durationMs, 2500);
   assert.deepEqual(shot.assetRoles, ['hero_character', 'location']);
 });
 
 test('edition contract is platform-specific and versioned', () => {
-  const edition = createEditionContract({
-    productionId: 'production-1',
-    platform: 'TIKTOK',
-    version: 1,
-    sourceArtifactIds: ['artifact-1', 'artifact-2'],
-  });
-
+  const edition = createEditionContract({ productionId: 'production-1', platform: 'TIKTOK', version: 1, sourceArtifactIds: ['artifact-1', 'artifact-2'] });
   assert.equal(edition.platform, 'TIKTOK');
   assert.equal(edition.version, 1);
   assert.deepEqual(edition.sourceArtifactIds, ['artifact-1', 'artifact-2']);
@@ -119,20 +85,15 @@ test('versioned objects cannot be overwritten with the same or older version', (
 });
 
 test('production cannot be marked complete before learning output exists', () => {
-  assert.throws(
-    () => assertProductionCompletable(['PUBLICATIONS', 'PERFORMANCE_DATA']),
-    /missing: LEARNINGS/
-  );
-
-  assert.equal(
-    assertProductionCompletable(['PUBLICATIONS', 'PERFORMANCE_DATA', 'LEARNINGS']),
-    true
-  );
+  assert.throws(() => assertProductionCompletable(['PUBLICATIONS', 'PERFORMANCE_DATA']), /missing: LEARNINGS/);
+  assert.equal(assertProductionCompletable(['PUBLICATIONS', 'PERFORMANCE_DATA', 'LEARNINGS']), true);
 });
 
 test('stage outputs define the factory handoff vocabulary', () => {
   assert.deepEqual(getRequiredArtifacts('BIBLE'), ['SCRIPT']);
   assert.deepEqual(getStageOutputs('BIBLE'), ['PRODUCTION_BIBLE']);
+  assert.deepEqual(getStageOutputs('SHOT_PLAN'), ['SHOTS']);
+  assert.deepEqual(getStageOutputs('ASSET_PLAN'), ['ASSET_REQUIREMENTS']);
   assert.deepEqual(getStageOutputs('ASSET_GENERATION'), ['ASSETS']);
   assert.deepEqual(getStageOutputs('LEARN'), ['LEARNINGS']);
 });
