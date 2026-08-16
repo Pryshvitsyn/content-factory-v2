@@ -15,7 +15,12 @@ ALTER TABLE v2_1.artifacts
   ));
 
 UPDATE v2_1.stage_definitions
-   SET parallel_group = 'PLANNING'
+   SET requires = CASE
+     WHEN stage = 'SHOT_PLAN' THEN '["PRODUCTION_BIBLE","SCRIPT"]'::jsonb
+     WHEN stage = 'ASSET_PLAN' THEN '["PRODUCTION_BIBLE","SHOTS"]'::jsonb
+     ELSE requires
+   END,
+   parallel_group = NULL
  WHERE stage IN ('ASSET_PLAN','SHOT_PLAN');
 
 ALTER TABLE v2_1.shots
