@@ -56,7 +56,6 @@ async function main() {
   const client = new Client(config);
   await client.connect();
   let tenantId;
-  let secondProductionId;
   try {
     await client.query('BEGIN');
     const suffix = Date.now().toString();
@@ -104,7 +103,6 @@ async function main() {
     }
     await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED',output_artifacts='["SCRIPT"]'::jsonb,output_fingerprint=$1,completed_at=now() WHERE id=$2`, [scriptHash, stageByName.SCRIPT]);
     await client.query(`INSERT INTO v2_1.generation_runs(stage_run_id,provider_id,model_id,capability,request_hash,request,status,response,artifact_id,completed_at) VALUES($1,$2,$3,'TEXT_GENERATION',$4,$5::jsonb,'COMPLETED',$6::jsonb,$7,now())`, [stageByName.SCRIPT, provider.rows[0].id, model.rows[0].id, fingerprint({ scriptRequest: suffix }), JSON.stringify({ capability: 'TEXT_GENERATION', production: { contextFingerprint } }), JSON.stringify(SCRIPT), scriptArtifactId]);
-    await client.query('COMMIT');
 
     const workerId = 'bible-smoke-worker';
     const claimedJob = await claimJobForProduction(client, { jobId, productionId, workerId, leaseSeconds: 60 });
@@ -124,8 +122,11 @@ async function main() {
     const duplicate = await executeBibleStage({ client, productionId, stageRunId: bibleStage.id, workerId, providerCall: async () => ({ parsed: BIBLE }) }).catch((error) => error);
     if (!(duplicate instanceof Error) || !duplicate.message.includes('lease')) throw new Error('Completed BIBLE stage was not protected from duplicate execution');
 
-    const second = await client.query(`INSERT INTO v2_1.productions(content_variant_id,tenant_id,business_id,brand_id,project_id,status,request_hash,context_fingerprint,context_snapshot,request_snapshot) SELECT content_variant_id,tenant_id,business_id,brand_id,project_id,'RUNNING',$1,$2,context_snapshot,request_snapshot FROM v2_1.productions WHERE id=$3 RETURNING id`, [`bible-smoke-second-${suffix}`, contextFingerprint, productionId]);
-    secondProductionId = second.rows[0].id;
+    // A second production for the same content variant is a legitimate versioned production,
+    // not a duplicate production. The schema deliberately enforces (content_variant_id, production_version).
+    const second = await client.query(`INSERT INTO v2_1.productions(content_variant_id,tenant_id,business_id,brand_id,project_id,production_version,status,request_hash,context_fingerprint,context_snapshot,request_snapshot) SELECT content_variant_id,tenant_id,business_id,brand_id,project_id,production_version + 1,'RUNNING',$1,$2,context_snapshot,$3::jsonb FROM v2_1.productions WHERE id=$4 RETURNING id, production_version`, [`bible-smoke-second-${suffix}`, contextFingerprint, JSON.stringify({ signal: { topic: 'cross-production-smoke' } }), productionId]);
+    const secondProductionId = second.rows[0].id;
+    if (second.rows[0].production_version !== 2) throw new Error('Second production did not advance production_version');
     const foreignSource = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('SCRIPT',$1,'VALID') RETURNING id`, [secondProductionId]);
     await assertDatabaseRejects(client, `INSERT INTO v2_1.production_bibles(production_id,version,contract_version,bible_id,context_fingerprint,context_snapshot,document,artifact_id,source_script_artifact_id,source_script_version,source_script_hash) VALUES($1,1,2,$2,$3,'{}'::jsonb,'{}'::jsonb,$4,$5,1,'x')`, [productionId, `foreign-${suffix}`, contextFingerprint, first.artifactId, foreignSource.rows[0].id], /belongs to a different production/);
 
@@ -136,10 +137,14 @@ async function main() {
     console.log('DATABASE BIBLE RECORD + IMMUTABILITY VERIFIED.');
     console.log('CROSS-PRODUCTION BIBLE SOURCE REJECTED.');
     console.log('DUPLICATE BIBLE EXECUTION REJECTED.');
+    console.log('PRODUCTION VERSIONING VERIFIED.');
     console.log('TEST DATA CLEANED UP.');
   } finally {
     await client.query('ROLLBACK').catch(() => {});
-    if (tenantId) await client.query('DELETE FROM v2_1.tenants WHERE id=$1', [tenantId]).catch(() => {});
+    if (tenantId) {
+      await client.query('DELETE FROM v2_1.productions WHERE tenant_id=$1', [tenantId]).catch(() => {});
+      await client.query('DELETE FROM v2_1.tenants WHERE id=$1', [tenantId]).catch(() => {});
+    }
     await client.end();
   }
 }
