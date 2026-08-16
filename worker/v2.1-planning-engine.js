@@ -33,9 +33,12 @@ function normalizeAssetRequirements(bible) {
   const declared = Array.isArray(bible.productionPlan.assetRequirements) ? bible.productionPlan.assetRequirements : [];
   const byId = new Map(declared.filter((item) => item && item.id).map((item) => [item.id, item]));
   const result = [];
+  const shotNumbers = (bible.productionPlan.shots || []).map((shot) => {
+    positiveInteger(shot.number, 'shot.number');
+    return shot.number;
+  });
 
   for (const shot of bible.productionPlan.shots || []) {
-    positiveInteger(shot.number, 'shot.number');
     for (const ref of shot.assetRefs || []) {
       assertObject(ref, 'shot.assetRefs[]');
       if (!ref.id) throw new Error(`Shot ${shot.number} contains an asset reference without id`);
@@ -62,25 +65,27 @@ function normalizeAssetRequirements(bible) {
     if (!result.some((row) => row.requiredAssetId === item.id)) {
       const version = item.version ?? null;
       if (version !== null) positiveInteger(version, `asset ${item.id} version`);
-      result.push({
-        shotNumber: null,
-        assetRole: String(item.role).trim(),
-        requiredAssetType: normalizeAssetType(item.type),
-        requiredAssetId: item.id,
-        requiredAssetVersion: version,
-        status: item.status || 'MISSING',
-        constraints: { ...(item.constraints || {}) },
-      });
+      for (const shotNumber of shotNumbers) {
+        result.push({
+          shotNumber,
+          assetRole: String(item.role).trim(),
+          requiredAssetType: normalizeAssetType(item.type),
+          requiredAssetId: item.id,
+          requiredAssetVersion: version,
+          status: item.status || 'MISSING',
+          constraints: { ...(item.constraints || {}) },
+        });
+      }
     }
   }
 
-  result.sort((a, b) => (a.shotNumber ?? Number.MAX_SAFE_INTEGER) - (b.shotNumber ?? Number.MAX_SAFE_INTEGER)
+  result.sort((a, b) => a.shotNumber - b.shotNumber
     || a.assetRole.localeCompare(b.assetRole)
     || a.requiredAssetId.localeCompare(b.requiredAssetId));
 
   const seen = new Set();
   return result.filter((row) => {
-    const key = `${row.shotNumber ?? 'GLOBAL'}|${row.assetRole}`;
+    const key = `${row.shotNumber}|${row.assetRole}`;
     if (seen.has(key)) throw new Error(`Duplicate ASSET_PLAN requirement: ${key}`);
     seen.add(key);
     return true;
