@@ -63,6 +63,7 @@ DECLARE
   bible_production uuid;
   script_production uuid;
   shot_production uuid;
+  shot_bible uuid;
 BEGIN
   IF NEW.production_bible_id IS NULL THEN
     RAISE EXCEPTION '% must reference a production BIBLE', TG_TABLE_NAME;
@@ -71,26 +72,30 @@ BEGIN
   SELECT production_id INTO bible_production
     FROM v2_1.production_bibles
    WHERE id = NEW.production_bible_id;
-  IF bible_production IS DISTINCT FROM NEW.production_id
-     AND TG_TABLE_NAME = 'shots' THEN
-    RAISE EXCEPTION 'Planning row % belongs to a different production BIBLE', NEW.id;
-  END IF;
 
-  IF TG_TABLE_NAME = 'shots' AND NEW.source_script_artifact_id IS NOT NULL THEN
-    SELECT production_id INTO script_production
-      FROM v2_1.artifacts
-     WHERE id = NEW.source_script_artifact_id;
-    IF script_production IS DISTINCT FROM NEW.production_id THEN
-      RAISE EXCEPTION 'SHOT_PLAN source SCRIPT % belongs to a different production', NEW.source_script_artifact_id;
+  IF TG_TABLE_NAME = 'shots' THEN
+    IF bible_production IS DISTINCT FROM NEW.production_id THEN
+      RAISE EXCEPTION 'SHOT_PLAN row % belongs to a different production BIBLE', NEW.id;
     END IF;
-  END IF;
 
-  IF TG_TABLE_NAME = 'asset_requirements' THEN
-    SELECT s.production_id INTO shot_production
+    IF NEW.source_script_artifact_id IS NOT NULL THEN
+      SELECT production_id INTO script_production
+        FROM v2_1.artifacts
+       WHERE id = NEW.source_script_artifact_id;
+      IF script_production IS DISTINCT FROM NEW.production_id THEN
+        RAISE EXCEPTION 'SHOT_PLAN source SCRIPT % belongs to a different production', NEW.source_script_artifact_id;
+      END IF;
+    END IF;
+  ELSE
+    SELECT s.production_id, s.production_bible_id INTO shot_production, shot_bible
       FROM v2_1.shots s
      WHERE s.id = NEW.shot_id;
-    IF shot_production IS DISTINCT FROM NEW.production_id THEN
-      RAISE EXCEPTION 'ASSET_PLAN shot % belongs to a different production', NEW.shot_id;
+    IF shot_production IS NULL THEN
+      RAISE EXCEPTION 'ASSET_PLAN shot % does not exist', NEW.shot_id;
+    END IF;
+    IF bible_production IS DISTINCT FROM shot_production
+       OR NEW.production_bible_id IS DISTINCT FROM shot_bible THEN
+      RAISE EXCEPTION 'ASSET_PLAN row % belongs to a different production BIBLE', NEW.id;
     END IF;
   END IF;
 
