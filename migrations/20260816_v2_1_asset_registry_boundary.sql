@@ -34,6 +34,7 @@ DECLARE
   brand_business uuid;
   asset_business uuid;
   asset_tenant uuid;
+  asset_brand uuid;
   production_row record;
 BEGIN
   IF TG_TABLE_NAME = 'assets' THEN
@@ -86,7 +87,7 @@ BEGIN
 
   IF NEW.resolved_asset_id IS NOT NULL THEN
     SELECT a.tenant_id, a.business_id, a.brand_id
-      INTO asset_tenant, asset_business, NEW.brand_id
+      INTO asset_tenant, asset_business, asset_brand
       FROM v2_1.assets a
      WHERE a.id = NEW.resolved_asset_id;
 
@@ -96,7 +97,7 @@ BEGIN
 
     IF asset_tenant IS DISTINCT FROM production_row.tenant_id
        OR asset_business IS DISTINCT FROM production_row.business_id
-       OR (NEW.brand_id IS NOT NULL AND NEW.brand_id IS DISTINCT FROM production_row.brand_id) THEN
+       OR (asset_brand IS NOT NULL AND asset_brand IS DISTINCT FROM production_row.brand_id) THEN
       RAISE EXCEPTION 'Resolved asset % violates production ownership boundary', NEW.resolved_asset_id;
     END IF;
 
