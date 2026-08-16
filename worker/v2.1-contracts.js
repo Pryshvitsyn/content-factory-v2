@@ -5,8 +5,8 @@ const STAGES = Object.freeze([
   'CONCEPT',
   'SCRIPT',
   'BIBLE',
-  'ASSET_PLAN',
   'SHOT_PLAN',
+  'ASSET_PLAN',
   'ASSET_GENERATION',
   'CONTINUITY',
   'EDIT',
@@ -45,6 +45,8 @@ const PLATFORMS = Object.freeze(['TIKTOK', 'INSTAGRAM_REELS', 'YOUTUBE_SHORTS', 
 const ARTIFACT_TYPES = Object.freeze([
   'SCRIPT',
   'PRODUCTION_BIBLE',
+  'ASSET_REQUIREMENTS',
+  'SHOTS',
   'REFERENCE_IMAGE',
   'IMAGE',
   'VIDEO',
@@ -58,9 +60,7 @@ const ARTIFACT_TYPES = Object.freeze([
 ]);
 
 function assertKnown(value, allowed, field) {
-  if (!allowed.includes(value)) {
-    throw new Error(`${field} must be one of: ${allowed.join(', ')}`);
-  }
+  if (!allowed.includes(value)) throw new Error(`${field} must be one of: ${allowed.join(', ')}`);
 }
 
 function assertStage(stage) {
@@ -78,16 +78,12 @@ function canTransition(from, to) {
 }
 
 function assertTransition(from, to) {
-  if (!canTransition(from, to)) {
-    throw new Error(`Invalid state transition: ${from} -> ${to}`);
-  }
+  if (!canTransition(from, to)) throw new Error(`Invalid state transition: ${from} -> ${to}`);
 }
 
 function buildIdempotencyKey({ stage, inputHash, promptVersion, provider, model, parameters = {} }) {
   assertStage(stage);
-  if (!inputHash || !promptVersion || !provider || !model) {
-    throw new Error('stage, inputHash, promptVersion, provider and model are required');
-  }
+  if (!inputHash || !promptVersion || !provider || !model) throw new Error('stage, inputHash, promptVersion, provider and model are required');
   const stableParameters = JSON.stringify(parameters, Object.keys(parameters).sort());
   return [stage, inputHash, promptVersion, provider, model, stableParameters].join(':');
 }
@@ -96,13 +92,7 @@ function createGenerationRequest({ capability, model, prompt, referenceAssets = 
   assertCapability(capability);
   if (!model || typeof model !== 'string') throw new Error('model is required');
   if (!prompt || typeof prompt !== 'string') throw new Error('prompt is required');
-  return Object.freeze({
-    capability,
-    model,
-    prompt,
-    referenceAssets: [...referenceAssets],
-    parameters: { ...parameters },
-  });
+  return Object.freeze({ capability, model, prompt, referenceAssets: [...referenceAssets], parameters: { ...parameters } });
 }
 
 function createStageRun({ jobId, stage, attempt = 1 }) {
@@ -112,18 +102,4 @@ function createStageRun({ jobId, stage, attempt = 1 }) {
   return Object.freeze({ jobId, stage, attempt, status: 'QUEUED' });
 }
 
-module.exports = {
-  STAGES,
-  JOB_STATES,
-  STAGE_TRANSITIONS,
-  CAPABILITIES,
-  PLATFORMS,
-  ARTIFACT_TYPES,
-  assertStage,
-  assertCapability,
-  canTransition,
-  assertTransition,
-  buildIdempotencyKey,
-  createGenerationRequest,
-  createStageRun,
-};
+module.exports = { STAGES, JOB_STATES, STAGE_TRANSITIONS, CAPABILITIES, PLATFORMS, ARTIFACT_TYPES, assertStage, assertCapability, canTransition, assertTransition, buildIdempotencyKey, createGenerationRequest, createStageRun };
