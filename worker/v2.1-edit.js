@@ -146,6 +146,26 @@ async function executeEditStage({ client, productionId, stageRunId, workerId } =
 
   await client.query('BEGIN');
   try {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, $2))`, [String(productionId), 20260816]);
+
+    const existing = await client.query(`
+      SELECT a.id AS artifact_id, av.output_hash, av.metadata
+        FROM v2_1.artifacts a
+        JOIN v2_1.artifact_versions av ON av.artifact_id=a.id AND av.version=1
+       WHERE a.production_id=$1 AND a.artifact_type='EDIT' AND a.status='VALID'
+       ORDER BY a.created_at DESC LIMIT 1`, [productionId]);
+    if (existing.rows.length) {
+      const row = existing.rows[0];
+      if (row.output_hash !== outputHash || row.metadata?.contextFingerprint !== production.context_fingerprint || row.metadata?.continuityArtifactId !== continuity.artifact_id || row.metadata?.continuityFingerprint !== continuity.output_hash) {
+        throw new Error('Existing canonical EDIT artifact conflicts with the requested immutable production context');
+      }
+      const completed = await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED', output_artifacts='["EDIT"]'::jsonb, output_fingerprint=$1, completed_at=now(), heartbeat_at=now(), lease_expires_at=NULL, worker_id=NULL WHERE id=$2 AND status='RUNNING' AND worker_id=$3 RETURNING id`, [outputHash, stageRunId, workerId]);
+      if (!completed.rowCount) throw new Error('EDIT completion rejected: lease ownership or stage state is invalid');
+      await client.query(`INSERT INTO v2_1.events(event_type,entity_type,entity_id,payload) VALUES('EDIT_REUSED','artifact',$1,$2::jsonb)`, [row.artifact_id, JSON.stringify({ productionId, stageRunId, outputHash, contextFingerprint: production.context_fingerprint, continuityArtifactId: continuity.artifact_id })]);
+      await client.query('COMMIT');
+      return { artifactId: row.artifact_id, outputHash, manifest, reused: true };
+    }
+
     const artifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('EDIT',$1,'VALID') RETURNING id`, [productionId]);
     const artifactId = artifact.rows[0].id;
     await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,$2,$3,$4::jsonb)`, [artifactId, continuity.output_hash, outputHash, JSON.stringify({ stage: 'EDIT', contextFingerprint: production.context_fingerprint, continuityArtifactId: continuity.artifact_id, continuityFingerprint: continuity.output_hash, durationMs: manifest.durationMs, shotCount: manifest.timeline.length })]);
@@ -153,7 +173,7 @@ async function executeEditStage({ client, productionId, stageRunId, workerId } =
     if (!completed.rowCount) throw new Error('EDIT completion rejected: lease ownership or stage state is invalid');
     await client.query(`INSERT INTO v2_1.events(event_type,entity_type,entity_id,payload) VALUES('EDIT_COMPLETED','artifact',$1,$2::jsonb)`, [artifactId, JSON.stringify({ productionId, stageRunId, outputHash, contextFingerprint: production.context_fingerprint, continuityArtifactId: continuity.artifact_id })]);
     await client.query('COMMIT');
-    return { artifactId, outputHash, manifest };
+    return { artifactId, outputHash, manifest, reused: false };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
