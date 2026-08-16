@@ -8,18 +8,9 @@ const { executeScriptStage } = require('./v2.1-script-generation');
 const { executeBibleStage } = require('./v2.1-bible-generation');
 const { executeShotPlanStage } = require('./v2.1-shot-plan');
 const { executeAssetPlanStage } = require('./v2.1-asset-plan');
-const {
-  recoverExpiredWork,
-  claimJobForProduction,
-  heartbeatJob,
-  claimNextStage,
-  completeStage,
-  failStage,
-} = require('./v2.1-execution-engine');
+const { recoverExpiredWork, claimJobForProduction, heartbeatJob, claimNextStage, completeStage, failStage } = require('./v2.1-execution-engine');
 
-const FIRST_VERTICAL_SLICE = Object.freeze([
-  'SIGNAL', 'IDEA', 'BRIEF', 'CONCEPT', 'SCRIPT', 'BIBLE', 'SHOT_PLAN', 'ASSET_PLAN',
-]);
+const FIRST_VERTICAL_SLICE = Object.freeze(['SIGNAL', 'IDEA', 'BRIEF', 'CONCEPT', 'SCRIPT', 'BIBLE', 'SHOT_PLAN', 'ASSET_PLAN']);
 
 function requireClient(client) {
   if (!client || typeof client.query !== 'function') throw new Error('client is required');
@@ -36,8 +27,7 @@ function normalizeSignal(signal) {
 async function loadProduction(client, productionId) {
   const result = await client.query(
     `SELECT id, status, context_fingerprint, context_snapshot, request_snapshot
-       FROM v2_1.productions
-      WHERE id = $1`,
+       FROM v2_1.productions WHERE id = $1`,
     [productionId]
   );
   if (!result.rowCount) throw new Error('Production not found');
@@ -54,12 +44,7 @@ async function assertContextUnchanged(client, productionId, expectedFingerprint)
 async function completeSignalStage(client, { productionId, stageRunId, workerId, signal }) {
   const production = await loadProduction(client, productionId);
   const effectiveSignal = normalizeSignal(signal || production.request_snapshot?.signal || {});
-  return completeStage(client, {
-    stageRunId,
-    workerId,
-    outputArtifacts: ['SIGNAL_SET'],
-    outputFingerprint: fingerprint(effectiveSignal),
-  });
+  return completeStage(client, { stageRunId, workerId, outputArtifacts: ['SIGNAL_SET'], outputFingerprint: fingerprint(effectiveSignal) });
 }
 
 const HANDLERS = Object.freeze({
@@ -76,40 +61,20 @@ async function executeClaimedStage(client, { productionId, stage, stageRunId, wo
   if (stage === 'SIGNAL') return completeSignalStage(client, { productionId, stageRunId, workerId, signal });
   const handler = HANDLERS[stage];
   if (!handler) throw new Error(`No production handler is registered for stage ${stage}`);
-  return handler({
-    client,
-    productionId,
-    stageRunId,
-    workerId,
-    signal: normalizeSignal(signal),
-    provider: 'nvidia',
-    providerCall,
-  });
+  return handler({ client, productionId, stageRunId, workerId, signal: normalizeSignal(signal), provider: 'nvidia', providerCall });
 }
 
 async function verifyVerticalSliceProvenance(client, { productionId, jobId, contextFingerprint }) {
   const result = await client.query(
-    `SELECT sr.stage,
-            sr.status AS stage_status,
-            sr.output_artifacts,
-            sr.output_fingerprint,
-            gr.id AS generation_run_id,
-            gr.status AS generation_status,
-            gr.artifact_id,
+    `SELECT sr.stage, sr.status AS stage_status, sr.output_artifacts, sr.output_fingerprint,
+            gr.id AS generation_run_id, gr.status AS generation_status, gr.artifact_id,
             gr.request->'production'->>'contextFingerprint' AS request_context_fingerprint,
-            a.artifact_type,
-            av.version AS artifact_version,
-            av.output_hash,
-            av.metadata,
-            pb.id AS production_bible_id,
-            pb.context_fingerprint AS bible_context_fingerprint,
-            pb.source_script_artifact_id AS bible_source_script_artifact_id,
-            pb.bible_id AS bible_id
+            a.artifact_type, av.version AS artifact_version, av.output_hash, av.metadata,
+            pb.id AS production_bible_id, pb.context_fingerprint AS bible_context_fingerprint,
+            pb.source_script_artifact_id AS bible_source_script_artifact_id, pb.bible_id
        FROM v2_1.stage_runs sr
        LEFT JOIN LATERAL (
-         SELECT gr.* FROM v2_1.generation_runs gr
-          WHERE gr.stage_run_id = sr.id
-          ORDER BY gr.created_at DESC LIMIT 1
+         SELECT gr.* FROM v2_1.generation_runs gr WHERE gr.stage_run_id = sr.id ORDER BY gr.created_at DESC LIMIT 1
        ) gr ON true
        LEFT JOIN v2_1.artifacts a ON a.id = gr.artifact_id
        LEFT JOIN v2_1.artifact_versions av ON av.artifact_id = gr.artifact_id
@@ -140,8 +105,6 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
   const concept = rowsByStage.get('CONCEPT');
   const script = rowsByStage.get('SCRIPT');
   const bible = rowsByStage.get('BIBLE');
-  const shotPlan = rowsByStage.get('SHOT_PLAN');
-  const assetPlan = rowsByStage.get('ASSET_PLAN');
 
   if (idea.artifact_type !== 'IDEA_SET') throw new Error('IDEA artifact type is not canonical');
   if (brief.artifact_type !== 'CONTENT_BRIEF') throw new Error('BRIEF artifact type is not canonical');
@@ -159,24 +122,43 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
   if (bible.bible_context_fingerprint !== contextFingerprint) throw new Error('BIBLE database context fingerprint drift detected');
   if (bible.bible_source_script_artifact_id !== script.artifact_id) throw new Error('BIBLE provenance does not point to canonical SCRIPT artifact');
   if (!bible.bible_id) throw new Error('BIBLE durable identity is missing');
-  if (shotPlan.artifact_type !== 'SHOTS') throw new Error('SHOT_PLAN artifact type is not canonical');
-  if (assetPlan.artifact_type !== 'ASSET_REQUIREMENTS') throw new Error('ASSET_PLAN artifact type is not canonical');
+
+  const deterministicArtifacts = await client.query(
+    `SELECT DISTINCT ON (a.artifact_type)
+            a.artifact_type, a.id AS artifact_id, av.output_hash, av.metadata
+       FROM v2_1.artifacts a
+       JOIN v2_1.artifact_versions av ON av.artifact_id = a.id
+      WHERE a.production_id = $1 AND a.artifact_type IN ('SHOTS','ASSET_REQUIREMENTS')
+      ORDER BY a.artifact_type, a.created_at DESC, av.version DESC`,
+    [productionId]
+  );
+  const planArtifacts = new Map(deterministicArtifacts.rows.map((row) => [row.artifact_type, row]));
+  const shotArtifact = planArtifacts.get('SHOTS');
+  const assetArtifact = planArtifacts.get('ASSET_REQUIREMENTS');
+  if (!shotArtifact || !assetArtifact) throw new Error('Planning artifacts are incomplete');
+  if (shotArtifact.metadata?.stage !== 'SHOT_PLAN') throw new Error('SHOT_PLAN artifact provenance is invalid');
+  if (assetArtifact.metadata?.stage !== 'ASSET_PLAN') throw new Error('ASSET_PLAN artifact provenance is invalid');
+  if (shotArtifact.metadata?.contextFingerprint !== contextFingerprint || assetArtifact.metadata?.contextFingerprint !== contextFingerprint) throw new Error('Planning context fingerprint drift detected');
+
+  const shotStage = rowsByStage.get('SHOT_PLAN');
+  const assetStage = rowsByStage.get('ASSET_PLAN');
+  if (shotStage.output_artifacts[0] !== 'SHOTS' || assetStage.output_artifacts[0] !== 'ASSET_REQUIREMENTS') throw new Error('Planning stage output vocabulary is invalid');
 
   const shotRows = await client.query(
     `SELECT count(*)::integer AS count,
-            count(*) FILTER (WHERE production_bible_id = $2 AND source_script_artifact_id = $3 AND context_fingerprint = $4)::integer AS valid_count
+            count(*) FILTER (WHERE production_bible_id = $2 AND source_script_artifact_id = $3 AND context_fingerprint = $4 AND plan_fingerprint = $5)::integer AS valid_count
        FROM v2_1.shots WHERE production_id = $1`,
-    [productionId, bible.production_bible_id, script.artifact_id, contextFingerprint]
+    [productionId, bible.production_bible_id, script.artifact_id, contextFingerprint, shotArtifact.metadata?.planFingerprint]
   );
   if (shotRows.rows[0].count < 1 || shotRows.rows[0].count !== shotRows.rows[0].valid_count) throw new Error('SHOT_PLAN durable provenance is incomplete');
 
   const assetRows = await client.query(
     `SELECT count(*)::integer AS count,
-            count(*) FILTER (WHERE production_bible_id = $2 AND context_fingerprint = $3)::integer AS valid_count
+            count(*) FILTER (WHERE ar.production_bible_id = $2 AND ar.context_fingerprint = $3 AND ar.plan_fingerprint = $4)::integer AS valid_count
        FROM v2_1.asset_requirements ar
        JOIN v2_1.shots s ON s.id = ar.shot_id
-      WHERE s.production_id = $1 AND ar.plan_fingerprint = $4`,
-    [productionId, bible.production_bible_id, contextFingerprint, assetPlan.metadata?.planFingerprint]
+      WHERE s.production_id = $1`,
+    [productionId, bible.production_bible_id, contextFingerprint, assetArtifact.metadata?.planFingerprint]
   );
   if (assetRows.rows[0].count < 1 || assetRows.rows[0].count !== assetRows.rows[0].valid_count) throw new Error('ASSET_PLAN durable provenance is incomplete');
 
@@ -185,7 +167,7 @@ async function verifyVerticalSliceProvenance(client, { productionId, jobId, cont
     contextFingerprint,
     stages: FIRST_VERTICAL_SLICE.map((stage) => ({
       stage,
-      artifactId: rowsByStage.get(stage)?.artifact_id || null,
+      artifactId: ['SHOT_PLAN', 'ASSET_PLAN'].includes(stage) ? (stage === 'SHOT_PLAN' ? shotArtifact.artifact_id : assetArtifact.artifact_id) : rowsByStage.get(stage)?.artifact_id || null,
       generationRunId: rowsByStage.get(stage)?.generation_run_id || null,
     })),
   };
@@ -197,12 +179,10 @@ async function runProductionThroughPlanning(client, {
   requireClient(client);
   requireWorker(workerId);
   if (!productionId || !jobId) throw new Error('productionId and jobId are required');
-
   const initial = await loadProduction(client, productionId);
   if (initial.status !== 'RUNNING') throw new Error(`Production is not RUNNING: ${initial.status}`);
   const contextFingerprint = initial.context_fingerprint;
   if (recover) await recoverExpiredWork(client);
-
   const claimedJob = await claimJobForProduction(client, { jobId, productionId, workerId, leaseSeconds });
   if (!claimedJob) throw new Error('Production job was not claimable by this worker for this production');
   if (claimedJob.id !== jobId || claimedJob.production_id !== productionId) throw new Error('Database returned a job outside the requested production boundary');
@@ -232,12 +212,4 @@ async function runProductionThroughPlanning(client, {
 const runProductionThroughBible = runProductionThroughPlanning;
 const runProductionThroughScript = runProductionThroughPlanning;
 
-module.exports = {
-  FIRST_VERTICAL_SLICE,
-  HANDLERS,
-  normalizeSignal,
-  verifyVerticalSliceProvenance,
-  runProductionThroughPlanning,
-  runProductionThroughBible,
-  runProductionThroughScript,
-};
+module.exports = { FIRST_VERTICAL_SLICE, HANDLERS, normalizeSignal, verifyVerticalSliceProvenance, runProductionThroughPlanning, runProductionThroughBible, runProductionThroughScript };
