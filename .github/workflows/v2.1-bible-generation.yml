@@ -52,7 +52,8 @@ jobs:
             migrations/20260815_v2_1_execution_engine.sql \
             migrations/20260816_v2_1_production_scoped_job_claim.sql \
             migrations/20260816_v2_1_database_contract_hardening.sql \
-            migrations/20260816_v2_1_bible_db_contract.sql
+            migrations/20260816_v2_1_bible_db_contract.sql \
+            migrations/20260816_v2_1_planning_db_contract.sql
           do
             echo "Applying $migration"
             psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f "$migration"
