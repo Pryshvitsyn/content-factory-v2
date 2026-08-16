@@ -19,6 +19,7 @@ DECLARE
   v_context text;
   v_continuity_id uuid;
   v_continuity_hash text;
+  v_continuity_count integer;
   v_edit_count integer;
 BEGIN
   IF NEW.stage <> 'EDIT' OR NEW.status <> 'COMPLETED' THEN
@@ -33,6 +34,18 @@ BEGIN
     FROM v2_1.productions p
    WHERE p.id = v_production_id;
 
+  SELECT count(*)::integer
+    INTO v_continuity_count
+    FROM v2_1.artifacts a
+    JOIN v2_1.artifact_versions av ON av.artifact_id = a.id AND av.version = 1
+   WHERE a.production_id = v_production_id
+     AND a.artifact_type = 'CONTINUITY_REPORT'
+     AND a.status = 'VALID';
+
+  IF v_continuity_count <> 1 THEN
+    RAISE EXCEPTION 'EDIT cannot complete without exactly one VALID CONTINUITY_REPORT artifact';
+  END IF;
+
   SELECT a.id, av.output_hash
     INTO v_continuity_id, v_continuity_hash
     FROM v2_1.artifacts a
@@ -40,10 +53,6 @@ BEGIN
    WHERE a.production_id = v_production_id
      AND a.artifact_type = 'CONTINUITY_REPORT'
      AND a.status = 'VALID';
-
-  IF v_continuity_id IS NULL THEN
-    RAISE EXCEPTION 'EDIT cannot complete without one VALID CONTINUITY_REPORT artifact';
-  END IF;
 
   SELECT count(*)::integer
     INTO v_edit_count
@@ -68,4 +77,4 @@ COMMENT ON INDEX v2_1.uq_v21_canonical_edit_artifact IS
   'Exactly one VALID canonical EDIT artifact per production for V2.1 EDIT v1.';
 
 COMMENT ON FUNCTION v2_1.enforce_edit_completion() IS
-  'Database authority for EDIT: one valid CONTINUITY_REPORT and exactly one context-bound canonical EDIT artifact tied to its hash are required.';
+  'Database authority for EDIT: exactly one valid CONTINUITY_REPORT and exactly one context-bound canonical EDIT artifact tied to its hash are required.';
