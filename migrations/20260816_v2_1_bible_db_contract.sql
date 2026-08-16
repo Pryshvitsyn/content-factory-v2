@@ -100,7 +100,7 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   IF TG_OP = 'UPDATE' THEN RAISE EXCEPTION 'Resolved production bibles are immutable; create a new version instead'; END IF;
-  RETURN OLD;
+  RETURN NEW;
 END;
 $$;
 
