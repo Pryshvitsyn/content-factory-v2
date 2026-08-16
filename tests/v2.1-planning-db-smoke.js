@@ -49,7 +49,7 @@ async function main() {
     const bibleDocument = { ...BIBLE, context };
     const bibleHash = fingerprint(bibleDocument);
     await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,$2,$3,$4::jsonb)`, [bibleArtifactId, fingerprint({ bible: suffix }), bibleHash, JSON.stringify({ contractVersion: 1 })]);
-    const bibleRow = await client.query(`INSERT INTO v2_1.production_bibles(production_id,version,contract_version,bible_id,context_fingerprint,context_snapshot,document,artifact_id,source_script_artifact_id,source_script_version,source_script_hash) VALUES($1,1,1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,1,$9) RETURNING id`, [productionId, `bible-${suffix}`, contextFingerprint, JSON.stringify(context), JSON.stringify(BIBLE), bibleArtifactId, scriptArtifactId, scriptHash]);
+    const bibleRow = await client.query(`INSERT INTO v2_1.production_bibles(production_id,version,contract_version,bible_id,context_fingerprint,context_snapshot,document,artifact_id,source_script_artifact_id,source_script_version,source_script_hash) VALUES($1,1,1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,1,$8) RETURNING id`, [productionId, `bible-${suffix}`, contextFingerprint, JSON.stringify(context), JSON.stringify(BIBLE), bibleArtifactId, scriptArtifactId, scriptHash]);
     const bibleId = bibleRow.rows[0].id;
     const bibleStage = (await client.query(`SELECT id FROM v2_1.stage_runs WHERE job_id=$1 AND stage='BIBLE'`, [jobId])).rows[0].id;
     await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED',output_artifacts='["PRODUCTION_BIBLE"]'::jsonb,output_fingerprint=$1,completed_at=now() WHERE id=$2`, [bibleHash, bibleStage]);
