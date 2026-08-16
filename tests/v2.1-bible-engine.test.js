@@ -33,8 +33,8 @@ function sample(overrides = {}) {
     productionPlan: {
       objective: { cta: 'visit' },
       shots: [
-        { number: 1, description: 'Marco enters', assetRefs: [{ id: 'char-marco', type: 'CHARACTER', version: 2 }] },
-        { number: 2, description: 'The order goes wrong', assetRefs: [{ id: 'char-marco', type: 'CHARACTER', version: 2 }] },
+        { number: 1, description: 'Marco enters', action: 'Marco enters the cafe', durationMs: 3000, continuityRequirements: [], assetRefs: [{ id: 'char-marco', type: 'CHARACTER', version: 2 }] },
+        { number: 2, description: 'The order goes wrong', action: 'Marco orders the wrong pizza', durationMs: 4000, continuityRequirements: ['same character identity'], assetRefs: [{ id: 'char-marco', type: 'CHARACTER', version: 2 }] },
       ],
       assetRequirements: [{ role: 'main-character', type: 'CHARACTER', id: 'char-marco' }],
       editions: [
