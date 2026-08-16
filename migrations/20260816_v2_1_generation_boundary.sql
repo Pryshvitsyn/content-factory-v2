@@ -73,16 +73,24 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT count(*), max(gr.artifact_id)
-    INTO run_count, artifact_id
+  SELECT count(*)::integer
+    INTO run_count
     FROM v2_1.generation_runs gr
    WHERE gr.stage_run_id = NEW.id
      AND gr.status = 'COMPLETED'
      AND gr.artifact_id IS NOT NULL;
 
-  IF run_count <> 1 OR artifact_id IS NULL THEN
+  IF run_count <> 1 THEN
     RAISE EXCEPTION 'ASSET_GENERATION cannot complete without exactly one completed generation run and output artifact';
   END IF;
+
+  SELECT gr.artifact_id
+    INTO artifact_id
+    FROM v2_1.generation_runs gr
+   WHERE gr.stage_run_id = NEW.id
+     AND gr.status = 'COMPLETED'
+     AND gr.artifact_id IS NOT NULL
+   LIMIT 1;
 
   IF NOT EXISTS (
     SELECT 1 FROM v2_1.artifacts a
