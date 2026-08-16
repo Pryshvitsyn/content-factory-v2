@@ -29,14 +29,20 @@ async function main() {
     const production = await client.query(`INSERT INTO v2_1.productions(content_variant_id,tenant_id,business_id,brand_id,project_id,status,request_hash,context_fingerprint,context_snapshot,request_snapshot) VALUES($1,$2,$3,$4,$5,'RUNNING',$6,$7,'{}'::jsonb,'{}'::jsonb) RETURNING id`, [variant.rows[0].id, tenantId, business.rows[0].id, brand.rows[0].id, project.rows[0].id, `asset-prod-${suffix}`, `ctx-${suffix}`]);
     const productionId = production.rows[0].id;
 
+    const scriptArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('SCRIPT',$1,'VALID') RETURNING id`, [productionId]);
+    const scriptArtifactId = scriptArtifact.rows[0].id;
+    const scriptVersion = await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'asset-script-input','asset-script-output','{}'::jsonb) RETURNING version`, [scriptArtifactId]);
+    const scriptVersionNumber = scriptVersion.rows[0].version;
+    const scriptHash = 'asset-script-output';
+
+    const bibleArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('PRODUCTION_BIBLE',$1,'VALID') RETURNING id`, [productionId]);
+    const bible = await client.query(`INSERT INTO v2_1.production_bibles(production_id,version,contract_version,bible_id,context_fingerprint,context_snapshot,document,artifact_id,source_script_artifact_id,source_script_version,source_script_hash) VALUES($1,1,1,$2,$3,'{}'::jsonb,'{}'::jsonb,$4,$5,$6,$7) RETURNING id`, [productionId, `bible-${suffix}`, `ctx-${suffix}`, bibleArtifact.rows[0].id, scriptArtifactId, scriptVersionNumber, scriptHash]);
+
     const asset = await client.query(`INSERT INTO v2_1.assets(tenant_id,business_id,brand_id,asset_type,name,identity_fingerprint,canonical_data) VALUES($1,$2,$3,'CHARACTER',$4,$5,$6::jsonb) RETURNING id`, [tenantId, business.rows[0].id, brand.rows[0].id, `Hero ${suffix}`, `identity-${suffix}`, JSON.stringify({ description: 'canonical hero' })]);
     const assetId = asset.rows[0].id;
     const version = await client.query(`INSERT INTO v2_1.asset_versions(asset_id,version,data) VALUES($1,1,$2::jsonb) RETURNING id`, [assetId, JSON.stringify({ appearance: 'canonical' })]);
-    const shot = await client.query(`INSERT INTO v2_1.shots(production_id,shot_number,duration_ms,instructions,production_bible_id,context_fingerprint,plan_fingerprint) VALUES($1,1,3000,'{}'::jsonb,$2,$3,$4) RETURNING id`, [productionId, null, `ctx-${suffix}`, `plan-${suffix}`]).catch(async () => {
-      const bibleArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('PRODUCTION_BIBLE',$1,'VALID') RETURNING id`, [productionId]);
-      const bible = await client.query(`INSERT INTO v2_1.production_bibles(production_id,version,contract_version,bible_id,context_fingerprint,context_snapshot,document,artifact_id) VALUES($1,1,1,$2,$3,'{}'::jsonb,'{}'::jsonb,$4) RETURNING id`, [productionId, `bible-${suffix}`, `ctx-${suffix}`, bibleArtifact.rows[0].id]);
-      return client.query(`INSERT INTO v2_1.shots(production_id,shot_number,duration_ms,instructions,production_bible_id,context_fingerprint,plan_fingerprint) VALUES($1,1,3000,'{}'::jsonb,$2,$3,$4) RETURNING id`, [productionId, bible.rows[0].id, `ctx-${suffix}`, `plan-${suffix}`]);
-    });
+
+    const shot = await client.query(`INSERT INTO v2_1.shots(production_id,shot_number,duration_ms,instructions,production_bible_id,source_script_artifact_id,context_fingerprint,plan_fingerprint) VALUES($1,1,3000,'{}'::jsonb,$2,$3,$4,$5) RETURNING id`, [productionId, bible.rows[0].id, scriptArtifactId, `ctx-${suffix}`, `plan-${suffix}`]);
     const shotId = shot.rows[0].id;
     const requirement = await client.query(`INSERT INTO v2_1.asset_requirements(shot_id,asset_role,required_asset_type,status,constraints,production_bible_id,context_fingerprint,plan_fingerprint) SELECT $1,'hero','CHARACTER','MISSING',$2::jsonb,s.production_bible_id,$3,$4 FROM v2_1.shots s WHERE s.id=$1 RETURNING id`, [shotId, JSON.stringify({ requiredAssetId: assetId, requiredAssetVersion: 1 }), `ctx-${suffix}`, `plan-${suffix}`]);
 
