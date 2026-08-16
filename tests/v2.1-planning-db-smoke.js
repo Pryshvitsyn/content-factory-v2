@@ -69,7 +69,7 @@ async function main() {
 
     const durable = await client.query(`SELECT count(*)::integer AS shots, count(*) FILTER (WHERE production_bible_id=$2 AND source_script_artifact_id=$3 AND context_fingerprint=$4)::integer AS valid_shots FROM v2_1.shots WHERE production_id=$1`, [productionId, bibleId, scriptArtifactId, contextFingerprint]);
     if (durable.rows[0].shots !== 2 || durable.rows[0].shots !== durable.rows[0].valid_shots) throw new Error('SHOT_PLAN provenance is incomplete');
-    const requirements = await client.query(`SELECT count(*)::integer AS count, count(*) FILTER (WHERE production_bible_id=$2 AND context_fingerprint=$3)::integer AS valid_count FROM v2_1.asset_requirements ar JOIN v2_1.shots s ON s.id=ar.shot_id WHERE s.production_id=$1`, [productionId, bibleId, contextFingerprint]);
+    const requirements = await client.query(`SELECT count(*)::integer AS count, count(*) FILTER (WHERE ar.production_bible_id=$2 AND ar.context_fingerprint=$3)::integer AS valid_count FROM v2_1.asset_requirements ar JOIN v2_1.shots s ON s.id=ar.shot_id WHERE s.production_id=$1`, [productionId, bibleId, contextFingerprint]);
     if (requirements.rows[0].count !== 4 || requirements.rows[0].count !== requirements.rows[0].valid_count) throw new Error('ASSET_PLAN provenance is incomplete');
     await assertDatabaseRejects(client, `UPDATE v2_1.shots SET instructions='{"tampered":true}'::jsonb WHERE production_id=$1 AND shot_number=1`, [productionId], /SHOT_PLAN definition is immutable/);
 
