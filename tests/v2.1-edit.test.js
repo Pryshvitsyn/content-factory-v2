@@ -29,8 +29,18 @@ test('EDIT manifest is deterministic and context-bound', () => {
   assert.equal(fingerprint(a), fingerprint(b));
   assert.equal(a.contextFingerprint, 'ctx-1');
   assert.equal(a.continuityFingerprint, 'continuity-hash');
+  assert.equal(a.sourceArtifacts.continuityReportArtifactId, 'continuity-1');
   assert.equal(a.durationMs, 2500);
   assert.deepEqual(a.timeline.map((x) => [x.index, x.startMs, x.endMs]), [[1, 0, 1000], [2, 1000, 2500]]);
+});
+
+test('EDIT fingerprint changes when continuity provenance changes', () => {
+  const a = buildEditManifest(fixture());
+  const changed = fixture();
+  changed.continuity.output_hash = 'different-continuity-hash';
+  const b = buildEditManifest(changed);
+  assert.notEqual(fingerprint(a), fingerprint(b));
+  assert.notEqual(a.continuityFingerprint, b.continuityFingerprint);
 });
 
 test('EDIT validator rejects timing gaps', () => {
@@ -43,4 +53,10 @@ test('EDIT validator rejects missing asset versions', () => {
   const manifest = buildEditManifest(fixture());
   manifest.timeline[0].assetVersionIds = [];
   assert.throws(() => validateEditManifest(manifest), /no asset versions/);
+});
+
+test('EDIT validator rejects zero-duration timeline items', () => {
+  const manifest = buildEditManifest(fixture());
+  manifest.timeline[0].endMs = manifest.timeline[0].startMs;
+  assert.throws(() => validateEditManifest(manifest), /invalid timing/);
 });
