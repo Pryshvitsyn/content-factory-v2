@@ -56,7 +56,8 @@ jobs:
             migrations/20260816_v2_1_asset_registry_boundary.sql \
             migrations/20260816_v2_1_generation_boundary.sql \
             migrations/20260816_v2_1_continuity_boundary.sql \
-            migrations/20260816_v2_1_edit_boundary.sql
+            migrations/20260816_v2_1_edit_boundary.sql \
+            migrations/20260816_v2_1_edit_hardening.sql
           do
             echo "Applying $migration"
             psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f "$migration"
