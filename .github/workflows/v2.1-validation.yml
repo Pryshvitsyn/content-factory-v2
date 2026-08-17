@@ -1,0 +1,76 @@
+name: V2.1 VALIDATION
+
+on:
+  push:
+    branches:
+      - 'feature/v2.1-validation-*'
+      - 'feature/v2.1-platform-*'
+      - 'develop/**'
+  pull_request:
+    branches:
+      - main
+      - 'develop/**'
+      - 'feature/v2.1-*'
+
+jobs:
+  validation-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: n8n
+          POSTGRES_PASSWORD: n8n
+          POSTGRES_DB: content_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U n8n -d content_os"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: content_os
+      PGUSER: n8n
+      PGPASSWORD: n8n
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply V2.1 database migrations
+        run: |
+          set -euo pipefail
+          for migration in \
+            migrations/20260815_v2_1_foundation.sql \
+            migrations/20260815_v2_1_multi_business.sql \
+            migrations/20260815_v2_1_production_boundary.sql \
+            migrations/20260815_v2_1_execution_engine.sql \
+            migrations/20260816_v2_1_production_scoped_job_claim.sql \
+            migrations/20260816_v2_1_database_contract_hardening.sql \
+            migrations/20260816_v2_1_bible_db_contract.sql \
+            migrations/20260816_v2_1_planning_db_contract.sql \
+            migrations/20260816_v2_1_asset_registry_boundary.sql \
+            migrations/20260816_v2_1_generation_boundary.sql \
+            migrations/20260816_v2_1_continuity_boundary.sql \
+            migrations/20260816_v2_1_edit_boundary.sql \
+            migrations/20260816_v2_1_edit_hardening.sql \
+            migrations/20260817_v2_1_platform_adaptation_boundary.sql \
+            migrations/20260817_v2_1_validation_boundary.sql
+          do
+            echo "Applying $migration"
+            psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f "$migration"
+          done
+      - name: Check worker syntax
+        run: |
+          node --check worker/v2.1-platform-adaptation.js
+          node --check worker/v2.1-validation.js
+          node --check worker/v2.1-production-orchestrator.js
+      - name: Run validation contract tests
+        run: node --test tests/v2.1-validation.test.js
+      - name: Run validation database smoke test
+        run: node tests/v2.1-validation-db-smoke.js
