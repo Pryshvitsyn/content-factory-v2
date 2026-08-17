@@ -38,6 +38,8 @@ async function main() {
     const editArtifactId = edit.rows[0].id;
     const editManifest = { type:'EDIT', version:1, contextFingerprint:context, durationMs:2000, timeline:[{ index:1, shotId:'shot-1', shotNumber:1, startMs:0, endMs:2000, durationMs:2000, assetVersionIds:['asset-v1'] }] };
     await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'continuity-hash','edit-hash',$2::jsonb)`, [editArtifactId, JSON.stringify({ stage:'EDIT', contextFingerprint:context, continuityArtifactId:'continuity-1', continuityFingerprint:'continuity-hash', durationMs:2000, shotCount:1, manifest:editManifest })]);
+    const continuityArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('CONTINUITY_REPORT',$1,'VALID') RETURNING id`, [productionId]);
+    await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'continuity-input','continuity-hash',$2::jsonb)`, [continuityArtifact.rows[0].id, JSON.stringify({ stage:'CONTINUITY', contextFingerprint:context, checkCount:8 })]);
 
     for (const platform of platforms) {
       const manifest = { type:'PLATFORM_EDITION', version:1, platform, profileVersion:1, aspectRatio:'9:16', renderIntent:'SHORT_FORM_VERTICAL', contextFingerprint:context, sourceEditArtifactId:editArtifactId, sourceEditFingerprint:'edit-hash', durationMs:2000, timeline:[{ index:1, shotId:'shot-1', shotNumber:1, startMs:0, endMs:2000, durationMs:2000, assetVersionIds:['asset-v1'], transition:null }], adaptationPolicy:{ crop:'DECLARED_BY_RENDERER', captions:'PRESERVE_SOURCE', audio:'PRESERVE_SOURCE', branding:'PRESERVE_BIBLE' } };
