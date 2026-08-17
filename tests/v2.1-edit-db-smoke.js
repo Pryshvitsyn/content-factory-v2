@@ -35,6 +35,7 @@ async function main() {
     const script = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('SCRIPT',$1,'VALID') RETURNING id`, [productionId]);
     await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'in','script-hash','{}'::jsonb)`, [script.rows[0].id]);
     const bibleArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('PRODUCTION_BIBLE',$1,'VALID') RETURNING id`, [productionId]);
+    await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'script-hash','bible-hash',$2::jsonb)`, [bibleArtifact.rows[0].id, JSON.stringify({ stage: 'BIBLE', contextFingerprint: `ctx-${suffix}`, sourceScriptArtifactId: script.rows[0].id })]);
     const bible = await client.query(`INSERT INTO v2_1.production_bibles(production_id,version,contract_version,bible_id,context_fingerprint,context_snapshot,document,artifact_id,source_script_artifact_id,source_script_version,source_script_hash) VALUES($1,1,1,$2,$3,'{}'::jsonb,'{"productionPlan":{}}'::jsonb,$4,$5,1,'script-hash') RETURNING id`, [productionId, `bible-${suffix}`, `ctx-${suffix}`, bibleArtifact.rows[0].id, script.rows[0].id]);
     const shot = await client.query(`INSERT INTO v2_1.shots(production_id,shot_number,duration_ms,instructions,production_bible_id,source_script_artifact_id,context_fingerprint,plan_fingerprint) VALUES($1,1,2000,'{"description":"hero"}'::jsonb,$2,$3,$4,$5) RETURNING id`, [productionId, bible.rows[0].id, script.rows[0].id, `ctx-${suffix}`, `plan-${suffix}`]);
     const req = await client.query(`INSERT INTO v2_1.asset_requirements(shot_id,asset_role,required_asset_type,status,constraints,production_bible_id,context_fingerprint,plan_fingerprint) VALUES($1,'hero','CHARACTER','SATISFIED','{}'::jsonb,$2,$3,$4) RETURNING id`, [shot.rows[0].id, bible.rows[0].id, `ctx-${suffix}`, `plan-${suffix}`]);
@@ -58,9 +59,12 @@ async function main() {
     const result = await executeEditStage({ client, productionId, stageRunId: editStage.id, workerId });
     if (!result.artifactId || result.manifest.type !== 'EDIT' || result.manifest.durationMs !== 2000) throw new Error('EDIT did not produce a canonical manifest');
 
+    const duplicateStage = await client.query(`SELECT id FROM v2_1.stage_runs WHERE job_id=$1 AND stage='EDIT' AND id<>$2 ORDER BY attempt DESC LIMIT 1`, [jobId, editStage.id]);
+    if (duplicateStage.rowCount) throw new Error('Unexpected duplicate EDIT stage run exists');
+
     const durable = await client.query(`SELECT sr.status AS stage_status,a.artifact_type,a.status AS artifact_status,av.output_hash,av.metadata,p.status AS production_status FROM v2_1.stage_runs sr JOIN v2_1.artifacts a ON a.id=$2 JOIN v2_1.artifact_versions av ON av.artifact_id=a.id JOIN v2_1.productions p ON p.id=$1 WHERE sr.id=$3`, [productionId,result.artifactId,editStage.id]);
     const row = durable.rows[0];
-    if (!row || row.stage_status !== 'COMPLETED' || row.artifact_type !== 'EDIT' || row.artifact_status !== 'VALID' || row.output_hash !== result.outputHash || row.metadata.contextFingerprint !== `ctx-${suffix}` || row.production_status !== 'RUNNING') throw new Error('EDIT durable boundary is incomplete');
+    if (!row || row.stage_status !== 'COMPLETED' || row.artifact_type !== 'EDIT' || row.artifact_status !== 'VALID' || row.output_hash !== result.outputHash || row.metadata.contextFingerprint !== `ctx-${suffix}` || row.metadata.continuityArtifactId !== continuityArtifact.rows[0].id || row.metadata.continuityFingerprint !== 'continuity-hash' || row.production_status !== 'RUNNING') throw new Error('EDIT durable boundary is incomplete');
 
     console.log('V2.1 EDIT DATABASE SMOKE TEST PASSED.');
     console.log('CONTINUITY -> EDIT VERIFIED.');
