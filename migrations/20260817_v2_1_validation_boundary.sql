@@ -23,9 +23,10 @@ DECLARE
   v_production_id uuid;
   v_context text;
   v_platforms jsonb;
+  v_requested_count integer;
   v_edit_count integer;
   v_edition_count integer;
-  v_invalid_count integer;
+  v_valid_edition_count integer;
   v_missing integer;
   v_report_count integer;
 BEGIN
@@ -43,6 +44,11 @@ BEGIN
   IF v_context IS NULL OR v_platforms IS NULL OR jsonb_typeof(v_platforms) <> 'array' OR jsonb_array_length(v_platforms) = 0 THEN
     RAISE EXCEPTION 'VALIDATION requires declared target platforms';
   END IF;
+  SELECT count(*)::integer INTO v_requested_count
+    FROM jsonb_array_elements_text(v_platforms) requested(platform);
+  IF v_requested_count <> (SELECT count(DISTINCT upper(value)) FROM jsonb_array_elements_text(v_platforms) value) THEN
+    RAISE EXCEPTION 'VALIDATION target platform declaration contains duplicates';
+  END IF;
 
   SELECT count(*)::integer INTO v_edit_count
     FROM v2_1.artifacts a
@@ -57,10 +63,10 @@ BEGIN
 
   SELECT count(*)::integer,
          count(*) FILTER (WHERE e.metadata->>'contextFingerprint' = v_context
-                           AND e.metadata->>'stage' = 'PLATFORM_ADAPTATION')::integer,
-         count(*) FILTER (WHERE e.metadata->>'sourceEditArtifactId' IS NULL
-                           OR e.metadata->>'sourceEditFingerprint' IS NULL)::integer
-    INTO v_edition_count, v_invalid_count, v_missing
+                           AND e.metadata->>'stage' = 'PLATFORM_ADAPTATION'
+                           AND e.metadata->>'sourceEditArtifactId' IS NOT NULL
+                           AND e.metadata->>'sourceEditFingerprint' IS NOT NULL)::integer
+    INTO v_edition_count, v_valid_edition_count
     FROM v2_1.editions e
    WHERE e.production_id = v_production_id AND e.version = 1;
 
@@ -80,8 +86,8 @@ BEGIN
     RAISE EXCEPTION 'VALIDATION cannot complete until every requested platform has a canonical context-bound edition';
   END IF;
 
-  IF v_edition_count < jsonb_array_length(v_platforms) OR v_invalid_count < jsonb_array_length(v_platforms) THEN
-    RAISE EXCEPTION 'VALIDATION found incomplete or invalid platform editions';
+  IF v_edition_count <> v_requested_count OR v_valid_edition_count <> v_requested_count THEN
+    RAISE EXCEPTION 'VALIDATION requires exactly one valid canonical edition per requested platform';
   END IF;
 
   SELECT count(*)::integer INTO v_report_count
@@ -103,4 +109,4 @@ BEFORE INSERT OR UPDATE OF status, output_artifacts ON v2_1.stage_runs
 FOR EACH ROW EXECUTE FUNCTION v2_1.enforce_validation_completion();
 
 COMMENT ON FUNCTION v2_1.enforce_validation_completion() IS
-  'Database authority for VALIDATION: all declared platform editions must remain context-bound to the canonical EDIT boundary and exactly one VALIDATION_REPORT must exist before stage completion.';
+  'Database authority for VALIDATION: exactly one canonical context-bound edition must exist for every requested platform, plus exactly one VALIDATION_REPORT, before stage completion.';
