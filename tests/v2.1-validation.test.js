@@ -13,8 +13,9 @@ test('validation fingerprint is stable across object key order', () => {
 });
 
 test('validation rejects timeline gaps and duration drift', () => {
-  assert.throws(() => validateTimeline([{ index: 1, startMs: 0, endMs: 1000 }, { index: 2, startMs: 1100, endMs: 2000 }], 2000), /timing/);
-  assert.throws(() => validateTimeline([{ index: 1, startMs: 0, endMs: 1000 }], 1200), /duration/);
+  const validAssets = ['asset-v1'];
+  assert.throws(() => validateTimeline([{ index: 1, startMs: 0, endMs: 1000, assetVersionIds: validAssets }, { index: 2, startMs: 1100, endMs: 2000, assetVersionIds: validAssets }], 2000), /timing/);
+  assert.throws(() => validateTimeline([{ index: 1, startMs: 0, endMs: 1000, assetVersionIds: validAssets }], 1200), /duration/);
 });
 
 test('validation rejects edition provenance drift', () => {
