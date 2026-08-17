@@ -67,26 +67,13 @@ async function loadContinuity(client, productionId, contextFingerprint) {
 }
 
 async function loadShotsAndAssets(client, productionId, contextFingerprint) {
-  const shots = await client.query(`
-    SELECT s.id, s.shot_number, s.duration_ms, s.instructions, s.context_fingerprint
-      FROM v2_1.shots s
-     WHERE s.production_id=$1 ORDER BY s.shot_number`, [productionId]);
+  const shots = await client.query(`SELECT s.id, s.shot_number, s.duration_ms, s.instructions, s.context_fingerprint FROM v2_1.shots s WHERE s.production_id=$1 ORDER BY s.shot_number`, [productionId]);
   if (!shots.rows.length) throw new Error('EDIT requires durable SHOTS');
   if (shots.rows.some((s) => s.context_fingerprint !== contextFingerprint)) throw new Error('EDIT cannot proceed with shot context drift');
-
-  const requirements = await client.query(`
-    SELECT ar.id, ar.shot_id, ar.required_asset_type, ar.resolved_asset_id, ar.resolved_asset_version_id, ar.status
-      FROM v2_1.asset_requirements ar
-      JOIN v2_1.shots s ON s.id=ar.shot_id
-     WHERE s.production_id=$1 ORDER BY s.shot_number, ar.id`, [productionId]);
+  const requirements = await client.query(`SELECT ar.id, ar.shot_id, ar.required_asset_type, ar.resolved_asset_id, ar.resolved_asset_version_id, ar.status FROM v2_1.asset_requirements ar JOIN v2_1.shots s ON s.id=ar.shot_id WHERE s.production_id=$1 ORDER BY s.shot_number, ar.id`, [productionId]);
   if (!requirements.rows.length) throw new Error('EDIT requires durable ASSET_PLAN requirements');
   if (requirements.rows.some((r) => r.status !== 'SATISFIED' || !r.resolved_asset_id || !r.resolved_asset_version_id)) throw new Error('EDIT requires all asset requirements to be satisfied');
-
-  const versions = await client.query(`
-    SELECT av.id AS version_id, av.asset_id, av.version, a.asset_type
-      FROM v2_1.asset_versions av
-      JOIN v2_1.assets a ON a.id=av.asset_id
-     WHERE av.id = ANY($1::uuid[])`, [requirements.rows.map((r) => r.resolved_asset_version_id)]);
+  const versions = await client.query(`SELECT av.id AS version_id, av.asset_id, av.version, a.asset_type FROM v2_1.asset_versions av JOIN v2_1.assets a ON a.id=av.asset_id WHERE av.id = ANY($1::uuid[])`, [requirements.rows.map((r) => r.resolved_asset_version_id)]);
   const byId = new Map(versions.rows.map((v) => [String(v.version_id), v]));
   for (const requirement of requirements.rows) {
     const version = byId.get(String(requirement.resolved_asset_version_id));
@@ -106,30 +93,11 @@ function buildEditManifest({ production, continuity, shots, requirements, versio
     const assetVersionIds = requirements.filter((r) => String(r.shot_id) === String(shot.id)).map((r) => r.resolved_asset_version_id);
     if (!assetVersionIds.length) throw new Error(`Shot ${shot.shot_number} has no resolved assets`);
     assetVersionIds.forEach((id) => { if (!versionsById.has(String(id))) throw new Error(`Missing asset version ${id}`); });
-    const item = {
-      index: index + 1,
-      shotId: shot.id,
-      shotNumber: shot.shot_number,
-      startMs: cursor,
-      endMs: cursor + durationMs,
-      durationMs,
-      instructions: shot.instructions || {},
-      assetVersionIds,
-      transitions: index === 0 ? [] : [{ type: 'CUT', atMs: cursor }],
-    };
+    const item = { index: index + 1, shotId: shot.id, shotNumber: shot.shot_number, startMs: cursor, endMs: cursor + durationMs, durationMs, instructions: shot.instructions || {}, assetVersionIds, transitions: index === 0 ? [] : [{ type: 'CUT', atMs: cursor }] };
     cursor += durationMs;
     return item;
   });
-  const manifest = {
-    type: 'EDIT',
-    version: 1,
-    contextFingerprint: production.context_fingerprint,
-    continuityFingerprint: continuity.output_hash,
-    sourceArtifacts: { continuityReportArtifactId: continuity.artifact_id },
-    timeline,
-    durationMs: cursor,
-    renderPolicy: { mode: 'PROVIDER_NEUTRAL', resolution: 'SOURCE', audio: 'SOURCE', captions: 'DOWNSTREAM' },
-  };
+  const manifest = { type: 'EDIT', version: 1, contextFingerprint: production.context_fingerprint, continuityFingerprint: continuity.output_hash, sourceArtifacts: { continuityReportArtifactId: continuity.artifact_id }, timeline, durationMs: cursor, renderPolicy: { mode: 'PROVIDER_NEUTRAL', resolution: 'SOURCE', audio: 'SOURCE', captions: 'DOWNSTREAM' } };
   validateEditManifest(manifest);
   return manifest;
 }
@@ -143,41 +111,28 @@ async function executeEditStage({ client, productionId, stageRunId, workerId } =
   const { shots, requirements, versions } = await loadShotsAndAssets(client, productionId, production.context_fingerprint);
   const manifest = buildEditManifest({ production, continuity, shots, requirements, versions });
   const outputHash = fingerprint(manifest);
-
   await client.query('BEGIN');
   try {
     await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, $2))`, [String(productionId), 20260816]);
-
-    const existing = await client.query(`
-      SELECT a.id AS artifact_id, av.output_hash, av.metadata
-        FROM v2_1.artifacts a
-        JOIN v2_1.artifact_versions av ON av.artifact_id=a.id AND av.version=1
-       WHERE a.production_id=$1 AND a.artifact_type='EDIT' AND a.status='VALID'
-       ORDER BY a.created_at DESC LIMIT 1`, [productionId]);
+    const existing = await client.query(`SELECT a.id AS artifact_id, av.output_hash, av.metadata FROM v2_1.artifacts a JOIN v2_1.artifact_versions av ON av.artifact_id=a.id AND av.version=1 WHERE a.production_id=$1 AND a.artifact_type='EDIT' AND a.status='VALID' ORDER BY a.created_at DESC LIMIT 1`, [productionId]);
     if (existing.rows.length) {
       const row = existing.rows[0];
-      if (row.output_hash !== outputHash || row.metadata?.contextFingerprint !== production.context_fingerprint || row.metadata?.continuityArtifactId !== continuity.artifact_id || row.metadata?.continuityFingerprint !== continuity.output_hash) {
-        throw new Error('Existing canonical EDIT artifact conflicts with the requested immutable production context');
-      }
+      if (row.output_hash !== outputHash || row.metadata?.contextFingerprint !== production.context_fingerprint || row.metadata?.continuityArtifactId !== continuity.artifact_id || row.metadata?.continuityFingerprint !== continuity.output_hash) throw new Error('Existing canonical EDIT artifact conflicts with the requested immutable production context');
       const completed = await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED', output_artifacts='["EDIT"]'::jsonb, output_fingerprint=$1, completed_at=now(), heartbeat_at=now(), lease_expires_at=NULL, worker_id=NULL WHERE id=$2 AND status='RUNNING' AND worker_id=$3 RETURNING id`, [outputHash, stageRunId, workerId]);
       if (!completed.rowCount) throw new Error('EDIT completion rejected: lease ownership or stage state is invalid');
       await client.query(`INSERT INTO v2_1.events(event_type,entity_type,entity_id,payload) VALUES('EDIT_REUSED','artifact',$1,$2::jsonb)`, [row.artifact_id, JSON.stringify({ productionId, stageRunId, outputHash, contextFingerprint: production.context_fingerprint, continuityArtifactId: continuity.artifact_id })]);
       await client.query('COMMIT');
       return { artifactId: row.artifact_id, outputHash, manifest, reused: true };
     }
-
     const artifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('EDIT',$1,'VALID') RETURNING id`, [productionId]);
     const artifactId = artifact.rows[0].id;
-    await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,$2,$3,$4::jsonb)`, [artifactId, continuity.output_hash, outputHash, JSON.stringify({ stage: 'EDIT', contextFingerprint: production.context_fingerprint, continuityArtifactId: continuity.artifact_id, continuityFingerprint: continuity.output_hash, durationMs: manifest.durationMs, shotCount: manifest.timeline.length })]);
+    await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,$2,$3,$4::jsonb)`, [artifactId, continuity.output_hash, outputHash, JSON.stringify({ stage: 'EDIT', contextFingerprint: production.context_fingerprint, continuityArtifactId: continuity.artifact_id, continuityFingerprint: continuity.output_hash, durationMs: manifest.durationMs, shotCount: manifest.timeline.length, manifest })]);
     const completed = await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED', output_artifacts='["EDIT"]'::jsonb, output_fingerprint=$1, completed_at=now(), heartbeat_at=now(), lease_expires_at=NULL, worker_id=NULL WHERE id=$2 AND status='RUNNING' AND worker_id=$3 RETURNING id`, [outputHash, stageRunId, workerId]);
     if (!completed.rowCount) throw new Error('EDIT completion rejected: lease ownership or stage state is invalid');
     await client.query(`INSERT INTO v2_1.events(event_type,entity_type,entity_id,payload) VALUES('EDIT_COMPLETED','artifact',$1,$2::jsonb)`, [artifactId, JSON.stringify({ productionId, stageRunId, outputHash, contextFingerprint: production.context_fingerprint, continuityArtifactId: continuity.artifact_id })]);
     await client.query('COMMIT');
     return { artifactId, outputHash, manifest, reused: false };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  }
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
 }
 
 module.exports = { stableStringify, fingerprint, validateEditManifest, buildEditManifest, executeEditStage };
