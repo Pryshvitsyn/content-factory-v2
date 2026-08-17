@@ -43,10 +43,15 @@ const CAPABILITIES = Object.freeze([
 const PLATFORMS = Object.freeze(['TIKTOK', 'INSTAGRAM_REELS', 'YOUTUBE_SHORTS', 'YOUTUBE']);
 
 const ARTIFACT_TYPES = Object.freeze([
+  'IDEA_SET',
+  'CONTENT_BRIEF',
+  'CONCEPT',
   'SCRIPT',
   'PRODUCTION_BIBLE',
   'ASSET_REQUIREMENTS',
   'SHOTS',
+  'ASSETS',
+  'CONTINUITY_REPORT',
   'REFERENCE_IMAGE',
   'IMAGE',
   'VIDEO',
@@ -55,6 +60,7 @@ const ARTIFACT_TYPES = Object.freeze([
   'MUSIC',
   'CAPTIONS',
   'EDIT',
+  'EDITIONS',
   'FINAL_VIDEO',
   'THUMBNAIL',
 ]);
