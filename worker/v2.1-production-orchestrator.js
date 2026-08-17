@@ -10,12 +10,14 @@ const { executeShotPlanStage } = require('./v2.1-shot-plan');
 const { executeAssetPlanStage } = require('./v2.1-asset-plan');
 const { executeEditStage } = require('./v2.1-edit');
 const { executePlatformAdaptationStage } = require('./v2.1-platform-adaptation');
+const { executeValidationStage } = require('./v2.1-validation');
 const { recoverExpiredWork, claimJobForProduction, heartbeatJob, claimNextStage, completeStage, failStage } = require('./v2.1-execution-engine');
 
 const BIBLE_VERTICAL_SLICE = Object.freeze(['SIGNAL', 'IDEA', 'BRIEF', 'CONCEPT', 'SCRIPT', 'BIBLE']);
 const FIRST_VERTICAL_SLICE = Object.freeze([...BIBLE_VERTICAL_SLICE, 'SHOT_PLAN', 'ASSET_PLAN']);
 const EDIT_VERTICAL_SLICE = Object.freeze([...FIRST_VERTICAL_SLICE, 'ASSET_GENERATION', 'CONTINUITY', 'EDIT']);
 const PLATFORM_ADAPTATION_VERTICAL_SLICE = Object.freeze([...EDIT_VERTICAL_SLICE, 'PLATFORM_ADAPTATION']);
+const VALIDATION_VERTICAL_SLICE = Object.freeze([...PLATFORM_ADAPTATION_VERTICAL_SLICE, 'VALIDATION']);
 
 function requireClient(client) { if (!client || typeof client.query !== 'function') throw new Error('client is required'); }
 function requireWorker(workerId) { if (typeof workerId !== 'string' || !workerId.trim()) throw new Error('workerId is required'); }
@@ -38,12 +40,13 @@ async function completeSignalStage(client, { productionId, stageRunId, workerId,
   return completeStage(client, { stageRunId, workerId, outputArtifacts: ['SIGNAL_SET'], outputFingerprint: fingerprint(effectiveSignal) });
 }
 
-const HANDLERS = Object.freeze({ IDEA: executeIdeaStage, BRIEF: executeBriefStage, CONCEPT: executeConceptStage, SCRIPT: executeScriptStage, BIBLE: executeBibleStage, SHOT_PLAN: executeShotPlanStage, ASSET_PLAN: executeAssetPlanStage, EDIT: executeEditStage, PLATFORM_ADAPTATION: executePlatformAdaptationStage });
+const HANDLERS = Object.freeze({ IDEA: executeIdeaStage, BRIEF: executeBriefStage, CONCEPT: executeConceptStage, SCRIPT: executeScriptStage, BIBLE: executeBibleStage, SHOT_PLAN: executeShotPlanStage, ASSET_PLAN: executeAssetPlanStage, EDIT: executeEditStage, PLATFORM_ADAPTATION: executePlatformAdaptationStage, VALIDATION: executeValidationStage });
 
 async function executeClaimedStage(client, { productionId, stage, stageRunId, workerId, signal, providerCall }) {
   if (stage === 'SIGNAL') return completeSignalStage(client, { productionId, stageRunId, workerId, signal });
   if (stage === 'EDIT') return executeEditStage({ client, productionId, stageRunId, workerId });
   if (stage === 'PLATFORM_ADAPTATION') return executePlatformAdaptationStage({ client, productionId, stageRunId, workerId });
+  if (stage === 'VALIDATION') return executeValidationStage({ client, productionId, stageRunId, workerId });
   const handler = HANDLERS[stage];
   if (!handler) throw new Error(`No production handler is registered for stage ${stage}`);
   return handler({ client, productionId, stageRunId, workerId, signal: normalizeSignal(signal), provider: 'nvidia', providerCall });
@@ -104,6 +107,7 @@ async function runProductionThroughBible(client, options = {}) { return runProdu
 async function runProductionThroughPlanning(client, options = {}) { const result = await runProductionThroughStages(client, { ...options, stages: FIRST_VERTICAL_SLICE, status: 'PLANNING_COMPLETED' }); const provenance = await verifyVerticalSliceProvenance(client, { productionId: result.productionId, jobId: result.jobId, contextFingerprint: (await loadProduction(client, result.productionId)).context_fingerprint }); return { ...result, provenance }; }
 async function runProductionThroughEdit(client, options = {}) { return runProductionThroughStages(client, { ...options, stages: EDIT_VERTICAL_SLICE, status: 'EDIT_COMPLETED' }); }
 async function runProductionThroughPlatformAdaptation(client, options = {}) { return runProductionThroughStages(client, { ...options, stages: PLATFORM_ADAPTATION_VERTICAL_SLICE, status: 'PLATFORM_ADAPTATION_COMPLETED' }); }
+async function runProductionThroughValidation(client, options = {}) { return runProductionThroughStages(client, { ...options, stages: VALIDATION_VERTICAL_SLICE, status: 'VALIDATION_COMPLETED' }); }
 
 const runProductionThroughScript = runProductionThroughBible;
-module.exports = { BIBLE_VERTICAL_SLICE, FIRST_VERTICAL_SLICE, EDIT_VERTICAL_SLICE, PLATFORM_ADAPTATION_VERTICAL_SLICE, HANDLERS, normalizeSignal, verifyVerticalSliceProvenance, runProductionThroughPlanning, runProductionThroughEdit, runProductionThroughPlatformAdaptation, runProductionThroughBible, runProductionThroughScript };
+module.exports = { BIBLE_VERTICAL_SLICE, FIRST_VERTICAL_SLICE, EDIT_VERTICAL_SLICE, PLATFORM_ADAPTATION_VERTICAL_SLICE, VALIDATION_VERTICAL_SLICE, HANDLERS, normalizeSignal, verifyVerticalSliceProvenance, runProductionThroughPlanning, runProductionThroughEdit, runProductionThroughPlatformAdaptation, runProductionThroughValidation, runProductionThroughBible, runProductionThroughScript };
