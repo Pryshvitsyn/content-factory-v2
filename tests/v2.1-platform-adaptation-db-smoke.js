@@ -44,10 +44,13 @@ async function main() {
     };
     const editArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('EDIT',$1,'VALID') RETURNING id`, [productionId]);
     await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'continuity-hash','edit-hash',$2::jsonb)`, [editArtifact.rows[0].id, JSON.stringify({ stage:'EDIT', contextFingerprint:`ctx-${suffix}`, continuityArtifactId:'continuity-1', continuityFingerprint:'continuity-hash', durationMs:2500, shotCount:2, manifest: editManifest })]);
+    const continuityArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('CONTINUITY_REPORT',$1,'VALID') RETURNING id`, [productionId]);
+    await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'continuity-input','continuity-hash',$2::jsonb)`, [continuityArtifact.rows[0].id, JSON.stringify({ stage:'CONTINUITY', contextFingerprint:`ctx-${suffix}`, checkCount:8 })]);
 
     const stages = await client.query(`SELECT id,stage FROM v2_1.stage_runs WHERE job_id=$1`, [jobId]);
     const byStage = Object.fromEntries(stages.rows.map((r) => [r.stage, r.id]));
     await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED',output_artifacts='["EDIT"]'::jsonb,output_fingerprint='edit-hash',completed_at=now() WHERE id=$1`, [byStage.EDIT]);
+    await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED',output_artifacts='["CONTINUITY_REPORT"]'::jsonb,output_fingerprint='continuity-hash',completed_at=now() WHERE id=$1`, [byStage.CONTINUITY]);
 
     const workerId = 'platform-adaptation-smoke-worker';
     const claimedJob = await claimJobForProduction(client, { jobId, productionId, workerId, leaseSeconds: 60 });
