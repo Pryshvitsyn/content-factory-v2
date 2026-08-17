@@ -44,6 +44,11 @@ async function main() {
     const scriptArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('SCRIPT',$1,'VALID') RETURNING id`, [productionId]);
     await client.query(`INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata) VALUES($1,1,'script-input','script-output','{}'::jsonb)`, [scriptArtifact.rows[0].id]);
     const bibleArtifact = await client.query(`INSERT INTO v2_1.artifacts(artifact_type,production_id,status) VALUES('PRODUCTION_BIBLE',$1,'VALID') RETURNING id`, [productionId]);
+    await client.query(
+      `INSERT INTO v2_1.artifact_versions(artifact_id,version,input_hash,output_hash,metadata)
+       VALUES($1,1,$2,$3,$4::jsonb)`,
+      [bibleArtifact.rows[0].id, `bible-input-${suffix}`, `bible-output-${suffix}`, JSON.stringify({ stage: 'BIBLE', contextFingerprint: `ctx-${suffix}` })]
+    );
     const bible = await client.query(
       `INSERT INTO v2_1.production_bibles(production_id,version,contract_version,bible_id,context_fingerprint,context_snapshot,document,artifact_id,source_script_artifact_id,source_script_version,source_script_hash)
        VALUES($1,1,1,$2,$3,'{}'::jsonb,$4::jsonb,$5,$6,1,'script-output') RETURNING id`,
@@ -54,7 +59,7 @@ async function main() {
        VALUES($1,1,4000,'{"description":"hero"}'::jsonb,$2,$3,$4,$5) RETURNING id`,
       [productionId, bible.rows[0].id, scriptArtifact.rows[0].id, `ctx-${suffix}`, `plan-${suffix}`]
     );
-    const requirement = await client.query(
+    await client.query(
       `INSERT INTO v2_1.asset_requirements(shot_id,asset_role,required_asset_type,status,constraints,production_bible_id,context_fingerprint,plan_fingerprint)
        VALUES($1,'hero','CHARACTER','MISSING','{}'::jsonb,$2,$3,$4) RETURNING id`,
       [shot.rows[0].id, bible.rows[0].id, `ctx-${suffix}`, `plan-${suffix}`]
@@ -112,9 +117,14 @@ async function main() {
     console.log('PRODUCTION REMAINS RUNNING UNTIL EDIT/VALIDATION/PUBLISH/LEARN.');
     console.log('TEST DATA CLEANED UP.');
   } finally {
-    await client.query(`DELETE FROM v2_1.productions WHERE tenant_id=$1`, [tenantId]).catch(() => {});
-    await client.query(`DELETE FROM v2_1.assets WHERE tenant_id=$1`, [tenantId]).catch(() => {});
-    await client.query(`DELETE FROM v2_1.tenants WHERE id=$1`, [tenantId]).catch(() => {});
+    if (tenantId) {
+      await client.query(`DELETE FROM v2_1.asset_requirements WHERE shot_id IN (SELECT id FROM v2_1.shots WHERE production_id IN (SELECT id FROM v2_1.productions WHERE tenant_id=$1))`, [tenantId]).catch(() => {});
+      await client.query(`DELETE FROM v2_1.shots WHERE production_id IN (SELECT id FROM v2_1.productions WHERE tenant_id=$1)`, [tenantId]).catch(() => {});
+      await client.query(`DELETE FROM v2_1.production_bibles WHERE production_id IN (SELECT id FROM v2_1.productions WHERE tenant_id=$1)`, [tenantId]).catch(() => {});
+      await client.query(`DELETE FROM v2_1.assets WHERE tenant_id=$1`, [tenantId]).catch(() => {});
+      await client.query(`DELETE FROM v2_1.productions WHERE tenant_id=$1`, [tenantId]).catch(() => {});
+      await client.query(`DELETE FROM v2_1.tenants WHERE id=$1`, [tenantId]).catch(() => {});
+    }
     await client.end();
   }
 }
