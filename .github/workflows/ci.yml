@@ -13,6 +13,19 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: content_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d content_os"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
 
     steps:
       - name: Checkout repository
@@ -36,6 +49,15 @@ jobs:
       - name: Run V2.1 execution foundation tests
         run: npm run test:v2.1
 
+      - name: Run PostgreSQL execution and concurrency certification
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: content_os
+        run: node tests/v2.1-postgres-certification.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -49,6 +71,7 @@ jobs:
           test -s migrations/003_v2_1_execution_contract_fix.sql
           test -s migrations/004_v2_1_retry_attempt_contract.sql
           test -s tests/v2.1-database-contract.sql
+          test -s tests/v2.1-postgres-certification.js
 
       - name: Check required project files
         run: |
