@@ -40,7 +40,8 @@ function mockClient(expectedSql, row = {}) {
   const claimedStage = await engine.claimNextStage(stage, { jobId: 'job-1', workerId: 'worker-1' });
   assert.equal(claimedStage.stage, 'SIGNAL');
 
-  const complete = mockClient('UPDATE v2.1.stage_runs', { id: 'stage-1', job_id: 'job-1', stage: 'SIGNAL', attempt: 1, status: 'COMPLETED' });
+  // Completion is ownership-scoped and must send canonical, de-duplicated artifact JSON.
+  const complete = mockClient('UPDATE v2_1.stage_runs', { id: 'stage-1', job_id: 'job-1', stage: 'SIGNAL', attempt: 1, status: 'COMPLETED' });
   const result = await engine.completeStage(complete, {
     stageRunId: 'stage-1', workerId: 'worker-1', outputArtifacts: ['a1', 'a1', 'a2'], outputFingerprint: 'fp',
   });
