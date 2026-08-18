@@ -1,8 +1,8 @@
 BEGIN;
 
--- Contract hardening for 002: deterministic lock syntax and accurate
--- recovery counters. Keep this as a separate migration so 002 remains
--- historically auditable.
+-- Contract hardening for 002: deterministic lock syntax, ownership locking,
+-- and accurate recovery counters. Keep this as a separate migration so 002
+-- remains historically auditable.
 CREATE OR REPLACE FUNCTION v2_1.claim_job(p_worker_id text, p_lease_seconds integer)
 RETURNS SETOF v2_1.jobs
 LANGUAGE plpgsql AS $$
@@ -56,7 +56,14 @@ LANGUAGE plpgsql AS $$
 DECLARE r v2_1.stage_runs; target text; seq integer; prev_done boolean;
 BEGIN
   IF coalesce(trim(p_worker_id),'') = '' THEN RAISE EXCEPTION 'worker_id is required'; END IF;
-  IF NOT EXISTS (SELECT 1 FROM v2_1.jobs WHERE id=p_job_id AND status='RUNNING' AND worker_id=p_worker_id) THEN RETURN; END IF;
+
+  -- Serialize stage claims for one running job. Without this lock two workers
+  -- can both observe the same missing stage and race on the UNIQUE constraint.
+  IF NOT EXISTS (
+    SELECT 1 FROM v2_1.jobs
+     WHERE id=p_job_id AND status='RUNNING' AND worker_id=p_worker_id
+     FOR UPDATE
+  ) THEN RETURN; END IF;
 
   SELECT sd.stage, sd.sequence_no INTO target, seq
     FROM v2_1.stage_definitions sd
@@ -93,7 +100,7 @@ END $$;
 CREATE OR REPLACE FUNCTION v2_1.recover_expired_work()
 RETURNS TABLE(jobs_recovered integer,jobs_failed integer,stages_recovered integer,stages_failed integer)
 LANGUAGE plpgsql AS $$
-DECLARE jr integer:=0; jf integer:=0; sr integer:=0; sf integer:=0; r integer;
+DECLARE jr integer:=0; jf integer:=0; sr integer:=0; sf integer:=0;
 BEGIN
   WITH expired AS (
     SELECT id, attempt, max_attempts FROM v2_1.stage_runs
