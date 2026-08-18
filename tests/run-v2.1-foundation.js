@@ -7,6 +7,7 @@ const tests = [
   'v2.1-contract-test.js',
   'v2.1-stage-sequence-test.js',
   'v2.1-execution-engine-test.js',
+  'v2.1-storage-adapter-test.js',
 ];
 
 for (const test of tests) {
