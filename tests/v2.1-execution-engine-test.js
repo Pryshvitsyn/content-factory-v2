@@ -52,8 +52,14 @@ function mockClient(expectedSql, row = {}) {
   const recover = mockClient('recover_expired_work', { jobs_recovered: 1, jobs_failed: 0, stages_recovered: 1, stages_failed: 0 });
   assert.equal((await engine.recoverExpiredWork(recover)).jobs_recovered, 1);
 
-  assert.throws(() => engine.claimJob(mockClient(), { workerId: '' }), /workerId is required/);
-  assert.throws(() => engine.claimJobForProduction(mockClient(), { workerId: 'w' }), /jobId and productionId are required/);
+  await assert.rejects(
+    engine.claimJob(mockClient(), { workerId: '' }),
+    /workerId is required/
+  );
+  await assert.rejects(
+    engine.claimJobForProduction(mockClient(), { workerId: 'w' }),
+    /jobId and productionId are required/
+  );
 
   console.log('V2.1 execution engine unit contract: PASS');
 })().catch((error) => {
