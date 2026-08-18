@@ -2,7 +2,7 @@
 
 const { createHash } = require('node:crypto');
 const { createReadStream } = require('node:fs');
-const { mkdir, stat, access, open, link, unlink, rm } = require('node:fs/promises');
+const { mkdir, stat, access, open, link, unlink } = require('node:fs/promises');
 const path = require('node:path');
 
 class FilesystemStorage {
@@ -90,10 +90,6 @@ class FilesystemStorage {
 
   createReadStream(key) {
     return createReadStream(this.resolveKey(key));
-  }
-
-  async delete(key) {
-    await rm(this.resolveKey(key), { force: true });
   }
 
   async hash(file) {
