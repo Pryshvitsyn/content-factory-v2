@@ -13,8 +13,9 @@ put(key, bytes, metadata) -> StoredObject
 get(key) -> bytes/stream
 head(key) -> ObjectMetadata
 exists(key) -> boolean
-delete(key) -> void
 ```
+
+There is deliberately **no normal `delete()` operation** in the production storage adapter. Artifact versions are immutable. Physical deletion belongs to a separate administrative retention/purge workflow, which must be auditable and must never be part of normal production execution.
 
 The implementation must never expose absolute Windows paths to the core pipeline.
 
@@ -49,7 +50,9 @@ The adapter joins the configured root with the validated relative key. `..`, abs
 
 ## Immutability
 
-Artifact versions are immutable. `put` must not silently overwrite an existing object for an immutable artifact version. A collision is an error unless an explicit future administrative operation allows replacement.
+Artifact versions are immutable. `put` must not silently overwrite an existing object for an immutable artifact version. A collision is an error.
+
+`artifact_versions` is the canonical version history in PostgreSQL. The legacy `artifacts.version` field is only a compatibility mirror and must not be used as an independent version source.
 
 ## Metadata
 
@@ -61,7 +64,7 @@ The adapter records/returns:
 - modification time
 - content hash when calculated
 
-The canonical artifact metadata remains in PostgreSQL.
+The canonical artifact-version metadata remains in PostgreSQL.
 
 ## Safety and capacity
 
