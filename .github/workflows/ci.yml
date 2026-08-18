@@ -47,6 +47,7 @@ jobs:
           test -s migrations/001_v2.sql
           test -s migrations/002_v2_1_execution.sql
           test -s migrations/003_v2_1_execution_contract_fix.sql
+          test -s migrations/004_v2_1_retry_attempt_contract.sql
           test -s tests/v2.1-database-contract.sql
 
       - name: Check required project files
