@@ -28,7 +28,13 @@ jobs:
         run: npm ci
 
       - name: Check worker syntax
-        run: node --check worker/factory-worker-v2.js
+        run: |
+          node --check worker/factory-worker-v2.js
+          node --check worker/v2.1-production-contract.js
+          node --check worker/v2.1-execution-engine.js
+
+      - name: Run V2.1 execution foundation tests
+        run: npm run test:v2.1
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
@@ -36,8 +42,12 @@ jobs:
       - name: Check build script syntax
         run: bash -n build-v2.sh
 
-      - name: Check migration exists
-        run: test -s migrations/001_v2.sql
+      - name: Check migrations
+        run: |
+          test -s migrations/001_v2.sql
+          test -s migrations/002_v2_1_execution.sql
+          test -s migrations/003_v2_1_execution_contract_fix.sql
+          test -s tests/v2.1-database-contract.sql
 
       - name: Check required project files
         run: |
