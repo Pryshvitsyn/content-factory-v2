@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+      - "feat/v2.1-execution-foundation"
 
 jobs:
   validate:
