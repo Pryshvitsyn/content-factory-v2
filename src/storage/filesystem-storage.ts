@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, stat, access, open, rename, rm } from 'node:fs/promises';
+import { mkdir, stat, access, open, link, unlink, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 export type StorageMetadata = {
@@ -70,7 +70,7 @@ export class FilesystemStorage {
     }
 
     await mkdir(path.dirname(file), { recursive: true });
-    const temp = `${file}.tmp-${process.pid}-${Date.now()}`;
+    const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const handle = await open(temp, 'wx');
     try {
       await handle.writeFile(data);
@@ -79,7 +79,15 @@ export class FilesystemStorage {
       await handle.close();
     }
 
-    await rename(temp, file);
+    try {
+      // link() gives us create-only semantics: an existing destination wins the race.
+      await link(temp, file);
+    } catch (error) {
+      await unlink(temp).catch(() => undefined);
+      throw error;
+    }
+    await unlink(temp);
+
     const info = await stat(file);
     return {
       key,
