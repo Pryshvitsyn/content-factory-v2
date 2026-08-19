@@ -93,17 +93,17 @@ async function main() {
     const owner = winners[0].worker_id;
     assert.ok(['worker-a', 'worker-b'].includes(owner));
 
-    // Two workers race for the first stage. The job-row lock must serialize
-    // the claim so there is exactly one SIGNAL stage run and one winner.
+    // Stage claiming is ownership-scoped. Two concurrent requests using the
+    // same legitimate owner must still create exactly one SIGNAL run.
     const c = client();
     const d = client();
     await Promise.all([c.connect(), d.connect()]);
     const stageClaims = await Promise.all([
-      c.query(`SELECT * FROM v2_1.claim_stage($1,$2,$3)`, [job.id, 'stage-a', 30]),
-      d.query(`SELECT * FROM v2_1.claim_stage($1,$2,$3)`, [job.id, 'stage-b', 30]),
+      c.query(`SELECT * FROM v2_1.claim_stage($1,$2,$3)`, [job.id, owner, 30]),
+      d.query(`SELECT * FROM v2_1.claim_stage($1,$2,$3)`, [job.id, owner, 30]),
     ]);
     const stageWinners = stageClaims.flatMap((r) => r.rows);
-    assert.equal(stageWinners.length, 1, 'exactly one worker must claim the next stage');
+    assert.equal(stageWinners.length, 1, 'exactly one concurrent request must claim the next stage');
     assert.equal(stageWinners[0].stage, 'SIGNAL');
     assert.equal(
       (await admin.query(`SELECT count(*)::int AS n FROM v2_1.stage_runs WHERE job_id=$1 AND stage='SIGNAL'`, [job.id])).rows[0].n,
@@ -122,7 +122,7 @@ async function main() {
 
     const heartbeatRight = await admin.query(
       `SELECT v2_1.heartbeat_stage($1,$2,$3) AS renewed`,
-      [stageRunId, stageWinners[0].worker_id, 30]
+      [stageRunId, owner, 30]
     );
     assert.equal(heartbeatRight.rows[0].renewed, true);
 
@@ -144,10 +144,11 @@ async function main() {
     `, [next.rows[0].id]);
     const recovery = await admin.query(`SELECT * FROM v2_1.recover_expired_work()`);
     assert.equal(recovery.rows[0].stages_recovered, 1);
-    const recovered = (await admin.query(`SELECT status, worker_id, lease_expires_at FROM v2_1.stage_runs WHERE id=$1`, [next.rows[0].id])).rows[0];
+    const recovered = (await admin.query(`SELECT status, worker_id, lease_expires_at, attempt FROM v2_1.stage_runs WHERE id=$1`, [next.rows[0].id])).rows[0];
     assert.equal(recovered.status, 'RETRYING');
     assert.equal(recovered.worker_id, null);
     assert.equal(recovered.lease_expires_at, null);
+    assert.equal(recovered.attempt, 2);
 
     // Production idempotency is database-enforced.
     await assert.rejects(
