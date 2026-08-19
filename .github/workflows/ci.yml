@@ -31,16 +31,26 @@ jobs:
         timeout-minutes: 5
 
       - name: Check worker syntax
-        run: node --check worker/factory-worker-v2.js
+        run: |
+          for file in worker/*.js; do
+            node --check "$file"
+          done
         timeout-minutes: 2
 
-      - name: Check V2.1 integration syntax
+      - name: Check V2.1 runtime contracts
         run: |
+          node --check worker/v2.1-production-contract.js
+          node --check worker/v2.1-execution-engine.js
           node --check src/providers/provider-registry.js
           node --check src/providers/provider-gateway.js
           node --check src/artifacts/artifact-service.js
           node --check src/storage/storage-adapter.js
           node --check tests/v2.1-provider-artifact-integration-test.js
+          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine')"
+        timeout-minutes: 2
+
+      - name: Run V2.1 stage contract
+        run: npm run test:v2.1:contract
         timeout-minutes: 2
 
       - name: Run provider-artifact-storage integration
