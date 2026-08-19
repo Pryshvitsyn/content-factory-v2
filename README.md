@@ -1,93 +1,149 @@
 # Content Factory V2
 
-A controlled V2 architecture for the Content Factory.
+A controlled production architecture for AI-assisted content generation.
 
-Content Factory V2 separates content production into explicit stages with persistent pipeline tracking, artifacts, validation, continuity data, provider configuration, retries, and idempotency.
+## Status
 
-## Current Status
+- **Architecture:** V2
+- **Baseline:** V2.0
+- **Development line:** V2.1
+- **Primary text provider:** NVIDIA
+- **Database:** PostgreSQL
+- **Runtime:** Node.js 22
+- **Stable branch:** `main`
 
-**Version:** 2.0.0-prep
-**Status:** Working V2 baseline
-**Primary text provider:** NVIDIA
-**Database:** PostgreSQL
-**Runtime:** Node.js
+V2 replaces the legacy V1 execution model with explicit production state, deterministic stages, attempts, artifacts, validation, provider configuration, and persistent database contracts.
 
-The current V2 build has been successfully smoke-tested through:
+## What V2 Is
 
-NVIDIA → SCRIPT → PRODUCTION_BIBLE → SHOTS → CONTINUITY → ARTIFACTS → VALIDATION
-
-The current system stops before actual image, video, voice, audio generation, final editing, and publishing. Asset requirements are prepared for downstream generation providers.
-
-## What Changed in V2
-
-V2 adds:
-
-- transactional and idempotent database migration
-- build journal
-- persistent pipeline runs
-- deterministic pipeline stages
-- stage attempt history
-- retry support
-- dead-letter job handling
-- artifact persistence
-- artifact versioning
-- per-stage validation records
-- character and location continuity snapshots
-- shot planning
-- asset requirements
-- provider capability registry
-- NVIDIA-first provider registration
-- preservation of the existing NVIDIA script-generation path
-- end-to-end smoke testing
-
-## Architecture
-
-A production job moves through explicit stages.
+Content Factory V2 is a production system, not a single AI script. A production job is tracked from execution through validated artifacts.
 
 ```text
-Generation Job
-      |
-      v
+Production
+    ↓
 Pipeline Run
-      |
-      +-- Script
-      |
-      +-- Production Bible
-      |
-      +-- Shots
-      |
-      +-- Continuity
-      |
-      +-- Asset Requirements
-      |
-      +-- Artifacts
-      |
-      +-- Validation
-
-     The architecture separates:
-job execution
-pipeline state
-stage execution
-production artifacts
-validation
-provider configuration
-Pipeline Stages
-Script
-Generates and persists the structured script using the existing NVIDIA-first text-generation path.
-Production Bible
-Converts the script into a structured production plan for downstream production.
-Shots
-Breaks scenes into individual shots and stores shot-level production information.
-Continuity
-Tracks continuity information across characters, locations, scenes, and shots.
-Asset Requirements
-Defines the assets required to produce the planned shots and provides the interface to future generation providers.
-Artifacts
-Persists production outputs independently from execution state and supports artifact versioning.
+    ↓
+Stage
+    ↓
+Attempt
+    ↓
+Provider
+    ↓
+Artifact
+    ↓
+Artifact Version
+    ↓
 Validation
-Stores validation results separately from production outputs.
-Database Architecture
-V2 introduces or extends the following structures:
+    ↓
+Storage
+```
+
+The system separates:
+
+- execution state
+- stage state
+- retry/attempt history
+- AI provider configuration
+- production artifacts
+- artifact versions
+- validation results
+- persistent storage
+- continuity and shot-planning data
+
+## Current Certified Foundation
+
+The V2 foundation currently includes:
+
+- PostgreSQL-backed pipeline state
+- deterministic stage sequencing
+- stage ownership and concurrency protection
+- attempt and retry tracking
+- recovery/idempotency contracts
+- artifact and artifact-version data model
+- validation records
+- provider capability registry
+- NVIDIA-first provider configuration
+- storage adapter foundation
+- CI validation on Node.js 22
+
+The execution foundation and PostgreSQL concurrency certification are protected by automated tests.
+
+## Production Pipeline
+
+The current production planning flow is:
+
+```text
+NVIDIA
+  ↓
+SCRIPT
+  ↓
+PRODUCTION_BIBLE
+  ↓
+SHOTS
+  ↓
+CONTINUITY
+  ↓
+ASSET_REQUIREMENTS
+  ↓
+ARTIFACTS
+  ↓
+VALIDATION
+```
+
+V2 currently provides the text, planning, production-package, tracking, and validation foundation. Full image/video/voice/audio generation, final assembly, rendering, and publishing are downstream capabilities and are developed as V2.1 integrations.
+
+## Provider Architecture
+
+Providers are configuration-driven and NVIDIA-first.
+
+The intended V2.1 provider boundary is:
+
+```text
+Execution
+   ↓
+Provider Gateway
+   ↓
+Provider Adapter
+   ↓
+NVIDIA
+   ↓
+Normalized Provider Result
+```
+
+The execution system must not depend directly on a vendor-specific response format. Provider results are normalized before becoming production artifacts.
+
+Additional providers can be added without changing the execution contract.
+
+## Artifact Architecture
+
+Artifacts are production outputs, independent from execution state.
+
+```text
+Artifact
+   ├── Version 1
+   ├── Version 2
+   └── Version 3
+```
+
+Versions are immutable. Regeneration creates a new version rather than destructively replacing the previous result.
+
+Artifact provenance records the production context needed to understand where an output came from, including stage, attempt, provider/model context, and validation state.
+
+## Storage
+
+Storage is accessed through an adapter boundary rather than directly from business logic.
+
+The adapter is responsible for persistence operations and content integrity. Production code should not assume a particular physical storage backend.
+
+The current foundation supports filesystem-backed development storage; object storage can be introduced later without changing the artifact contract.
+
+## Database
+
+V2 uses PostgreSQL for persistent production state.
+
+Core structures include:
+
+```text
 factory_v2_builds
 pipeline_runs
 job_stages
@@ -100,178 +156,103 @@ continuity_snapshots
 shots
 asset_requirements
 validation_results
-Existing Content Factory data is migrated into the V2 architecture rather than discarded.
-Provider Architecture
-The current text-generation provider is NVIDIA.
-The worker currently requires the configured provider to be:
-nvidia
-The NVIDIA API is accessed through its OpenAI-compatible API interface.
-Provider configuration is stored in PostgreSQL.
-API credentials are supplied through environment variables and must never be committed to Git.
-The architecture is designed to support additional providers later.
-Environment
-Create a local .env file based on .env.example.
-Example:
+```
+
+All database changes must be represented by migrations. Undocumented production schema changes are not allowed.
+
+## Testing
+
+Install dependencies:
+
+```bash
+npm ci
+```
+
+Run the V2 smoke test:
+
+```bash
+npm test
+```
+
+Run the V2.1 stage-sequencing tests:
+
+```bash
+npm run test:v2.1
+```
+
+CI additionally validates worker syntax, PostgreSQL execution/concurrency certification, migrations, required files, and Git whitespace.
+
+## Environment
+
+Create a local `.env` from `.env.example`.
+
+```text
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/content_os
 NVIDIA_API_KEY=your_nvidia_api_key_here
-Never commit .env.
-The repository contains .env.example as a safe template.
-Installation
-Install project dependencies:
-npm install
-Database Migration
-The main V2 migration is:
-migrations/001_v2.sql
-The migration creates the V2 structures and migrates existing Content Factory data into the V2 architecture.
-The migration includes idempotency protections for migrated records.
-Build Script
-The controlled V2 build script is:
-build-v2.sh
-The build process:
-verifies PostgreSQL connectivity
-creates a backup
-installs required dependencies
-applies the V2 database migration
-verifies the database structures
-verifies NVIDIA provider configuration
-verifies the enabled NVIDIA model
-installs the V2 worker
-runs the smoke test
-reports the final build result
-The build creates a backup before modifying the working Content Factory.
-Backups are kept outside the Git-tracked source tree.
-Worker
-The V2 worker is:
-worker/factory-worker-v2.js
-The worker can be run directly with:
-node worker/factory-worker-v2.js
-Testing
-Run:
-npm test
-The smoke test verifies the working V2 pipeline:
-NVIDIA
-|
-v
-SCRIPT
-|
-v
-PRODUCTION_BIBLE
-|
-v
-SHOTS
-|
-v
-CONTINUITY
-|
-v
-ARTIFACTS
-|
-v
-VALIDATION
-A successful test ends with:
-SMOKE TEST PASSED.
-The smoke test creates temporary test data and cleans it after completion.
-Idempotency
-V2 introduces idempotency protections for important operations.
-They prevent repeated execution from unintentionally creating duplicate:
-pipeline runs
-stages
-generation jobs
-asset requirements
-migrated legacy records
-This is important because production systems must be safe to retry after failures or interruptions.
-Retry and Failure Handling
-V2 tracks stage attempts separately from the logical stage.
-Example:
-Stage
-|
-+-- Attempt 1
-+-- Attempt 2
-+-- Attempt 3
-Failed jobs can eventually be moved into dead-letter handling instead of being retried indefinitely.
-Artifact Versioning
-Production outputs are stored separately from execution state.
-This allows multiple versions of an artifact to exist while retaining the logical identity of the production output.
-The goal is to make future regeneration and revision safe rather than destructive.
-Continuity
-Continuity is treated as structured production data.
-The system provides a foundation for maintaining consistency across:
-characters
-locations
-visual properties
-scene relationships
-production constraints
-This becomes particularly important when one character or location is reused across multiple videos or scenes.
-Current Limitations
-V2 currently provides the text, planning, production-package, tracking, and validation foundation.
-It does not yet provide:
-image generation
-video generation
-voice generation
-music/audio generation
-final editing
-rendering
-social publishing
-These capabilities are intended to consume the structured V2 production package and asset requirements.
-Repository Structure
+```
+
+Never commit `.env`, API keys, database passwords, credentials, or generated secrets.
+
+## Repository Structure
+
+```text
 content-factory-v2/
-|
-+-- build-v2.sh
-+-- migrations/
-| +-- 001_v2.sql
-+-- tests/
-| +-- smoke-test.js
-+-- worker/
-| +-- factory-worker-v2.js
-+-- package.json
-+-- package-lock.json
-+-- .env.example
-+-- .gitignore
-+-- README.md
-Development Workflow
-The stable release line is:
-main
-Development should happen on dedicated branches.
-Examples:
-release/v2.0.0-prep
-feature/v2.1-asset-generation
-feature/v2.1-provider-system
-fix/stage-retry
-Changes should be:
-developed on a branch
-tested locally
-reviewed
-committed intentionally
-merged into main
-tagged when a release is created
-Database changes must be represented by migrations.
-Do not make undocumented production database changes.
-Release Baseline
-The current working V2 baseline is being prepared for the v2.0.0 release.
-The intended stable release tag is:
-v2.0.0
-After the release baseline is verified, V2.1 development will continue on a separate branch.
-V2.1 Roadmap
-Planned V2.1 work includes:
-provider abstraction
-image generation providers
-video generation providers
-voice generation
-asset generation orchestration
-stronger continuity enforcement
-asset reuse
-generation retries
-final media assembly
-publishing workflows
-These are planned capabilities and are not represented as completed functionality in V2.0.0.
-Security Rules
+├── .github/workflows/       # CI
+├── migrations/              # versioned PostgreSQL changes
+├── tests/                   # smoke, contract and certification tests
+├── worker/                  # V2 execution worker
+├── build-v2.sh              # controlled V2 build
+├── package.json
+├── package-lock.json
+├── .env.example
+├── .gitignore
+└── README.md
+```
+
+## Development Rules
+
+1. `main` is the stable V2 line.
+2. Development happens on dedicated branches.
+3. Database changes require migrations.
+4. Certified execution functions are not changed casually.
+5. Provider-specific logic stays behind provider boundaries.
+6. Artifacts are immutable; revisions create new versions.
+7. Validation is recorded separately from production output.
+8. Secrets never enter Git.
+9. Every meaningful change must pass CI before being considered certified.
+
+## V2.1 Roadmap
+
+V2.1 is built incrementally on the certified V2 foundation:
+
+1. Provider Gateway and normalized provider contract
+2. NVIDIA provider adapter
+3. Artifact Service integration
+4. Storage Adapter integration
+5. End-to-end Stage → Provider → Artifact → Validation → Storage certification
+6. Image/video/voice/audio provider integrations
+7. Asset generation orchestration
+8. Stronger continuity enforcement and asset reuse
+9. Final media assembly
+10. Publishing workflows
+11. Production dashboard and analytics
+
+The rule is simple: a capability is called **certified** only after implementation and automated verification. Architecture or schema alone is not considered complete functionality.
+
+## Security
+
 Never commit:
-.env
-API keys
-database passwords
-production credentials
-generated secrets
-local backups
-Use .env.example to document required environment variables.
-License
+
+- `.env`
+- API keys
+- database passwords
+- production credentials
+- generated secrets
+- local backups
+- private data
+
+Use `.env.example` as the safe configuration template.
+
+## License
+
 Private project.
