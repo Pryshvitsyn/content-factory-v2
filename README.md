@@ -38,17 +38,7 @@ Validation
 Storage
 ```
 
-The system separates:
-
-- execution state
-- stage state
-- retry/attempt history
-- AI provider configuration
-- production artifacts
-- artifact versions
-- validation results
-- persistent storage
-- continuity and shot-planning data
+The system separates execution state, stage state, retry/attempt history, AI provider configuration, production artifacts, artifact versions, validation results, persistent storage, continuity, and shot-planning data.
 
 ## Current Certified Foundation
 
@@ -96,16 +86,14 @@ V2 currently provides the text, planning, production-package, tracking, and vali
 
 Providers are configuration-driven and NVIDIA-first.
 
-The intended V2.1 provider boundary is:
-
 ```text
 Execution
    ↓
-Provider Gateway
+Provider Gateway / routing boundary
    ↓
 Provider Adapter
    ↓
-NVIDIA
+NVIDIA or another enabled provider
    ↓
 Normalized Provider Result
 ```
@@ -113,6 +101,8 @@ Normalized Provider Result
 The execution system must not depend directly on a vendor-specific response format. Provider results are normalized before becoming production artifacts.
 
 Additional providers can be added without changing the execution contract.
+
+See [`docs/PROVIDER-CONTRACT-V2.1.md`](docs/PROVIDER-CONTRACT-V2.1.md).
 
 ## Artifact Architecture
 
@@ -133,9 +123,14 @@ Artifact provenance records the production context needed to understand where an
 
 Storage is accessed through an adapter boundary rather than directly from business logic.
 
-The adapter is responsible for persistence operations and content integrity. Production code should not assume a particular physical storage backend.
+PostgreSQL stores system truth and artifact metadata. Large media is stored through the configured storage backend.
 
-The current foundation supports filesystem-backed development storage; object storage can be introduced later without changing the artifact contract.
+The current V2.1 storage architecture is designed to support filesystem/network-share development and a future move to S3-compatible, MinIO, NAS, or cloud object storage without changing artifact semantics.
+
+See:
+
+- [`docs/STORAGE-ARCHITECTURE.md`](docs/STORAGE-ARCHITECTURE.md)
+- [`docs/STORAGE-ADAPTER-V2.1.md`](docs/STORAGE-ADAPTER-V2.1.md)
 
 ## Database
 
@@ -159,6 +154,8 @@ validation_results
 ```
 
 All database changes must be represented by migrations. Undocumented production schema changes are not allowed.
+
+The V2.1 data-model target is documented in [`docs/V2.1-DATA-MODEL-CONTRACT.md`](docs/V2.1-DATA-MODEL-CONTRACT.md). That document is a contract for controlled future normalization, not permission to bypass current execution certification.
 
 ## Testing
 
@@ -198,6 +195,7 @@ Never commit `.env`, API keys, database passwords, credentials, or generated sec
 ```text
 content-factory-v2/
 ├── .github/workflows/       # CI
+├── docs/                    # canonical architecture and contract documents
 ├── migrations/              # versioned PostgreSQL changes
 ├── tests/                   # smoke, contract and certification tests
 ├── worker/                  # V2 execution worker
@@ -220,6 +218,7 @@ content-factory-v2/
 7. Validation is recorded separately from production output.
 8. Secrets never enter Git.
 9. Every meaningful change must pass CI before being considered certified.
+10. Architecture and contracts live in `docs/` and must be updated when their corresponding boundaries change.
 
 ## V2.1 Roadmap
 
