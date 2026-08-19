@@ -41,12 +41,14 @@ jobs:
         run: |
           node --check worker/v2.1-production-contract.js
           node --check worker/v2.1-execution-engine.js
+          node --check worker/v2.1-stage-runner.js
           node --check src/providers/provider-registry.js
           node --check src/providers/provider-gateway.js
           node --check src/artifacts/artifact-service.js
           node --check src/storage/storage-adapter.js
           node --check tests/v2.1-provider-artifact-integration-test.js
-          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine')"
+          node --check tests/v2.1-stage-runner-integration-test.js
+          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner')"
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
@@ -55,6 +57,10 @@ jobs:
 
       - name: Run provider-artifact-storage integration
         run: npm run test:v2.1:integration
+        timeout-minutes: 3
+
+      - name: Run execution-stage-provider-storage integration
+        run: npm run test:v2.1:stage-runner
         timeout-minutes: 3
 
       - name: Check smoke test syntax
