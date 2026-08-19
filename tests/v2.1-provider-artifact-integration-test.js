@@ -16,10 +16,11 @@ async function run() {
     const fakeNvidia = {
       provider: 'nvidia',
       model: 'nvidia/test-model',
-      async generate({ prompt }) {
+      supports({ capability }) { return capability === 'text-generation'; },
+      async generate({ prompt, model }) {
         return assertProviderResult({
           provider: 'nvidia',
-          model: this.model,
+          model: model || this.model,
           output: `generated:${prompt}`,
           requestId: 'test-request-1',
           usage: { total_tokens: 3 },
@@ -27,13 +28,24 @@ async function run() {
       },
     };
 
-    const gateway = new ProviderGateway({ providers: { nvidia: fakeNvidia } });
+    const gateway = new ProviderGateway({
+      providers: { nvidia: fakeNvidia },
+      priorities: { nvidia: 10 },
+    });
     const storage = new FilesystemStorageAdapter({ root });
     const artifacts = new ArtifactService({ storage });
 
-    const result = await gateway.generate({ provider: 'nvidia', prompt: 'hello V2' });
+    const selection = gateway.select({ capability: 'text-generation' });
+    assert.deepEqual(selection, {
+      provider: 'nvidia',
+      model: 'nvidia/test-model',
+      selectionReason: 'priority',
+    });
+
+    const result = await gateway.generate({ capability: 'text-generation', prompt: 'hello V2' });
     assert.equal(result.provider, 'nvidia');
     assert.equal(result.model, 'nvidia/test-model');
+    assert.equal(result.provenance.selectionReason, 'priority');
 
     const artifact = await artifacts.createVersion({
       artifactId: 'integration-test-artifact',
@@ -51,7 +63,21 @@ async function run() {
     assert.match(artifact.contentHash, /^[a-f0-9]{64}$/);
 
     const stored = await storage.get({ key: artifact.storageKey });
-    assert.equal(stored, result.output);
+    assert.equal(stored.toString('utf8'), result.output);
+    assert.equal((await storage.head({ key: artifact.storageKey })).size, Buffer.byteLength(result.output));
+    assert.equal(await storage.exists({ key: artifact.storageKey }), true);
+
+    const second = await artifacts.createVersion({
+      artifactId: 'integration-test-artifact',
+      type: 'text',
+      content: 'second version',
+      stageId: 'stage-test',
+      attemptId: 'attempt-test-2',
+      provider: result.provider,
+      model: result.model,
+    });
+    assert.equal(second.version, 2);
+    assert.notEqual(second.storageKey, artifact.storageKey);
 
     console.log('V2.1 provider → artifact → storage integration: PASS');
   } finally {
