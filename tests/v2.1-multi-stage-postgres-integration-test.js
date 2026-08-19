@@ -152,7 +152,8 @@ async function run() {
       previousOutputs = result.outputArtifacts;
     }
 
-    assert.equal((await execution.claimNextStage(db, { jobId: job.id, workerId })).stage, undefined);
+    const noNextStage = await execution.claimNextStage(db, { jobId: job.id, workerId });
+    assert.equal(noNextStage, null);
     assert.equal((await db.query(
       `SELECT count(*)::int AS count FROM v2_1.stage_runs WHERE job_id=$1 AND status='COMPLETED'`,
       [job.id]
