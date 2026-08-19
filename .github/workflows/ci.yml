@@ -6,14 +6,20 @@ on:
       - main
       - "release/**"
       - "develop/**"
+      - "feat/v2.1-execution-foundation"
+      - "feat/v2.1-storage-adapter"
+      - "fix/**"
   pull_request:
     branches:
       - main
       - "feat/v2.1-execution-foundation"
+      - "feat/v2.1-storage-adapter"
+      - "fix/**"
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17-alpine
@@ -30,25 +36,28 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+        timeout-minutes: 5
 
       - name: Check worker syntax
         run: |
           node --check worker/factory-worker-v2.js
           node --check worker/v2.1-production-contract.js
           node --check worker/v2.1-execution-engine.js
+        timeout-minutes: 2
 
       - name: Run V2.1 execution foundation tests
         run: npm run test:v2.1
+        timeout-minutes: 5
 
       - name: Run PostgreSQL execution and concurrency certification
         env:
@@ -58,12 +67,15 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: content_os
         run: node tests/v2.1-postgres-certification.js
+        timeout-minutes: 5
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
+        timeout-minutes: 2
 
       - name: Check build script syntax
         run: bash -n build-v2.sh
+        timeout-minutes: 2
 
       - name: Check migrations
         run: |
@@ -73,6 +85,7 @@ jobs:
           test -s migrations/004_v2_1_retry_attempt_contract.sql
           test -s tests/v2.1-database-contract.sql
           test -s tests/v2.1-postgres-certification.js
+        timeout-minutes: 2
 
       - name: Check required project files
         run: |
@@ -80,6 +93,8 @@ jobs:
           test -s package-lock.json
           test -s README.md
           test -s .env.example
+        timeout-minutes: 2
 
       - name: Check Git whitespace
         run: git diff --check
+        timeout-minutes: 2
