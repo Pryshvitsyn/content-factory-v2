@@ -1,25 +1,37 @@
 'use strict';
 
+const { ProviderRegistry } = require('./provider-registry');
+
 class ProviderGateway {
-  constructor({ providers }) {
-    this.providers = new Map(Object.entries(providers || {}));
+  constructor({ providers, priorities } = {}) {
+    this.registry = new ProviderRegistry({ providers, priorities });
   }
 
-  register(name, adapter) {
-    if (!name || !adapter || typeof adapter.generate !== 'function') {
-      throw new Error('Provider adapter must expose generate()');
-    }
-    this.providers.set(name, adapter);
+  register(name, adapter, options) {
+    this.registry.register(name, adapter, options);
   }
 
   get(name) {
-    const provider = this.providers.get(name);
-    if (!provider) throw new Error(`Provider '${name}' is not registered`);
-    return provider;
+    return this.registry.get(name);
   }
 
-  async generate({ provider = 'nvidia', ...request }) {
-    return this.get(provider).generate(request);
+  select(options) {
+    return this.registry.select(options);
+  }
+
+  async generate({ capability = 'text-generation', provider, model, ...request } = {}) {
+    const selection = this.select({ capability, provider, model });
+    const adapter = this.get(selection.provider);
+    const result = await adapter.generate({ ...request, model: selection.model });
+    return {
+      ...result,
+      provenance: {
+        ...(result.provenance || {}),
+        provider: result.provider || selection.provider,
+        model: result.model || selection.model,
+        selectionReason: selection.selectionReason,
+      },
+    };
   }
 }
 
