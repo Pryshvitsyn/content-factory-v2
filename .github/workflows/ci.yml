@@ -15,6 +15,27 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: content_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d content_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: content_os
 
     steps:
       - name: Checkout repository
@@ -48,6 +69,7 @@ jobs:
           node --check src/storage/storage-adapter.js
           node --check tests/v2.1-provider-artifact-integration-test.js
           node --check tests/v2.1-stage-runner-integration-test.js
+          node --check tests/v2.1-stage-runner-postgres-integration-test.js
           node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner')"
         timeout-minutes: 2
 
@@ -61,6 +83,10 @@ jobs:
 
       - name: Run execution-stage-provider-storage integration
         run: npm run test:v2.1:stage-runner
+        timeout-minutes: 3
+
+      - name: Run PostgreSQL execution-stage integration
+        run: npm run test:v2.1:stage-runner:postgres
         timeout-minutes: 3
 
       - name: Check smoke test syntax
