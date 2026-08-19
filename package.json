@@ -10,7 +10,8 @@
     "test": "node tests/smoke-test.js",
     "test:v2.1": "node tests/v2.1-stage-sequence-test.js",
     "test:v2.1:contract": "node tests/v2.1-stage-sequence-test.js",
-    "test:v2.1:integration": "node tests/v2.1-provider-artifact-integration-test.js"
+    "test:v2.1:integration": "node tests/v2.1-provider-artifact-integration-test.js",
+    "test:v2.1:stage-runner": "node tests/v2.1-stage-runner-integration-test.js"
   },
   "keywords": ["content-factory", "ai", "pipeline", "production"],
   "author": "",
