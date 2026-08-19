@@ -1,6 +1,7 @@
 name: Content Factory V2 CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
