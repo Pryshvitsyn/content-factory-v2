@@ -34,6 +34,19 @@ jobs:
         run: node --check worker/factory-worker-v2.js
         timeout-minutes: 2
 
+      - name: Check V2.1 integration syntax
+        run: |
+          node --check src/providers/provider-registry.js
+          node --check src/providers/provider-gateway.js
+          node --check src/artifacts/artifact-service.js
+          node --check src/storage/storage-adapter.js
+          node --check tests/v2.1-provider-artifact-integration-test.js
+        timeout-minutes: 2
+
+      - name: Run provider-artifact-storage integration
+        run: npm run test:v2.1:integration
+        timeout-minutes: 3
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
         timeout-minutes: 2
