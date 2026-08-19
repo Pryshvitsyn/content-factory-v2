@@ -69,6 +69,7 @@ jobs:
           node --check tests/v2.1-stage-runner-integration-test.js
           node --check tests/v2.1-stage-runner-postgres-integration-test.js
           node --check tests/v2.1-multi-stage-integration-test.js
+          node --check tests/v2.1-multi-stage-postgres-integration-test.js
           node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner')"
         timeout-minutes: 2
 
@@ -92,6 +93,10 @@ jobs:
         run: npm run test:v2.1:stage-runner:postgres
         timeout-minutes: 3
 
+      - name: Run PostgreSQL full multi-stage lifecycle
+        run: npm run test:v2.1:multi-stage:postgres
+        timeout-minutes: 5
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
         timeout-minutes: 2
@@ -104,6 +109,7 @@ jobs:
         run: |
           test -s migrations/001_v2.sql
           test -s migrations/002_v2_1_execution.sql
+          test -s migrations/20260819_v2_1_stage_input_propagation.sql
         timeout-minutes: 2
 
       - name: Check required project files
