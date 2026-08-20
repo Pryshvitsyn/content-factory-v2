@@ -39,17 +39,31 @@ async function run() {
   try {
     await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
-    for (const migration of migrations) await db.query(fs.readFileSync(path.join(root, migration), 'utf8'));
 
+    // The V2.1 execution migration intentionally depends on the canonical
+    // V2 workspace/job identities. Create only the minimal fixture needed
+    // for this isolated execution-layer certification.
     await db.query(`
       CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
-      INSERT INTO workspaces(id, name) VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-cert') ON CONFLICT (id) DO NOTHING;
+      CREATE TABLE IF NOT EXISTS generation_jobs (id uuid PRIMARY KEY);
+    `);
+
+    for (const migration of migrations) {
+      await db.query(fs.readFileSync(path.join(root, migration), 'utf8'));
+    }
+
+    await db.query(`
+      INSERT INTO workspaces(id, name)
+      VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-cert')
+      ON CONFLICT (id) DO NOTHING;
       INSERT INTO v2_1.productions(workspace_id, idempotency_key, status, immutable_context)
       VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-production', 'DRAFT', '{"test":true}')
       ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
       INSERT INTO v2_1.jobs(production_id, workspace_id, idempotency_key, status, max_attempts)
-      SELECT p.id, p.workspace_id, 'stage-runner-job', 'QUEUED', 3 FROM v2_1.productions p
-      WHERE p.idempotency_key='stage-runner-production' ON CONFLICT (production_id, idempotency_key) DO NOTHING;
+      SELECT p.id, p.workspace_id, 'stage-runner-job', 'QUEUED', 3
+      FROM v2_1.productions p
+      WHERE p.idempotency_key='stage-runner-production'
+      ON CONFLICT (production_id, idempotency_key) DO NOTHING;
     `);
 
     const job = (await db.query(`SELECT j.id FROM v2_1.jobs j JOIN v2_1.productions p ON p.id=j.production_id
@@ -81,9 +95,10 @@ async function run() {
     console.log('V2.1 PostgreSQL → execution → stage runner → provider → artifact → storage: PASS');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE').catch(() => {});
+    await db.query('DROP TABLE IF EXISTS generation_jobs').catch(() => {});
     await db.query('DROP TABLE IF EXISTS workspaces').catch(() => {});
     await db.end();
-    await fs.rm(storageRoot, { recursive: true, force: true }).catch(() => {});
+    await fs.promises.rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 run().catch((error) => { console.error(error); process.exitCode = 1; });
