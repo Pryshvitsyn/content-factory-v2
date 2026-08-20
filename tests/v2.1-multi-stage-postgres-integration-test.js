@@ -55,6 +55,10 @@ async function run() {
   try {
     await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
+
+    // V2.1 execution migration intentionally depends on the canonical
+    // V2 workspace/job identities. Create only the minimal fixture needed
+    // for this isolated execution-layer certification, before migrations.
     await db.query(`
       CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
       CREATE TABLE IF NOT EXISTS generation_jobs (id uuid PRIMARY KEY);
@@ -77,8 +81,8 @@ async function run() {
     `, [productionKey]);
 
     await db.query(`
-      INSERT INTO v2_1.jobs(production_id, stage, idempotency_key, status, max_attempts)
-      SELECT p.id, 'SIGNAL', $2, 'QUEUED', 3
+      INSERT INTO v2_1.jobs(production_id, stage, status, max_attempts, idempotency_key)
+      SELECT p.id, 'SIGNAL', 'QUEUED', 3, $2
       FROM v2_1.productions p
       WHERE p.name=$1
       ON CONFLICT (production_id, idempotency_key) DO NOTHING
