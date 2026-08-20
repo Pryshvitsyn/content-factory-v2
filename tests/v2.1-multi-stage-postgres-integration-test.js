@@ -55,12 +55,20 @@ async function run() {
   try {
     await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
+
+    // V2.1 execution migration intentionally depends on the canonical
+    // V2 workspace/job identities. Create only the minimal fixture needed
+    // for this isolated execution-layer certification, before migrations.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
+      CREATE TABLE IF NOT EXISTS generation_jobs (id uuid PRIMARY KEY);
+    `);
+
     for (const migration of migrations) {
       await db.query(fs.readFileSync(path.join(root, migration), 'utf8'));
     }
 
     await db.query(`
-      CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
       INSERT INTO workspaces(id, name)
       VALUES ('00000000-0000-0000-0000-000000000021', 'multi-stage-postgres-cert')
       ON CONFLICT (id) DO NOTHING;
@@ -172,6 +180,7 @@ async function run() {
     console.log(`V2.1 PostgreSQL full multi-stage lifecycle (${STAGE_ORDER.length} stages): PASS`);
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE').catch(() => {});
+    await db.query('DROP TABLE IF EXISTS generation_jobs').catch(() => {});
     await db.query('DROP TABLE IF EXISTS workspaces').catch(() => {});
     await db.end();
     fs.rmSync(storageRoot, { recursive: true, force: true });
