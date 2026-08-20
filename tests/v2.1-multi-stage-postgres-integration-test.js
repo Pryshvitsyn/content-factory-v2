@@ -55,10 +55,6 @@ async function run() {
   try {
     await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
-
-    // V2.1 execution migration intentionally depends on the canonical
-    // V2 workspace/job identities. Create only the minimal fixture needed
-    // for this isolated execution-layer certification, before migrations.
     await db.query(`
       CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
       CREATE TABLE IF NOT EXISTS generation_jobs (id uuid PRIMARY KEY);
@@ -75,16 +71,16 @@ async function run() {
     `);
 
     await db.query(`
-      INSERT INTO v2_1.productions(workspace_id, idempotency_key, status, immutable_context)
+      INSERT INTO v2_1.productions(workspace_id, name, status, metadata)
       VALUES ('00000000-0000-0000-0000-000000000021', $1, 'DRAFT', '{"test":true}')
-      ON CONFLICT (workspace_id, idempotency_key) DO NOTHING
+      ON CONFLICT (workspace_id, name) DO NOTHING
     `, [productionKey]);
 
     await db.query(`
-      INSERT INTO v2_1.jobs(production_id, workspace_id, idempotency_key, status, max_attempts)
-      SELECT p.id, p.workspace_id, $2, 'QUEUED', 3
+      INSERT INTO v2_1.jobs(production_id, stage, idempotency_key, status, max_attempts)
+      SELECT p.id, 'SIGNAL', $2, 'QUEUED', 3
       FROM v2_1.productions p
-      WHERE p.idempotency_key=$1
+      WHERE p.name=$1
       ON CONFLICT (production_id, idempotency_key) DO NOTHING
     `, [productionKey, jobKey]);
 
@@ -92,7 +88,7 @@ async function run() {
       SELECT j.id, j.production_id
       FROM v2_1.jobs j
       JOIN v2_1.productions p ON p.id=j.production_id
-      WHERE p.idempotency_key=$1 AND j.idempotency_key=$2
+      WHERE p.name=$1 AND j.idempotency_key=$2
     `, [productionKey, jobKey])).rows[0];
     assert.ok(job);
 
