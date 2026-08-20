@@ -56,18 +56,22 @@ async function run() {
       INSERT INTO workspaces(id, name)
       VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-cert')
       ON CONFLICT (id) DO NOTHING;
-      INSERT INTO v2_1.productions(workspace_id, idempotency_key, status, immutable_context)
+    `);
+    await db.query(`
+      INSERT INTO v2_1.productions(workspace_id, name, status, metadata)
       VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-production', 'DRAFT', '{"test":true}')
-      ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
-      INSERT INTO v2_1.jobs(production_id, workspace_id, idempotency_key, status, max_attempts)
-      SELECT p.id, p.workspace_id, 'stage-runner-job', 'QUEUED', 3
+      ON CONFLICT (workspace_id, name) DO NOTHING;
+    `);
+    await db.query(`
+      INSERT INTO v2_1.jobs(production_id, stage, status, max_attempts, idempotency_key)
+      SELECT p.id, 'SIGNAL', 'QUEUED', 3, 'stage-runner-job'
       FROM v2_1.productions p
-      WHERE p.idempotency_key='stage-runner-production'
+      WHERE p.name='stage-runner-production'
       ON CONFLICT (production_id, idempotency_key) DO NOTHING;
     `);
 
     const job = (await db.query(`SELECT j.id FROM v2_1.jobs j JOIN v2_1.productions p ON p.id=j.production_id
-      WHERE p.idempotency_key='stage-runner-production' AND j.idempotency_key='stage-runner-job'`)).rows[0];
+      WHERE p.name='stage-runner-production' AND j.idempotency_key='stage-runner-job'`)).rows[0];
     assert.ok(job);
     const claimedJob = await execution.claimJob(db, { workerId: 'stage-runner-worker', leaseSeconds: 60 });
     assert.equal(claimedJob.id, job.id);
