@@ -3,14 +3,16 @@
 /**
  * Canonical V2.1 production contract.
  *
- * This module is intentionally dependency-free. Database migrations and the
- * execution engine must agree with these names and ordering.
+ * Stages describe execution checkpoints. The production graph remains the
+ * dependency authority; this ordered contract defines the lifecycle gates.
+ * Human approval is an explicit gate and is never inferred from QA success.
  */
 
 const STAGE_ORDER = [
   'SIGNAL',
   'IDEA',
   'BRIEF',
+  'RESEARCH',
   'BIBLE',
   'CONCEPT',
   'SCRIPT',
@@ -18,8 +20,11 @@ const STAGE_ORDER = [
   'ASSET_PLAN',
   'ASSETS',
   'EDIT',
-  'PLATFORM_ADAPTATION',
-  'VALIDATION',
+  'MASTER',
+  'OBJECTIVE_QA',
+  'HUMAN_APPROVAL',
+  'DELIVERY',
+  'DELIVERY_QA',
   'PUBLISH',
   'ANALYZE',
   'LEARN',
@@ -27,13 +32,18 @@ const STAGE_ORDER = [
 
 const TERMINAL_STAGE = 'LEARN';
 
+const NON_AUTONOMOUS_GATES = new Set(['HUMAN_APPROVAL']);
+const REPAIR_AUTHORIZED_STAGES = new Set(['OBJECTIVE_QA', 'DELIVERY_QA']);
+
 const STAGE_DEFINITIONS = Object.freeze(Object.fromEntries(
   STAGE_ORDER.map((stage, index) => [stage, Object.freeze({
     stage,
     order: index + 1,
     terminal: stage === TERMINAL_STAGE,
-    retryable: true,
+    retryable: !NON_AUTONOMOUS_GATES.has(stage),
     requiresPreviousStage: index > 0,
+    humanGate: NON_AUTONOMOUS_GATES.has(stage),
+    mayAuthorizeAutomaticRepair: REPAIR_AUTHORIZED_STAGES.has(stage),
   })])
 ));
 
@@ -73,10 +83,22 @@ function assertStageTransition(fromStage, toStage) {
   return true;
 }
 
+function assertAutomaticRepairAuthorized(stage, finding) {
+  if (!REPAIR_AUTHORIZED_STAGES.has(stage)) {
+    throw new Error(`Automatic repair is not authorized from stage: ${stage}`);
+  }
+  if (!finding || finding.kind !== 'objective_rule_violation') {
+    throw new Error('Automatic repair requires an objective_rule_violation finding');
+  }
+  return true;
+}
+
 module.exports = {
   STAGE_ORDER: Object.freeze([...STAGE_ORDER]),
   STAGE_DEFINITIONS,
   TERMINAL_STAGE,
+  NON_AUTONOMOUS_GATES: Object.freeze([...NON_AUTONOMOUS_GATES]),
+  REPAIR_AUTHORIZED_STAGES: Object.freeze([...REPAIR_AUTHORIZED_STAGES]),
   getStageDefinition,
   isValidStage,
   isTerminalStage,
@@ -84,4 +106,5 @@ module.exports = {
   previousStage,
   stageIndex,
   assertStageTransition,
+  assertAutomaticRepairAuthorized,
 };
