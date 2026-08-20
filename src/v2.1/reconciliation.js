@@ -30,6 +30,14 @@ function classifyReconciliation({ delivery, attempt, maxAttempts = DEFAULT_MAX_A
   }
 }
 
+function assertRecoveryOwnership({ action, currentOwnerId, leaseValid }) {
+  if (action === 'DEFER') return true;
+  if (!currentOwnerId || leaseValid !== true) {
+    throw new Error('recovery requires current lease ownership');
+  }
+  return true;
+}
+
 function calculateBackoffMs(attempt, { baseMs = 1000, maxMs = 300000 } = {}) {
   assertAttempt(attempt);
   if (baseMs < 0 || maxMs < 0 || maxMs < baseMs) throw new Error('invalid backoff bounds');
@@ -44,6 +52,7 @@ module.exports = {
   RECOVERY_ACTIONS,
   DEFAULT_MAX_ATTEMPTS,
   classifyReconciliation,
+  assertRecoveryOwnership,
   calculateBackoffMs,
   shouldReconcile,
 };
