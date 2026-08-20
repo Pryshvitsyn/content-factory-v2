@@ -1,3 +1,4 @@
+-- V2.1 execution foundation: jobs, stages, claims, leases
 BEGIN;
 
 CREATE SCHEMA IF NOT EXISTS v2_1;
@@ -5,37 +6,33 @@ CREATE SCHEMA IF NOT EXISTS v2_1;
 CREATE TABLE IF NOT EXISTS v2_1.productions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  source_job_id uuid REFERENCES generation_jobs(id) ON DELETE SET NULL,
-  idempotency_key text NOT NULL,
+  name text NOT NULL,
   status text NOT NULL DEFAULT 'DRAFT',
-  immutable_context jsonb NOT NULL DEFAULT '{}'::jsonb,
-  context_fingerprint text,
   created_at timestamptz NOT NULL DEFAULT now(),
   started_at timestamptz,
   completed_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id, idempotency_key),
-  CHECK (status IN ('DRAFT','RUNNING','WAITING_APPROVAL','COMPLETED','FAILED','CANCELLED','DEAD_LETTER'))
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE(workspace_id, name),
+  CHECK (status IN ('DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED'))
 );
 
 CREATE TABLE IF NOT EXISTS v2_1.jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id uuid NOT NULL REFERENCES v2_1.productions(id) ON DELETE CASCADE,
-  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  idempotency_key text NOT NULL,
+  generation_job_id uuid REFERENCES generation_jobs(id) ON DELETE SET NULL,
+  stage text NOT NULL,
   status text NOT NULL DEFAULT 'QUEUED',
+  attempt integer NOT NULL DEFAULT 1,
+  max_attempts integer NOT NULL DEFAULT 3,
   worker_id text,
   lease_expires_at timestamptz,
   heartbeat_at timestamptz,
-  attempt integer NOT NULL DEFAULT 1,
-  max_attempts integer NOT NULL DEFAULT 3,
-  input_artifacts jsonb NOT NULL DEFAULT '[]'::jsonb,
-  output_artifacts jsonb NOT NULL DEFAULT '[]'::jsonb,
-  input_fingerprint text,
-  output_fingerprint text,
-  error jsonb NOT NULL DEFAULT '{}'::jsonb,
-  last_error jsonb NOT NULL DEFAULT '{}'::jsonb,
   next_attempt_at timestamptz,
+  idempotency_key text NOT NULL,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  error jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   started_at timestamptz,
   completed_at timestamptz,
@@ -140,16 +137,29 @@ BEGIN
    )
    ORDER BY sd.sequence_no LIMIT 1;
   IF target IS NULL THEN RETURN; END IF;
+
   SELECT s.* INTO r FROM v2_1.stage_runs s WHERE s.job_id=p_job_id AND s.stage=target
     AND s.status IN ('RETRYING','PENDING') AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
     ORDER BY s.attempt DESC FOR UPDATE SKIP LOCKED LIMIT 1;
+
   IF NOT FOUND THEN
     INSERT INTO v2_1.stage_runs(job_id,stage,attempt,status,max_attempts)
     VALUES(p_job_id,target,1,'PENDING',3)
     ON CONFLICT (job_id, stage, attempt) DO NOTHING
     RETURNING * INTO r;
-    IF NOT FOUND THEN RETURN; END IF;
+
+    -- If another worker won the insert, re-read the still-claimable row.
+    -- The winner holds the row lock while it transitions it to RUNNING, so
+    -- a concurrent loser will either see the RUNNING row or acquire a
+    -- legitimate retry/pending row after the winner releases the lock.
+    IF NOT FOUND THEN
+      SELECT s.* INTO r FROM v2_1.stage_runs s WHERE s.job_id=p_job_id AND s.stage=target
+        AND s.status IN ('RETRYING','PENDING') AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
+        ORDER BY s.attempt DESC FOR UPDATE SKIP LOCKED LIMIT 1;
+      IF NOT FOUND THEN RETURN; END IF;
+    END IF;
   END IF;
+
   UPDATE v2_1.stage_runs SET status='RUNNING', worker_id=p_worker_id,
     lease_expires_at=now()+make_interval(secs=>greatest(5,p_lease_seconds)), heartbeat_at=now(),
     started_at=coalesce(started_at,now()), updated_at=now() WHERE id=r.id RETURNING * INTO r;
