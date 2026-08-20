@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const {
   classifyReconciliation,
+  assertRecoveryOwnership,
   calculateBackoffMs,
   shouldReconcile,
 } = require('../src/v2.1/reconciliation');
@@ -20,6 +21,11 @@ function run() {
   assert.deepEqual(classifyReconciliation({ delivery: 'UNKNOWN', attempt: 2 }), {
     action: 'DEFER', nextDeliveryState: 'UNKNOWN',
   });
+
+  assert.equal(assertRecoveryOwnership({ action: 'SAFE_RETRY', currentOwnerId: 'worker-a', leaseValid: true }), true);
+  assert.throws(() => assertRecoveryOwnership({ action: 'SAFE_RETRY', currentOwnerId: 'worker-a', leaseValid: false }), /current lease ownership/);
+  assert.throws(() => assertRecoveryOwnership({ action: 'CONFIRM', currentOwnerId: null, leaseValid: true }), /current lease ownership/);
+  assert.equal(assertRecoveryOwnership({ action: 'DEFER', currentOwnerId: null, leaseValid: false }), true);
 
   assert.equal(calculateBackoffMs(1), 1000);
   assert.equal(calculateBackoffMs(2), 2000);
