@@ -42,14 +42,14 @@ async function setup(db) {
   const jobId = crypto.randomUUID();
 
   await db.query(
-    `INSERT INTO v2_1.productions(id, workspace_id, idempotency_key, status)
-     VALUES ($1,$2,$3,'DRAFT')`,
+    `INSERT INTO v2_1.productions(id, workspace_id, name, status, metadata)
+     VALUES ($1,$2,$3,'DRAFT','{}')`,
     [productionId, workspaceId, `concurrency-cert-${productionId}`]
   );
   await db.query(
-    `INSERT INTO v2_1.jobs(id, production_id, workspace_id, idempotency_key, status)
-     VALUES ($1,$2,$3,$4,'QUEUED')`,
-    [jobId, productionId, workspaceId, `concurrency-job-${jobId}`]
+    `INSERT INTO v2_1.jobs(id, production_id, stage, idempotency_key, status)
+     VALUES ($1,$2,'SIGNAL',$3,'QUEUED')`,
+    [jobId, productionId, `concurrency-job-${jobId}`]
   );
   return { workspaceId, productionId, jobId };
 }
