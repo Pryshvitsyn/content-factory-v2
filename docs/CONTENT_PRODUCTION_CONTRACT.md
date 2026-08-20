@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Content Factory turns a human creative idea into production-ready, validated, human-approved, publishable content.
+Content Factory turns a human creative idea into production-ready, objectively validated, human-approved, publishable content.
 
 The factory is autonomous in **execution**, but not autonomous in **creative authority**.
 
@@ -13,10 +13,12 @@ IDEA
   -> THINK / PLAN
   -> CREATE
   -> ASSEMBLE
-  -> RENDER
+  -> MASTER
   -> OBJECTIVE QA
-      PASS -> HUMAN REVIEW -> APPROVE -> PUBLISH
-      FAIL -> TARGETED REPAIR -> RENDER AFFECTED OUTPUT -> QA AGAIN
+      PASS -> HUMAN REVIEW
+                APPROVE -> DELIVERY -> DELIVERY QA -> PUBLISH
+                REVISION -> NEW REVISION
+      FAIL -> TARGETED REPAIR -> AFFECTED REBUILD -> QA AGAIN
 ```
 
 A successful creative result is never regenerated merely because an automated critic believes another version might be better.
@@ -25,7 +27,7 @@ A successful creative result is never regenerated merely because an automated cr
 
 Human approval is the authority for subjective creative quality.
 
-The factory MUST NOT autonomously regenerate an otherwise compliant production because of subjective judgments such as:
+The factory MUST NOT autonomously regenerate an otherwise compliant production because of:
 
 - taste
 - preference
@@ -41,35 +43,7 @@ A human revision request explicitly authorizes a new creative revision.
 
 The factory MAY initiate automatic repair only when a deterministic or explicitly configured rule fails.
 
-Examples:
-
-### Technical integrity
-- corrupt or unreadable media
-- invalid codec/container
-- invalid resolution or aspect ratio
-- invalid frame rate
-- missing audio where required
-- invalid loudness/clipping constraints
-- black/corrupt frames
-- missing required assets
-- failed render integrity
-
-### Production integrity
-- script/voice mismatch
-- missing required scene/shot
-- timeline/spec mismatch
-- continuity violation
-- duplicate output where uniqueness is required
-- impossible or visibly malformed generated content, when an explicit detector/rule exists
-- character/location state mismatch
-
-### Brand/project constraints
-- prohibited content
-- required element missing
-- required CTA missing
-- forbidden logo treatment
-- duration outside configured bounds
-- other explicit project constraints
+Examples include technical integrity, script/voice mismatch, missing required scene/shot, continuity violations, duplicate output where uniqueness is required, malformed generated content when an explicit detector exists, required brand elements, prohibited content, CTA requirements, duration bounds, and destination requirements.
 
 Subjective quality scores alone MUST NOT trigger automatic repair.
 
@@ -77,112 +51,66 @@ Subjective quality scores alone MUST NOT trigger automatic repair.
 
 Automatic repair MUST be targeted.
 
-The system MUST identify the smallest affected artifact set and regenerate only the affected nodes plus their invalidated downstream derivatives.
+The system MUST identify the smallest affected artifact set and regenerate only affected nodes plus their invalidated downstream derivatives.
 
-Example:
+Unaffected artifacts MUST remain immutable.
 
-```text
-Shot 17 visual FAIL
-        |
-        +--> regenerate Shot 17
-        |
-        +--> rebuild affected timeline
-        |
-        +--> rerender Master
-        |
-        +--> regenerate affected delivery packages
-```
-
-Unaffected script, voice, music, shots and assets MUST remain immutable.
+Repeated objective failure MUST stop at an explicit failure/dead-letter boundary; it MUST NOT create an uncontrolled regeneration loop.
 
 ## 6. Immutable Production Truth
 
-Once an artifact version is accepted by objective QA, it is immutable.
+Every accepted artifact version is immutable.
 
-The factory MUST NOT silently mutate an accepted artifact.
-
-New work creates a new revision/version with explicit lineage.
+A new creative revision creates a new version with explicit lineage. No process may silently mutate an accepted artifact.
 
 ## 7. Production Layers
 
 ### Creative layer
 
-Responsible for:
-
-- interpreting the idea
-- research when required
-- creative strategy
-- concept development
-- script
-- visual direction
-- audio direction
-- edit intent
+Interprets intent, researches when required, develops strategy/concept, writes the script, defines visual/audio direction and edit intent.
 
 ### Execution layer
 
-Responsible for:
-
-- deterministic stage execution
-- provider invocation
-- retries
-- idempotency
-- artifact persistence
-- dependency tracking
-- rendering
+Runs deterministic stages, provider calls, retries, idempotency, persistence, dependency tracking and rendering.
 
 ### Quality layer
 
-Responsible for:
-
-- deterministic validation
-- constraint validation
-- media integrity
-- continuity checks
-- platform compliance
-- repair planning
+Runs deterministic validation, constraint validation, media integrity, continuity checks, destination compliance and repair planning.
 
 ### Human approval layer
 
-Responsible for:
-
-- subjective creative approval
-- requested revisions
-- final release authorization
+Controls subjective creative approval, requested revisions and final release authorization.
 
 ### Delivery layer
 
-Responsible for:
-
-- platform transformation
-- package validation
-- publication
-- publication status
+Transforms the approved canonical master into destination-specific packages, validates them and publishes them through destination adapters.
 
 ## 8. Canonical Master
 
-The canonical Master is the approved production truth from which platform deliveries are derived.
+The canonical Master is the approved production truth from which all destination deliveries are derived.
 
-Platform packages MUST NOT become independent creative masters.
+Destination packages MUST NOT become independent creative masters.
 
 ```text
 CONTENT UNIT
     |
     +-- SOURCE ARTIFACTS
-    |
-    +-- COMPOSITION
+    +-- COMPOSITION / TIMELINE
     |
     +-- CANONICAL MASTER
              |
-             +-- TikTok package
-             +-- Instagram package
-             +-- YouTube package
+             +-- DELIVERY POLICY A -> ADAPTER A
+             +-- DELIVERY POLICY B -> ADAPTER B
+             +-- DELIVERY POLICY N -> ADAPTER N
 ```
+
+The core MUST NOT hard-code a finite list of platforms. A destination is an adapter plus a versioned policy defining requirements, transformation and publication capabilities.
 
 ## 9. Content Identity and Lineage
 
-Every production MUST have a stable content identity.
+Every production has a stable content identity.
 
-Every artifact MUST expose, directly or through lineage:
+Every artifact MUST expose directly or through lineage:
 
 - content identity
 - logical artifact identity
@@ -194,45 +122,33 @@ Every artifact MUST expose, directly or through lineage:
 - content hash when applicable
 - validation state
 
-The system MUST be able to answer:
-
-> Why does this artifact exist?
-
-with its complete upstream lineage.
+The system MUST be able to answer why an artifact exists and exactly which upstream inputs produced it.
 
 ## 10. Validation Is Cross-Cutting
 
-Validation is not a final pipeline stage only.
-
-Artifacts MAY be validated at every production boundary:
+Validation is not only a final stage.
 
 ```text
-Script       -> semantic/constraint validation
+Script       -> semantic / constraint validation
 Voice        -> audio validation
-Visual       -> media/continuity validation
+Visual       -> media / continuity validation
 Timeline     -> structural validation
-Master       -> media validation
-Delivery     -> platform validation
+Master       -> media / production validation
+Delivery     -> destination validation
 ```
 
-## 11. State Model
+## 11. Execution and Approval State
 
 Execution state and approval state MUST remain distinct.
 
-Recommended lifecycle:
+The lifecycle is conceptually:
 
 ```text
-DRAFT
-PLANNED
-IN_PROGRESS
-RENDERED
-QA_FAILED
-REPAIRING
-QA_PASSED
-AWAITING_HUMAN_APPROVAL
-APPROVED
-PUBLISHING
-PUBLISHED
+DRAFT -> PLANNED -> IN_PROGRESS -> MASTERED
+MASTERED -> QA_FAILED -> REPAIRING -> MASTERED
+MASTERED -> QA_PASSED -> AWAITING_HUMAN_APPROVAL
+AWAITING_HUMAN_APPROVAL -> APPROVED | REVISION_REQUESTED
+APPROVED -> DELIVERY -> DELIVERY_QA -> PUBLISHED
 ```
 
 `QA_PASSED` does not imply `APPROVED`.
@@ -241,53 +157,52 @@ PUBLISHED
 
 ## 12. Deterministic Rebuild
 
-Given identical approved inputs, configuration, provider/model identity and renderer version, the system SHOULD produce reproducible production decisions and MUST preserve the provenance necessary to explain any non-bit-identical output.
+Given identical approved inputs, configuration, provider/model identity and renderer version, the system SHOULD produce reproducible production decisions and MUST preserve sufficient provenance to explain any non-bit-identical output.
 
 ## 13. AI Provider Provenance
 
-AI-generated artifacts MUST retain sufficient provenance to identify, where available:
-
-- provider
-- model
-- model/version identifier
-- prompt/template identity
-- relevant configuration
-- input/reference artifacts
-- generation attempt
+AI-generated artifacts MUST retain sufficient provenance, where available, to identify provider, model/version, prompt/template identity, relevant configuration, input/reference artifacts and generation attempt.
 
 Secrets MUST never be persisted as provenance.
 
-## 14. Failure Policy
+## 14. Delivery Adapter Contract
 
-Transient execution failure MAY retry according to deterministic retry policy.
+A destination adapter is responsible only for destination-specific behavior.
 
-Objective production failure MAY trigger targeted repair.
+```text
+prepare(master, policy)
+validate(package, policy)
+publish(package, idempotency_key)
+getPublicationStatus(external_reference)
+```
 
-Repeated objective failure MUST terminate in an explicit failed state or dead-letter state rather than creating an uncontrolled regeneration loop.
+Adapters MUST be versioned, idempotent where the destination permits it, auditable, and isolated from creative production logic.
 
-Creative disagreement MUST go to human review, not autonomous regeneration.
+Adding a new destination MUST NOT require changes to the Content Graph, Creative layer, Master contract or existing adapters.
 
 ## 15. Publication Gate
 
-Nothing is publishable merely because rendering succeeded.
-
-Publication requires:
+Publication requires ALL of:
 
 ```text
-Master exists
+Canonical Master exists
 AND
-Master objective QA passed
+Master objective QA = PASS
 AND
-Human approval exists
+Human approval = APPROVED
 AND
-Delivery package validation passed
+Delivery package exists
+AND
+Delivery QA = PASS
+AND
+Destination adapter = ENABLED
 ```
+
+Publication attempts are independently auditable and retryable. A successful publication MUST retain the destination's external reference when available.
 
 ## 16. Architectural Rule
 
-The Content Factory is not a linear chain of AI calls.
-
-It is a controlled production system:
+The Content Factory is not a linear chain of AI calls. It is a controlled production system:
 
 ```text
 Human Intent
@@ -316,7 +231,10 @@ Canonical Master
 Policy-driven Delivery
      |
      v
+Destination Adapter
+     |
+     v
 Publication
 ```
 
-The system is optimized for **high-quality first-pass production, deterministic compliance, minimal unnecessary regeneration, explicit human creative authority, and auditable delivery**.
+The system is optimized for **excellent first-pass production, deterministic compliance, minimal unnecessary regeneration, explicit human creative authority, extensible destinations, and auditable delivery**.
