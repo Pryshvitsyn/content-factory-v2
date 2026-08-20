@@ -30,10 +30,16 @@ function classifyReconciliation({ delivery, attempt, maxAttempts = DEFAULT_MAX_A
   }
 }
 
-function assertRecoveryOwnership({ action, currentOwnerId, leaseValid }) {
+function assertRecoveryOwnership({ action, workerId, leaseExpiresAt, now = new Date() }) {
   if (action === 'DEFER') return true;
-  if (!currentOwnerId || leaseValid !== true) {
-    throw new Error('recovery requires current lease ownership');
+  if (typeof workerId !== 'string' || workerId.trim() === '') {
+    throw new Error('recovery requires current worker ownership');
+  }
+
+  const expiry = leaseExpiresAt instanceof Date ? leaseExpiresAt : new Date(leaseExpiresAt);
+  const reference = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(expiry.getTime()) || Number.isNaN(reference.getTime()) || expiry.getTime() <= reference.getTime()) {
+    throw new Error('recovery requires a valid, unexpired worker lease');
   }
   return true;
 }
