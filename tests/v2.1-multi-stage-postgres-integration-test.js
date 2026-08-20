@@ -71,17 +71,21 @@ async function run() {
     await db.query(`
       INSERT INTO workspaces(id, name)
       VALUES ('00000000-0000-0000-0000-000000000021', 'multi-stage-postgres-cert')
-      ON CONFLICT (id) DO NOTHING;
+      ON CONFLICT (id) DO NOTHING
+    `);
 
+    await db.query(`
       INSERT INTO v2_1.productions(workspace_id, idempotency_key, status, immutable_context)
       VALUES ('00000000-0000-0000-0000-000000000021', $1, 'DRAFT', '{"test":true}')
-      ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
+      ON CONFLICT (workspace_id, idempotency_key) DO NOTHING
+    `, [productionKey]);
 
+    await db.query(`
       INSERT INTO v2_1.jobs(production_id, workspace_id, idempotency_key, status, max_attempts)
       SELECT p.id, p.workspace_id, $2, 'QUEUED', 3
       FROM v2_1.productions p
       WHERE p.idempotency_key=$1
-      ON CONFLICT (production_id, idempotency_key) DO NOTHING;
+      ON CONFLICT (production_id, idempotency_key) DO NOTHING
     `, [productionKey, jobKey]);
 
     const job = (await db.query(`
