@@ -14,7 +14,8 @@
     "test:v2.1:multi-stage": "node tests/v2.1-multi-stage-integration-test.js",
     "test:v2.1:multi-stage:postgres": "node tests/v2.1-multi-stage-postgres-integration-test.js",
     "test:v2.1:retry-recovery:postgres": "node tests/v2.1-retry-recovery-postgres-integration-test.js",
-    "test:v2.1:concurrency:postgres": "node tests/v2.1-concurrency-postgres-certification.js"
+    "test:v2.1:concurrency:postgres": "node tests/v2.1-concurrency-postgres-certification.js",
+    "test:v2.1:validation": "node tests/v2.1-validation-engine-test.js"
   },
   "keywords": ["content-factory", "ai", "pipeline", "production"],
   "author": "",
