@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto');
 
 const PUBLICATION_BLOCKED = 'PUBLICATION_BLOCKED';
+const PUBLICATION_IN_PROGRESS = 'PUBLICATION_IN_PROGRESS';
 
 function publicationKey({ artifactVersionId, destination, idempotencyKey }) {
   const raw = idempotencyKey || `${artifactVersionId}:${destination}`;
@@ -16,18 +17,36 @@ function executePublication({ artifactVersionId, destination, gate, idempotencyK
 
   const key = publicationKey({ artifactVersionId, destination, idempotencyKey });
   const existing = store.get(key);
-  if (existing) return { ...existing, reused: true };
+  if (existing?.status === 'PUBLISHED') return { ...existing, reused: true };
+  if (existing?.status === 'PUBLISHING') {
+    const error = new Error(PUBLICATION_IN_PROGRESS);
+    error.code = PUBLICATION_IN_PROGRESS;
+    throw error;
+  }
 
-  const result = publisher({ artifactVersionId, destination });
-  const record = {
+  const intent = {
     publicationKey: key,
     artifactVersionId,
     destination,
-    status: 'PUBLISHED',
-    result,
+    status: 'PUBLISHING',
+    result: null,
   };
-  store.set(key, record);
-  return { ...record, reused: false };
+  store.set(key, intent);
+
+  try {
+    const result = publisher({ artifactVersionId, destination, idempotencyKey: key });
+    const record = { ...intent, status: 'PUBLISHED', result };
+    store.set(key, record);
+    return { ...record, reused: false };
+  } catch (error) {
+    store.set(key, { ...intent, status: 'FAILED', error: { message: error.message, code: error.code } });
+    throw error;
+  }
 }
 
-module.exports = { executePublication, publicationKey, PUBLICATION_BLOCKED };
+module.exports = {
+  executePublication,
+  publicationKey,
+  PUBLICATION_BLOCKED,
+  PUBLICATION_IN_PROGRESS,
+};
