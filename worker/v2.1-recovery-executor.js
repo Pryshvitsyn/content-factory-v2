@@ -10,12 +10,6 @@ function requireDependency(name, value) {
   if (!value || typeof value !== 'function') throw new Error(`${name} function is required`);
 }
 
-/**
- * Executes one deterministic reconciliation decision.
- * The execution engine remains the authority for durable state, claims and leases.
- * This boundary deliberately delegates the external provider lookup and each
- * durable mutation so the executor cannot silently bypass ownership controls.
- */
 class RecoveryExecutor {
   constructor({ reconcile, confirm, safeRetry, defer, fail } = {}) {
     requireDependency('reconcile', reconcile);
@@ -33,6 +27,13 @@ class RecoveryExecutor {
   async run({ publication, workerId, leaseExpiresAt, now = new Date() } = {}) {
     if (!publication?.id) throw new Error('publication.id is required');
     if (!shouldReconcile(publication)) return { action: 'NOOP', publicationId: publication.id };
+
+    assertRecoveryOwnership({
+      action: 'RECONCILE',
+      workerId,
+      leaseExpiresAt,
+      now,
+    });
 
     const result = await this.reconcile(publication);
     const decision = classifyReconciliation({
