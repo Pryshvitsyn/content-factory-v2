@@ -55,16 +55,28 @@ async function run() {
   try {
     await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
+
+    // The V2.1 migration has foreign keys into the canonical V2 tables.
+    // Bootstrap only those identities here so this certification is isolated
+    // from the order and cleanup behavior of other CI tests.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS workspaces (
+        id uuid PRIMARY KEY,
+        name text NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS generation_jobs (
+        id uuid PRIMARY KEY
+      );
+      INSERT INTO workspaces(id, name)
+      VALUES ('00000000-0000-0000-0000-000000000021', 'multi-stage-postgres-cert')
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
     for (const migration of migrations) {
       await db.query(fs.readFileSync(path.join(root, migration), 'utf8'));
     }
 
     await db.query(`
-      CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
-      INSERT INTO workspaces(id, name)
-      VALUES ('00000000-0000-0000-0000-000000000021', 'multi-stage-postgres-cert')
-      ON CONFLICT (id) DO NOTHING;
-
       INSERT INTO v2_1.productions(workspace_id, idempotency_key, status, immutable_context)
       VALUES ('00000000-0000-0000-0000-000000000021', $1, 'DRAFT', '{"test":true}')
       ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
@@ -172,6 +184,7 @@ async function run() {
     console.log(`V2.1 PostgreSQL full multi-stage lifecycle (${STAGE_ORDER.length} stages): PASS`);
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE').catch(() => {});
+    await db.query('DROP TABLE IF EXISTS generation_jobs').catch(() => {});
     await db.query('DROP TABLE IF EXISTS workspaces').catch(() => {});
     await db.end();
     fs.rmSync(storageRoot, { recursive: true, force: true });
