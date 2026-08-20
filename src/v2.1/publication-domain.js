@@ -40,10 +40,18 @@ function assertTransition(from, to) {
   }
 }
 
-function publicationIdentity({ artifactVersionId, destination, idempotencyKey }) {
+function canonicalPublicationIdentity({ artifactVersionId, destination }) {
   if (!artifactVersionId) throw new Error('artifactVersionId is required');
   if (!destination) throw new Error('destination is required');
-  return idempotencyKey || `${artifactVersionId}:${destination}`;
+  return `${artifactVersionId}:${destination}`;
+}
+
+function publicationIdentity({ artifactVersionId, destination, idempotencyKey }) {
+  const canonical = canonicalPublicationIdentity({ artifactVersionId, destination });
+  if (idempotencyKey !== undefined && idempotencyKey !== canonical) {
+    throw new Error('idempotencyKey must match canonical publication identity');
+  }
+  return canonical;
 }
 
 function createPublicationIntent({ artifactVersionId, destination, idempotencyKey, accountId, platform, channel, scheduledAt, timezone, productionRunId, pipelineRunId, correlationId }) {
@@ -72,6 +80,7 @@ module.exports = {
   assertDeliveryState,
   canTransition,
   assertTransition,
+  canonicalPublicationIdentity,
   publicationIdentity,
   createPublicationIntent,
 };
