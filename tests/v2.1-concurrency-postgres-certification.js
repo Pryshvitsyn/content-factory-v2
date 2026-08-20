@@ -2,8 +2,11 @@
 
 const { Client } = require('pg');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const WORKERS = 8;
+const root = path.resolve(__dirname, '..');
 
 function client() {
   return new Client({
@@ -13,6 +16,22 @@ function client() {
     password: process.env.PGPASSWORD || 'postgres',
     database: process.env.PGDATABASE || 'content_os',
   });
+}
+
+async function setupDatabase(db) {
+  await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
+  await db.query('DROP TABLE IF EXISTS generation_jobs CASCADE');
+  await db.query('DROP TABLE IF EXISTS workspaces CASCADE');
+  await db.query('CREATE TABLE workspaces (id uuid PRIMARY KEY, name text NOT NULL)');
+  await db.query('CREATE TABLE generation_jobs (id uuid PRIMARY KEY)');
+  await db.query(
+    'INSERT INTO workspaces(id,name) VALUES ($1,$2)',
+    ['00000000-0000-0000-0000-000000000032', 'concurrency-cert']
+  );
+
+  await db.query(fs.readFileSync(path.join(root, 'migrations/002_v2_1_execution.sql'), 'utf8'));
+  await db.query(fs.readFileSync(path.join(root, 'migrations/20260819_v2_1_stage_input_propagation.sql'), 'utf8'));
+  await db.query(fs.readFileSync(path.join(root, 'migrations/20260819_v2_1_retry_recovery.sql'), 'utf8'));
 }
 
 async function setup(db) {
@@ -40,9 +59,10 @@ async function raceClaims(jobId) {
   await Promise.all(clients.map((c) => c.connect()));
   try {
     return await Promise.all(clients.map(async (c, i) => {
+      const productionId = (await c.query('SELECT production_id FROM v2_1.jobs WHERE id=$1', [jobId])).rows[0].production_id;
       const result = await c.query('SELECT * FROM v2_1.claim_job_for_production($1,$2,$3,$4)', [
         jobId,
-        (await c.query('SELECT production_id FROM v2_1.jobs WHERE id=$1', [jobId])).rows[0].production_id,
+        productionId,
         `cert-worker-${i}`,
         30,
       ]);
@@ -57,7 +77,8 @@ async function main() {
   const db = client();
   await db.connect();
   try {
-    const { productionId, jobId } = await setup(db);
+    await setupDatabase(db);
+    const { jobId } = await setup(db);
     const claims = await raceClaims(jobId);
     const successfulClaims = claims.filter(Boolean);
 
@@ -96,6 +117,9 @@ async function main() {
     console.log(`V2.1 CONCURRENCY CERTIFICATION PASSED: ${WORKERS} contenders -> exactly 1 job owner and exactly 1 stage owner`);
     console.log(`job=${jobId} worker=${owner} stage=${stageClaims[0].stage}`);
   } finally {
+    await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE').catch(() => {});
+    await db.query('DROP TABLE IF EXISTS generation_jobs').catch(() => {});
+    await db.query('DROP TABLE IF EXISTS workspaces').catch(() => {});
     await db.end();
   }
 }
