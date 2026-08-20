@@ -65,6 +65,7 @@ jobs:
           node --check src/providers/provider-gateway.js
           node --check src/artifacts/artifact-service.js
           node --check src/storage/storage-adapter.js
+          node --check src/v2.1/validation-engine.js
           node --check tests/v2.1-provider-artifact-integration-test.js
           node --check tests/v2.1-stage-runner-integration-test.js
           node --check tests/v2.1-stage-runner-postgres-integration-test.js
@@ -72,7 +73,8 @@ jobs:
           node --check tests/v2.1-multi-stage-postgres-integration-test.js
           node --check tests/v2.1-retry-recovery-postgres-integration-test.js
           node --check tests/v2.1-concurrency-postgres-certification.js
-          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner')"
+          node --check tests/v2.1-validation-engine-test.js
+          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./src/v2.1/validation-engine')"
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
@@ -106,6 +108,10 @@ jobs:
       - name: Run PostgreSQL concurrency ownership certification
         run: npm run test:v2.1:concurrency:postgres
         timeout-minutes: 3
+
+      - name: Run V2.1 validation engine certification
+        run: npm run test:v2.1:validation
+        timeout-minutes: 2
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
