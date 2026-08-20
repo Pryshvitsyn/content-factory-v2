@@ -160,7 +160,7 @@ async function run() {
       assert.equal(persisted.worker_id, null);
 
       const stored = await storage.get({ key: result.outputArtifacts[0] });
-      assert.match(stored.toString('utf8'), new RegExp(`^generated:${stage}\\|input=`));
+      assert.match(stored.toString('utf8'), new RegExp(`^generated:${stageRun.stage}\\|input=`));
       previousOutputs = result.outputArtifacts;
     }
 
