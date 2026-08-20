@@ -66,6 +66,7 @@ jobs:
           node --check src/artifacts/artifact-service.js
           node --check src/storage/storage-adapter.js
           node --check src/v2.1/validation-engine.js
+          node --check src/v2.1/publish-executor.js
           node --check tests/v2.1-provider-artifact-integration-test.js
           node --check tests/v2.1-stage-runner-integration-test.js
           node --check tests/v2.1-stage-runner-postgres-integration-test.js
@@ -74,7 +75,8 @@ jobs:
           node --check tests/v2.1-retry-recovery-postgres-integration-test.js
           node --check tests/v2.1-concurrency-postgres-certification.js
           node --check tests/v2.1-validation-engine-test.js
-          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./src/v2.1/validation-engine')"
+          node --check tests/v2.1-publish-executor-test.js
+          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
@@ -113,6 +115,10 @@ jobs:
         run: npm run test:v2.1:validation
         timeout-minutes: 2
 
+      - name: Run V2.1 publish execution certification
+        run: npm run test:v2.1:publish
+        timeout-minutes: 2
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
         timeout-minutes: 2
@@ -128,6 +134,7 @@ jobs:
           test -s migrations/20260819_v2_1_stage_input_propagation.sql
           test -s migrations/20260819_v2_1_retry_recovery.sql
           test -s migrations/20260820_v2_1_concurrency_certification.sql
+          test -s migrations/20260820_v2_1_publication_execution.sql
         timeout-minutes: 2
 
       - name: Check required project files
