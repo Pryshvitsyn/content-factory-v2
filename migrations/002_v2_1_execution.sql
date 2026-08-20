@@ -144,7 +144,11 @@ BEGIN
     AND s.status IN ('RETRYING','PENDING') AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
     ORDER BY s.attempt DESC FOR UPDATE SKIP LOCKED LIMIT 1;
   IF NOT FOUND THEN
-    INSERT INTO v2_1.stage_runs(job_id,stage,attempt,status,max_attempts) VALUES(p_job_id,target,1,'PENDING',3) RETURNING * INTO r;
+    INSERT INTO v2_1.stage_runs(job_id,stage,attempt,status,max_attempts)
+    VALUES(p_job_id,target,1,'PENDING',3)
+    ON CONFLICT (job_id, stage, attempt) DO NOTHING
+    RETURNING * INTO r;
+    IF NOT FOUND THEN RETURN; END IF;
   END IF;
   UPDATE v2_1.stage_runs SET status='RUNNING', worker_id=p_worker_id,
     lease_expires_at=now()+make_interval(secs=>greatest(5,p_lease_seconds)), heartbeat_at=now(),
