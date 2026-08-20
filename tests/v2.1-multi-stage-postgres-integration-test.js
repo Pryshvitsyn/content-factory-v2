@@ -71,24 +71,28 @@ async function run() {
     await db.query(`
       INSERT INTO workspaces(id, name)
       VALUES ('00000000-0000-0000-0000-000000000021', 'multi-stage-postgres-cert')
-      ON CONFLICT (id) DO NOTHING;
+      ON CONFLICT (id) DO NOTHING
+    `);
 
-      INSERT INTO v2_1.productions(workspace_id, idempotency_key, status, immutable_context)
+    await db.query(`
+      INSERT INTO v2_1.productions(workspace_id, name, status, metadata)
       VALUES ('00000000-0000-0000-0000-000000000021', $1, 'DRAFT', '{"test":true}')
-      ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
+      ON CONFLICT (workspace_id, name) DO NOTHING
+    `, [productionKey]);
 
-      INSERT INTO v2_1.jobs(production_id, workspace_id, idempotency_key, status, max_attempts)
-      SELECT p.id, p.workspace_id, $2, 'QUEUED', 3
+    await db.query(`
+      INSERT INTO v2_1.jobs(production_id, stage, status, max_attempts, idempotency_key)
+      SELECT p.id, 'SIGNAL', 'QUEUED', 3, $2
       FROM v2_1.productions p
-      WHERE p.idempotency_key=$1
-      ON CONFLICT (production_id, idempotency_key) DO NOTHING;
+      WHERE p.name=$1
+      ON CONFLICT (production_id, idempotency_key) DO NOTHING
     `, [productionKey, jobKey]);
 
     const job = (await db.query(`
       SELECT j.id, j.production_id
       FROM v2_1.jobs j
       JOIN v2_1.productions p ON p.id=j.production_id
-      WHERE p.idempotency_key=$1 AND j.idempotency_key=$2
+      WHERE p.name=$1 AND j.idempotency_key=$2
     `, [productionKey, jobKey])).rows[0];
     assert.ok(job);
 
@@ -156,7 +160,7 @@ async function run() {
       assert.equal(persisted.worker_id, null);
 
       const stored = await storage.get({ key: result.outputArtifacts[0] });
-      assert.match(stored.toString('utf8'), new RegExp(`^generated:${stage}\\|input=`));
+      assert.match(stored.toString('utf8'), new RegExp(`^generated:${stageRun.stage}\\|input=`));
       previousOutputs = result.outputArtifacts;
     }
 

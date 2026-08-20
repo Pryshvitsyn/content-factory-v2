@@ -37,6 +37,24 @@ BEGIN
 
   IF target IS NULL THEN RETURN; END IF;
 
+  -- Serialize claims for the same job/stage. This is deliberately scoped to
+  -- the current transaction so concurrent workers cannot both decide that the
+  -- initial stage_run is absent and race on UNIQUE(job_id,stage,attempt).
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended(p_job_id::text || ':' || target, 0)
+  );
+
+  -- Re-check ownership after acquiring the lock. A competing worker may have
+  -- created and claimed the stage while this transaction was waiting.
+  SELECT s.* INTO r
+  FROM v2_1.stage_runs s
+  WHERE s.job_id=p_job_id
+    AND s.stage=target
+    AND s.status='RUNNING'
+  ORDER BY s.attempt DESC
+  LIMIT 1;
+  IF FOUND THEN RETURN; END IF;
+
   SELECT s.* INTO r
   FROM v2_1.stage_runs s
   WHERE s.job_id=p_job_id
@@ -44,7 +62,7 @@ BEGIN
     AND s.status IN ('RETRYING','PENDING')
     AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
   ORDER BY s.attempt DESC
-  FOR UPDATE SKIP LOCKED
+  FOR UPDATE
   LIMIT 1;
 
   IF NOT FOUND THEN
@@ -74,7 +92,20 @@ BEGIN
       p_job_id, target, 1, 'PENDING',
       COALESCE(previous_outputs, '[]'::jsonb), previous_fingerprint, 3
     )
+    ON CONFLICT (job_id, stage, attempt) DO NOTHING
     RETURNING * INTO r;
+
+    IF NOT FOUND THEN
+      SELECT s.* INTO r
+      FROM v2_1.stage_runs s
+      WHERE s.job_id=p_job_id
+        AND s.stage=target
+        AND s.status IN ('RETRYING','PENDING')
+        AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
+      ORDER BY s.attempt DESC
+      LIMIT 1;
+      IF NOT FOUND THEN RETURN; END IF;
+    END IF;
   END IF;
 
   UPDATE v2_1.stage_runs

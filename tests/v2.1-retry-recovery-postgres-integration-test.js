@@ -23,26 +23,33 @@ async function run() {
   await db.connect();
   try {
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
+    await db.query('DROP TABLE IF EXISTS generation_jobs CASCADE');
+    await db.query('DROP TABLE IF EXISTS workspaces CASCADE');
+    await db.query('CREATE TABLE workspaces (id uuid PRIMARY KEY, name text NOT NULL)');
+    await db.query('CREATE TABLE generation_jobs (id uuid PRIMARY KEY)');
+    await db.query(
+      'INSERT INTO workspaces(id,name) VALUES ($1,$2)',
+      ['00000000-0000-0000-0000-000000000031', 'retry-recovery-cert']
+    );
     await db.query(fs.readFileSync(path.join(root, 'migrations/002_v2_1_execution.sql'), 'utf8'));
     await db.query(fs.readFileSync(path.join(root, 'migrations/20260819_v2_1_stage_input_propagation.sql'), 'utf8'));
     await db.query(fs.readFileSync(path.join(root, 'migrations/20260819_v2_1_retry_recovery.sql'), 'utf8'));
 
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
-      INSERT INTO workspaces(id,name) VALUES ('00000000-0000-0000-0000-000000000031','retry-recovery-cert')
-      ON CONFLICT (id) DO NOTHING;
-      INSERT INTO v2_1.productions(workspace_id,idempotency_key,status,immutable_context)
-      VALUES ('00000000-0000-0000-0000-000000000031',$1,'DRAFT','{}')
-    `, [`retry-prod-${process.pid}`]);
+    await db.query(
+      `INSERT INTO v2_1.productions(workspace_id,name,status,metadata)
+       VALUES ($1,$2,'DRAFT','{}')`,
+      ['00000000-0000-0000-0000-000000000031', `retry-prod-${process.pid}`]
+    );
 
     const production = (await db.query(
       `SELECT id FROM v2_1.productions WHERE workspace_id='00000000-0000-0000-0000-000000000031' ORDER BY created_at DESC LIMIT 1`
     )).rows[0];
 
-    await db.query(`
-      INSERT INTO v2_1.jobs(production_id,workspace_id,idempotency_key,status,max_attempts)
-      VALUES ($1,'00000000-0000-0000-0000-000000000031',$2,'QUEUED',3)
-    `, [production.id, `retry-job-${process.pid}`]);
+    await db.query(
+      `INSERT INTO v2_1.jobs(production_id,stage,idempotency_key,status,max_attempts)
+       VALUES ($1,'SIGNAL',$2,'QUEUED',3)`,
+      [production.id, `retry-job-${process.pid}`]
+    );
 
     const job = (await db.query(
       `SELECT id FROM v2_1.jobs WHERE production_id=$1 ORDER BY created_at DESC LIMIT 1`, [production.id]
@@ -103,6 +110,7 @@ async function run() {
     console.log('V2.1 PostgreSQL retry + lease recovery + continuation: PASS');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE').catch(() => {});
+    await db.query('DROP TABLE IF EXISTS generation_jobs').catch(() => {});
     await db.query('DROP TABLE IF EXISTS workspaces').catch(() => {});
     await db.end();
   }
