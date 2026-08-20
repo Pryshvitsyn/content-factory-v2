@@ -22,10 +22,17 @@ function run() {
     action: 'DEFER', nextDeliveryState: 'UNKNOWN',
   });
 
-  assert.equal(assertRecoveryOwnership({ action: 'SAFE_RETRY', currentOwnerId: 'worker-a', leaseValid: true }), true);
-  assert.throws(() => assertRecoveryOwnership({ action: 'SAFE_RETRY', currentOwnerId: 'worker-a', leaseValid: false }), /current lease ownership/);
-  assert.throws(() => assertRecoveryOwnership({ action: 'CONFIRM', currentOwnerId: null, leaseValid: true }), /current lease ownership/);
-  assert.equal(assertRecoveryOwnership({ action: 'DEFER', currentOwnerId: null, leaseValid: false }), true);
+  const now = new Date('2026-08-20T20:00:00.000Z');
+  const validLease = new Date('2026-08-20T20:02:00.000Z');
+  const expiredLease = new Date('2026-08-20T19:59:59.000Z');
+
+  assert.equal(assertRecoveryOwnership({ action: 'SAFE_RETRY', workerId: 'worker-a', leaseExpiresAt: validLease, now }), true);
+  assert.equal(assertRecoveryOwnership({ action: 'CONFIRM', workerId: 'worker-a', leaseExpiresAt: validLease, now }), true);
+  assert.throws(() => assertRecoveryOwnership({ action: 'SAFE_RETRY', workerId: 'worker-a', leaseExpiresAt: expiredLease, now }), /valid, unexpired worker lease/);
+  assert.throws(() => assertRecoveryOwnership({ action: 'SAFE_RETRY', workerId: 'worker-a', leaseExpiresAt: now, now }), /valid, unexpired worker lease/);
+  assert.throws(() => assertRecoveryOwnership({ action: 'CONFIRM', workerId: '', leaseExpiresAt: validLease, now }), /current worker ownership/);
+  assert.throws(() => assertRecoveryOwnership({ action: 'CONFIRM', workerId: null, leaseExpiresAt: validLease, now }), /current worker ownership/);
+  assert.equal(assertRecoveryOwnership({ action: 'DEFER', workerId: null, leaseExpiresAt: expiredLease, now }), true);
 
   assert.equal(calculateBackoffMs(1), 1000);
   assert.equal(calculateBackoffMs(2), 2000);
