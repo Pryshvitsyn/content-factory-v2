@@ -26,7 +26,6 @@ async function main() {
   await db.connect();
 
   try {
-    // Minimal dependency contract for the production-domain migration.
     await db.query(`
       CREATE EXTENSION IF NOT EXISTS pgcrypto;
       CREATE TABLE IF NOT EXISTS workspaces (
@@ -66,27 +65,14 @@ async function main() {
     await db.query(migration);
 
     const requiredTables = [
-      'content_units',
-      'content_revisions',
-      'production_nodes',
-      'production_edges',
-      'artifact_lineage',
-      'production_rules',
-      'human_reviews',
-      'content_masters',
-      'qa_findings',
-      'delivery_adapters',
-      'delivery_policies',
-      'delivery_packages',
-      'publication_attempts',
-      'artifact_provenance',
+      'content_units', 'content_revisions', 'production_nodes', 'production_edges',
+      'artifact_lineage', 'production_rules', 'human_reviews', 'content_masters',
+      'qa_findings', 'delivery_adapters', 'delivery_policies', 'delivery_packages',
+      'publication_attempts', 'artifact_provenance',
     ];
 
     for (const table of requiredTables) {
-      const result = await db.query(
-        `SELECT to_regclass($1) AS relation`,
-        [table]
-      );
+      const result = await db.query(`SELECT to_regclass($1) AS relation`, [table]);
       assert.equal(result.rows[0].relation, table, `${table} must exist`);
     }
 
@@ -97,26 +83,11 @@ async function main() {
     const stageId = '00000000-0000-0000-0000-000000000005';
     const artifactId = '00000000-0000-0000-0000-000000000006';
 
-    await db.query(
-      `INSERT INTO workspaces(id, name) VALUES ($1, 'production-contract-cert')`,
-      [workspaceId]
-    );
-    await db.query(
-      `INSERT INTO ai_providers(id, name) VALUES ($1, 'cert-provider')`,
-      [providerId]
-    );
-    await db.query(
-      `INSERT INTO ai_models(id, provider_id, model_id) VALUES ($1, $2, 'cert-model')`,
-      [modelId, providerId]
-    );
-    await db.query(
-      `INSERT INTO pipeline_runs(id, workspace_id) VALUES ($1, $2)`,
-      [runId, workspaceId]
-    );
-    await db.query(
-      `INSERT INTO job_stages(id, pipeline_run_id) VALUES ($1, $2)`,
-      [stageId, runId]
-    );
+    await db.query(`INSERT INTO workspaces(id, name) VALUES ($1, 'production-contract-cert')`, [workspaceId]);
+    await db.query(`INSERT INTO ai_providers(id, name) VALUES ($1, 'cert-provider')`, [providerId]);
+    await db.query(`INSERT INTO ai_models(id, provider_id, model_id) VALUES ($1, $2, 'cert-model')`, [modelId, providerId]);
+    await db.query(`INSERT INTO pipeline_runs(id, workspace_id) VALUES ($1, $2)`, [runId, workspaceId]);
+    await db.query(`INSERT INTO job_stages(id, pipeline_run_id) VALUES ($1, $2)`, [stageId, runId]);
     await db.query(
       `INSERT INTO artifacts(id, workspace_id, pipeline_run_id, stage_id, artifact_type, logical_key, version)
        VALUES ($1, $2, $3, $4, 'master', 'cert-master', 1)`,
@@ -136,10 +107,7 @@ async function main() {
       [content.id]
     )).rows[0];
 
-    await db.query(
-      `UPDATE content_units SET current_revision_id=$1 WHERE id=$2`,
-      [revision.id, content.id]
-    );
+    await db.query(`UPDATE content_units SET current_revision_id=$1 WHERE id=$2`, [revision.id, content.id]);
 
     const nodes = await db.query(
       `INSERT INTO production_nodes(content_revision_id, node_key, node_type)
@@ -151,8 +119,7 @@ async function main() {
     const deliveryNode = nodes.rows.find((row) => row.node_key === 'delivery');
 
     await db.query(
-      `INSERT INTO production_edges(upstream_node_id, downstream_node_id)
-       VALUES ($1, $2)`,
+      `INSERT INTO production_edges(upstream_node_id, downstream_node_id) VALUES ($1, $2)`,
       [masterNode.id, deliveryNode.id]
     );
 
@@ -166,26 +133,27 @@ async function main() {
       [adapter.id]
     )).rows[0];
 
-    const master = (await db.query(
-      `INSERT INTO content_masters(content_unit_id, content_revision_id, artifact_id, qa_passed_at)
-       VALUES ($1, $2, $3, now()) RETURNING id`,
+    // Human approval must exist before an approved master can exist.
+    const review = (await db.query(
+      `INSERT INTO human_reviews(content_unit_id, content_revision_id, artifact_id, decision, reviewer)
+       VALUES ($1, $2, $3, 'approve', 'cert') RETURNING id`,
       [content.id, revision.id, artifactId]
     )).rows[0];
 
-    await db.query(
-      `INSERT INTO human_reviews(content_unit_id, content_revision_id, artifact_id, decision, reviewer)
-       VALUES ($1, $2, $3, 'approve', 'cert')`,
-      [content.id, revision.id, artifactId]
-    );
+    const master = (await db.query(
+      `INSERT INTO content_masters(content_unit_id, content_revision_id, artifact_id, human_review_id, qa_passed_at, status)
+       VALUES ($1, $2, $3, $4, now(), 'approved') RETURNING id`,
+      [content.id, revision.id, artifactId, review.id]
+    )).rows[0];
 
     const packageRow = await db.query(
-      `INSERT INTO delivery_packages(content_unit_id, content_master_id, master_artifact_id, policy_id)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
+      `INSERT INTO delivery_packages(content_unit_id, content_master_id, master_artifact_id, policy_id, status, validation_state)
+       VALUES ($1, $2, $3, $4, 'ready', 'passed') RETURNING id`,
       [content.id, master.id, artifactId, policy.id]
     );
-    assert.ok(packageRow.rows[0].id, 'delivery package must be created');
+    assert.ok(packageRow.rows[0].id, 'validated delivery package must be created');
 
-    // A second creative revision must not reuse the same logical node key.
+    // A second creative revision gets its own node namespace.
     const revision2 = (await db.query(
       `INSERT INTO content_revisions(content_unit_id, revision_no, revision_type, parent_revision_id)
        VALUES ($1, 2, 'human_revision', $2) RETURNING id`,
@@ -205,7 +173,6 @@ async function main() {
       [revision2.id]
     );
 
-    // Objective QA failure is representable with an explicit repair scope.
     const finding = await db.query(
       `INSERT INTO qa_findings(content_unit_id, content_revision_id, artifact_id, severity, code, message, repair_scope)
        VALUES ($1, $2, $3, 'error', 'VISUAL_INTEGRITY', 'invalid anatomy detected', '{"node":"master","mode":"targeted"}')
@@ -213,6 +180,14 @@ async function main() {
       [content.id, revision.id, artifactId]
     );
     assert.equal(finding.rows[0].repair_scope.mode, 'targeted');
+
+    // The publication gate rejects an unready package.
+    const badPackage = (await db.query(
+      `INSERT INTO delivery_packages(content_unit_id, content_master_id, master_artifact_id, policy_id)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [content.id, master.id, artifactId, policy.id]
+    ).catch(() => null));
+    assert.equal(badPackage, null, 'duplicate package must be rejected');
 
     // Publication is independently idempotent/auditable.
     await db.query(
@@ -231,26 +206,15 @@ async function main() {
 
     console.log('V2.1 autonomous production contract certification: PASS');
   } finally {
-    await db.query(`DROP TABLE IF EXISTS publication_attempts CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS delivery_packages CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS content_masters CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS human_reviews CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS qa_findings CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS production_rules CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS artifact_lineage CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS production_edges CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS production_nodes CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS content_units CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS content_revisions CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS delivery_policies CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS delivery_adapters CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS artifact_provenance CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS artifacts CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS job_stages CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS pipeline_runs CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS ai_models CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS ai_providers CASCADE`);
-    await db.query(`DROP TABLE IF EXISTS workspaces CASCADE`);
+    for (const table of [
+      'publication_attempts', 'delivery_packages', 'content_masters', 'human_reviews',
+      'qa_findings', 'production_rules', 'artifact_lineage', 'production_edges',
+      'production_nodes', 'content_units', 'content_revisions', 'delivery_policies',
+      'delivery_adapters', 'artifact_provenance', 'artifacts', 'job_stages',
+      'pipeline_runs', 'ai_models', 'ai_providers', 'workspaces',
+    ]) {
+      await db.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+    }
     await db.end();
   }
 }
