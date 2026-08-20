@@ -23,6 +23,7 @@
   "keywords": ["content-factory", "ai", "pipeline", "production"],
   "author": "",
   "license": "ISC",
+  "type": "commonjs",
   "dependencies": {
     "dotenv": "^17.4.2",
     "jsonrepair": "^3.15.0",
