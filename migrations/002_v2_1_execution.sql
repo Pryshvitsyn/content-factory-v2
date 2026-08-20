@@ -138,6 +138,8 @@ BEGIN
    ORDER BY sd.sequence_no LIMIT 1;
   IF target IS NULL THEN RETURN; END IF;
 
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_job_id::text || ':' || target, 0));
+
   SELECT s.* INTO r FROM v2_1.stage_runs s WHERE s.job_id=p_job_id AND s.stage=target
     AND s.status IN ('RETRYING','PENDING') AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
     ORDER BY s.attempt DESC FOR UPDATE SKIP LOCKED LIMIT 1;
@@ -145,19 +147,7 @@ BEGIN
   IF NOT FOUND THEN
     INSERT INTO v2_1.stage_runs(job_id,stage,attempt,status,max_attempts)
     VALUES(p_job_id,target,1,'PENDING',3)
-    ON CONFLICT (job_id, stage, attempt) DO NOTHING
     RETURNING * INTO r;
-
-    -- If another worker won the insert, re-read the still-claimable row.
-    -- The winner holds the row lock while it transitions it to RUNNING, so
-    -- a concurrent loser will either see the RUNNING row or acquire a
-    -- legitimate retry/pending row after the winner releases the lock.
-    IF NOT FOUND THEN
-      SELECT s.* INTO r FROM v2_1.stage_runs s WHERE s.job_id=p_job_id AND s.stage=target
-        AND s.status IN ('RETRYING','PENDING') AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
-        ORDER BY s.attempt DESC FOR UPDATE SKIP LOCKED LIMIT 1;
-      IF NOT FOUND THEN RETURN; END IF;
-    END IF;
   END IF;
 
   UPDATE v2_1.stage_runs SET status='RUNNING', worker_id=p_worker_id,
