@@ -2,10 +2,6 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- ------------------------------------------------------------------
--- Stable identity: one content idea across its entire lifetime.
--- A content unit may have many explicit creative revisions.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS content_units (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -28,10 +24,6 @@ CREATE TABLE IF NOT EXISTS content_units (
 CREATE INDEX IF NOT EXISTS idx_content_units_workspace_status
   ON content_units(workspace_id, status);
 
--- ------------------------------------------------------------------
--- Explicit creative/production revision. This prevents a human
--- revision from silently mixing nodes and artifacts from old work.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS content_revisions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content_unit_id uuid NOT NULL REFERENCES content_units(id) ON DELETE CASCADE,
@@ -56,10 +48,6 @@ CREATE INDEX IF NOT EXISTS idx_content_revisions_content
 ALTER TABLE content_units
   ADD COLUMN IF NOT EXISTS current_revision_id uuid REFERENCES content_revisions(id) ON DELETE SET NULL;
 
--- ------------------------------------------------------------------
--- Logical production graph. Nodes belong to one revision; artifacts
--- are immutable materializations of those nodes.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS production_nodes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content_revision_id uuid NOT NULL REFERENCES content_revisions(id) ON DELETE CASCADE,
@@ -78,10 +66,6 @@ CREATE TABLE IF NOT EXISTS production_nodes (
 CREATE INDEX IF NOT EXISTS idx_production_nodes_revision
   ON production_nodes(content_revision_id);
 
--- ------------------------------------------------------------------
--- Explicit graph edges make dependency closure and targeted repair
--- deterministic.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS production_edges (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   upstream_node_id uuid NOT NULL REFERENCES production_nodes(id) ON DELETE CASCADE,
@@ -97,10 +81,6 @@ CREATE INDEX IF NOT EXISTS idx_production_edges_downstream
 CREATE INDEX IF NOT EXISTS idx_production_edges_upstream
   ON production_edges(upstream_node_id);
 
--- ------------------------------------------------------------------
--- Artifact lineage. Physical artifacts remain in the existing V2
--- artifact registry; this table makes derivation explicit.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS artifact_lineage (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
@@ -116,10 +96,6 @@ CREATE INDEX IF NOT EXISTS idx_artifact_lineage_artifact
 CREATE INDEX IF NOT EXISTS idx_artifact_lineage_parent
   ON artifact_lineage(parent_artifact_id);
 
--- ------------------------------------------------------------------
--- Objective rules are the only authority for automatic repair.
--- Subjective scores/preferences do not belong here as repair triggers.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS production_rules (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content_unit_id uuid REFERENCES content_units(id) ON DELETE CASCADE,
@@ -136,10 +112,6 @@ CREATE TABLE IF NOT EXISTS production_rules (
 CREATE INDEX IF NOT EXISTS idx_production_rules_content
   ON production_rules(content_unit_id, enabled);
 
--- ------------------------------------------------------------------
--- Human review is separate from objective QA and belongs to a concrete
--- revision/artifact candidate.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS human_reviews (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content_unit_id uuid NOT NULL REFERENCES content_units(id) ON DELETE CASCADE,
@@ -158,10 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_human_reviews_content
 CREATE INDEX IF NOT EXISTS idx_human_reviews_revision
   ON human_reviews(content_revision_id, created_at DESC);
 
--- ------------------------------------------------------------------
--- Canonical master is explicit and versioned through the artifact it
--- references. Only one approved master may exist for a content unit.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS content_masters (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content_unit_id uuid NOT NULL REFERENCES content_units(id) ON DELETE CASCADE,
@@ -183,10 +151,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_content_masters_current_approved
 CREATE INDEX IF NOT EXISTS idx_content_masters_revision
   ON content_masters(content_revision_id);
 
--- ------------------------------------------------------------------
--- Objective QA results. A failed objective rule may authorize repair;
--- a subjective opinion cannot.
--- ------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION enforce_approved_master_contract()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  review_decision text;
+BEGIN
+  IF NEW.status = 'approved' THEN
+    IF NEW.human_review_id IS NULL THEN
+      RAISE EXCEPTION 'approved master requires human approval';
+    END IF;
+
+    SELECT decision
+      INTO review_decision
+      FROM human_reviews
+     WHERE id = NEW.human_review_id
+       AND content_unit_id = NEW.content_unit_id
+       AND content_revision_id = NEW.content_revision_id;
+
+    IF review_decision IS DISTINCT FROM 'approve' THEN
+      RAISE EXCEPTION 'approved master requires an approve human review for the same content revision';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_approved_master_contract ON content_masters;
+CREATE TRIGGER trg_enforce_approved_master_contract
+BEFORE INSERT OR UPDATE ON content_masters
+FOR EACH ROW
+EXECUTE FUNCTION enforce_approved_master_contract();
+
 CREATE TABLE IF NOT EXISTS qa_findings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content_unit_id uuid NOT NULL REFERENCES content_units(id) ON DELETE CASCADE,
@@ -212,10 +210,6 @@ CREATE INDEX IF NOT EXISTS idx_qa_findings_revision
 CREATE INDEX IF NOT EXISTS idx_qa_findings_artifact
   ON qa_findings(artifact_id);
 
--- ------------------------------------------------------------------
--- Generic destination adapter. No finite platform list is part of the
--- production core.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS delivery_adapters (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   adapter_key text NOT NULL UNIQUE,
@@ -227,7 +221,6 @@ CREATE TABLE IF NOT EXISTS delivery_adapters (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- A versioned policy describes destination requirements and transforms.
 CREATE TABLE IF NOT EXISTS delivery_policies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   adapter_id uuid NOT NULL REFERENCES delivery_adapters(id) ON DELETE RESTRICT,
@@ -243,9 +236,6 @@ CREATE TABLE IF NOT EXISTS delivery_policies (
 CREATE INDEX IF NOT EXISTS idx_delivery_policies_adapter
   ON delivery_policies(adapter_id, enabled);
 
--- ------------------------------------------------------------------
--- A package is a deterministic derivative of a canonical master.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS delivery_packages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content_unit_id uuid NOT NULL REFERENCES content_units(id) ON DELETE CASCADE,
@@ -273,9 +263,6 @@ CREATE INDEX IF NOT EXISTS idx_delivery_packages_master
 CREATE INDEX IF NOT EXISTS idx_delivery_packages_publication
   ON delivery_packages(publication_state);
 
--- ------------------------------------------------------------------
--- Publication attempts are independently auditable and retryable.
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS publication_attempts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   delivery_package_id uuid NOT NULL REFERENCES delivery_packages(id) ON DELETE CASCADE,
@@ -297,9 +284,41 @@ CREATE TABLE IF NOT EXISTS publication_attempts (
 CREATE INDEX IF NOT EXISTS idx_publication_attempts_package
   ON publication_attempts(delivery_package_id);
 
--- ------------------------------------------------------------------
--- Provider/model provenance without secrets.
--- ------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION enforce_publication_gate()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  package_validation text;
+  package_status text;
+  master_status text;
+  adapter_enabled boolean;
+BEGIN
+  SELECT dp.validation_state, dp.status, cm.status, da.enabled
+    INTO package_validation, package_status, master_status, adapter_enabled
+    FROM delivery_packages dp
+    JOIN content_masters cm ON cm.id = dp.content_master_id
+    JOIN delivery_policies dpol ON dpol.id = dp.policy_id
+    JOIN delivery_adapters da ON da.id = dpol.adapter_id
+   WHERE dp.id = NEW.delivery_package_id;
+
+  IF package_validation IS DISTINCT FROM 'passed'
+     OR package_status IS DISTINCT FROM 'ready'
+     OR master_status IS DISTINCT FROM 'approved'
+     OR adapter_enabled IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'publication gate not satisfied: master approval, delivery readiness/QA, and adapter enablement are required';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_publication_gate ON publication_attempts;
+CREATE TRIGGER trg_enforce_publication_gate
+BEFORE INSERT ON publication_attempts
+FOR EACH ROW
+EXECUTE FUNCTION enforce_publication_gate();
+
 CREATE TABLE IF NOT EXISTS artifact_provenance (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
