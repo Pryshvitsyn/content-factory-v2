@@ -11,28 +11,31 @@ function requireDependency(name, value) {
 }
 
 class RecoveryExecutor {
-  constructor({ reconcile, confirm, safeRetry, defer, fail } = {}) {
+  constructor({ reconcile, confirm, safeRetry, defer, fail, clock = () => new Date() } = {}) {
     requireDependency('reconcile', reconcile);
     requireDependency('confirm', confirm);
     requireDependency('safeRetry', safeRetry);
     requireDependency('defer', defer);
     requireDependency('fail', fail);
+    requireDependency('clock', clock);
     this.reconcile = reconcile;
     this.confirm = confirm;
     this.safeRetry = safeRetry;
     this.defer = defer;
     this.fail = fail;
+    this.clock = clock;
   }
 
-  async run({ publication, workerId, leaseExpiresAt, now = new Date() } = {}) {
+  async run({ publication, workerId, leaseExpiresAt, now } = {}) {
     if (!publication?.id) throw new Error('publication.id is required');
     if (!shouldReconcile(publication)) return { action: 'NOOP', publicationId: publication.id };
 
+    const initialNow = now ?? this.clock();
     assertRecoveryOwnership({
       action: 'RECONCILE',
       workerId,
       leaseExpiresAt,
-      now,
+      now: initialNow,
     });
 
     const result = await this.reconcile(publication);
@@ -51,7 +54,7 @@ class RecoveryExecutor {
       action: decision.action,
       workerId,
       leaseExpiresAt,
-      now,
+      now: this.clock(),
     });
 
     if (decision.action === 'CONFIRM') {
