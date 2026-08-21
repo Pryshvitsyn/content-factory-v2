@@ -75,6 +75,8 @@ async function run() {
   });
   const deferredResult = await deferred.run({
     publication: { id: 'pub-2', deliveryState: 'UNKNOWN', executionStatus: 'RECONCILING', attempt: 2, maxAttempts: 3 },
+    workerId: 'worker-a',
+    leaseExpiresAt: new Date('2026-08-20T20:05:00Z'),
   });
   assert.equal(deferredResult.action, 'DEFER');
   assert.deepEqual(deferredCalls, ['defer']);
