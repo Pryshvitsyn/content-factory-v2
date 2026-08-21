@@ -87,10 +87,12 @@ class StageRunner {
       const provenance = result?.provenance || {};
 
       for (const artifact of produced) {
+        const idempotencyKey = artifact.idempotencyKey || `${stageRun.job_id}:${stageRun.stage}:${artifact.artifactId}`;
         const created = await this.artifactService.createVersion({
           ...artifact,
           stageId: artifact.stageId || stageRun.id,
           attemptId: artifact.attemptId || `${stageRun.id}:${stageRun.attempt || 1}`,
+          idempotencyKey,
           provider: artifact.provider || provenance.provider,
           model: artifact.model || provenance.model,
         });
