@@ -1,8 +1,5 @@
 /**
  * CLI script for generating promotional videos with NVIDIA
- * 
- * Usage:
- *   node scripts/factory-video-cli.js --app=now --lang=en --duration=30 --style=tech --topic="Smart scheduling"
  */
 
 const path = require('path');
@@ -10,9 +7,6 @@ const { VideoFactory, VideoFactoryConfig } = require('../src/v2.1/video-factory'
 const { ProviderGateway } = require('../src/providers/provider-gateway');
 const { ProviderRegistry } = require('../src/providers/provider-registry');
 
-/**
- * Parse command line arguments
- */
 function parseArgs() {
   const args = process.argv.slice(2);
   const parsed = {};
@@ -28,24 +22,12 @@ function parseArgs() {
   return parsed;
 }
 
-/**
- * Validate input parameters
- */
 function validateInput(input) {
   const errors = [];
   
-  if (!input.app) {
-    errors.push('Missing required option: --app');
-  }
-  
-  if (!input.topic) {
-    errors.push('Missing required option: --topic');
-  }
-  
-  if (!input.lang) {
-    errors.push('Missing required option: --lang');
-  }
-  
+  if (!input.app) errors.push('Missing required option: --app');
+  if (!input.topic) errors.push('Missing required option: --topic');
+  if (!input.lang) errors.push('Missing required option: --lang');
   if (input.duration && (isNaN(input.duration) || input.duration <= 0)) {
     errors.push('Invalid --duration: must be a positive number');
   }
@@ -53,9 +35,6 @@ function validateInput(input) {
   return errors;
 }
 
-/**
- * Load configuration
- */
 function loadConfig() {
   const configPath = path.join(process.cwd(), 'config', 'video-factory.json');
   
@@ -69,38 +48,32 @@ function loadConfig() {
   }
 }
 
-/**
- * Create ProviderGateway with registered providers
- */
 function createProviderGateway(config) {
   const registry = new ProviderRegistry();
   
   // Register NVIDIA provider
   if (config.providers && config.providers.includes('nvidia')) {
     try {
-      const { NvidiaProvider } = require('../src/providers/nvidia-adapter');
+      const nvidiaModule = require('../src/providers/nvidia-adapter');
+      // Try different export patterns
+      const NvidiaProvider = nvidiaModule.NvidiaProvider || nvidiaModule.default || nvidiaModule;
       const nvidia = new NvidiaProvider();
       registry.register('nvidia', nvidia);
       console.log('[FactoryVideoCLI] NVIDIA provider registered ✓');
     } catch (error) {
       console.error('[FactoryVideoCLI] Failed to register NVIDIA provider:', error.message);
-      throw error;
+      console.log('[FactoryVideoCLI] Falling back to mock provider');
+      
+      // Fallback to mock
+      const { MockProvider } = require('../src/providers/mock-provider');
+      registry.register('mock', new MockProvider());
+      console.log('[FactoryVideoCLI] Mock provider registered');
     }
-  }
-  
-  // Register mock provider for fallback
-  if (config.providers && config.providers.includes('mock')) {
-    const { MockProvider } = require('../src/providers/mock-provider');
-    registry.register('mock', new MockProvider());
-    console.log('[FactoryVideoCLI] Mock provider registered');
   }
   
   return new ProviderGateway(registry);
 }
 
-/**
- * Main entry point
- */
 async function main() {
   console.log('[FactoryVideoCLI] Starting video production...\n');
   
@@ -114,13 +87,10 @@ async function main() {
     topic: args.topic
   };
   
-  // Validate input
   const errors = validateInput(input);
   if (errors.length > 0) {
     console.error('[FactoryVideoCLI] Validation errors:');
     errors.forEach(err => console.error(`  - ${err}`));
-    console.error('\nUsage:');
-    console.error('  node scripts/factory-video-cli.js --app=now --lang=en --duration=30 --topic="Your topic"');
     process.exit(1);
   }
   
@@ -133,13 +103,9 @@ async function main() {
   console.log('');
   
   try {
-    // Load configuration
     const config = loadConfig();
-    
-    // Create provider gateway with registered providers
     const providerGateway = createProviderGateway(config);
     
-    // Initialize factory with config and provider gateway
     const factoryConfig = new VideoFactoryConfig({
       ...config,
       rendering: {
@@ -154,7 +120,6 @@ async function main() {
     
     const factory = new VideoFactory(factoryConfig, providerGateway);
     
-    // Execute factory
     console.log('[FactoryVideoCLI] Executing video factory...\n');
     const result = await factory.generateVideo(input);
     
@@ -170,30 +135,11 @@ async function main() {
       console.log(`  Post-Render:  ${result.qa.postRender ? '✓' : '✗'}`);
       console.log(`  Final QA:     ${result.qa.finalQA ? '✓' : '✗'}`);
       
-      console.log('\n[FactoryVideoCLI] Decision Log:');
-      result.decisionLog.forEach(decision => {
-        console.log(`  - ${decision.type}: ${JSON.stringify(decision.data)}`);
-      });
-      
-      console.log('\n[FactoryVideoCLI] Artifacts generated:');
-      console.log(`  - Script:   ${result.artifacts.script ? '✓' : '✗'}`);
-      console.log(`  - Audio:    ${result.artifacts.audio ? '✓' : '✗'}`);
-      console.log(`  - Visuals:  ${result.artifacts.visuals ? '✓' : '✗'}`);
-      console.log(`  - Rendered: ${result.artifacts.rendered ? '✓' : '✗'}`);
-      
-      console.log(`\n[FactoryVideoCLI] Video saved to: ${result.outputPath}`);
-      console.log(`\n[FactoryVideoCLI] Open with: open ${result.outputPath}`);
+      console.log('\n[FactoryVideoCLI] Video saved to: ' + result.outputPath);
+      console.log('\n[FactoryVideoCLI] Open with: open ' + result.outputPath);
     } else {
       console.error('\n[FactoryVideoCLI] Error:');
       console.error(`  ${result.error}`);
-      
-      if (result.decisionLog.length > 0) {
-        console.error('\n[FactoryVideoCLI] Decision log (for debugging):');
-        result.decisionLog.forEach(decision => {
-          console.error(`  - ${decision.type}: ${JSON.stringify(decision.data)}`);
-        });
-      }
-      
       process.exit(1);
     }
     
@@ -204,5 +150,4 @@ async function main() {
   }
 }
 
-// Run
 main();
