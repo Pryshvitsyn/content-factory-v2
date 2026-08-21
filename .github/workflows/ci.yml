@@ -52,6 +52,7 @@ jobs:
           node --check worker/v2.2-production-orchestrator.js
           node --check worker/v2.2-stage-spec.js
           node --check worker/v2.2-artifact-contract.js
+          node --check worker/v2.3-quality-engine.js
 
       - name: Run V2.1 execution foundation tests
         run: npm run test:v2.1
@@ -77,6 +78,9 @@ jobs:
       - name: Run V2.2 production vertical slice certification
         run: npm run test:v2.2
 
+      - name: Run V2.3 quality engine certification
+        run: node tests/v2.3-quality-engine-test.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -96,6 +100,7 @@ jobs:
           test -s tests/v2.2-production-orchestrator-test.js
           test -s tests/v2.2-stage-spec-test.js
           test -s tests/v2.2-artifact-contract-test.js
+          test -s tests/v2.3-quality-engine-test.js
 
       - name: Check required project files
         run: |
