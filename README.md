@@ -1,113 +1,183 @@
 # Content Factory V2
 
-A controlled production architecture for AI-assisted content generation.
+A controlled production system for AI-assisted content generation.
 
-## Status
+## Current Status
 
 - **Architecture:** V2
-- **Baseline:** V2.0
 - **Development line:** V2.1
-- **Primary text provider:** NVIDIA
+- **Stable branch:** `main`
+- **Primary text provider:** NVIDIA-first
 - **Database:** PostgreSQL
 - **Runtime:** Node.js 22
-- **Stable branch:** `main`
-- **Repository:** Public development repository
 
-V2 replaces the legacy V1 execution model with explicit production state, deterministic stages, attempts, artifacts, validation, provider configuration, and persistent database contracts.
+V2 is built as a durable execution system rather than a single AI script. Production state, stage state, attempts, ownership, artifacts, validation, provider routing, storage, and publication state are explicit and persistent.
 
-## What V2 Is
+## What Is Implemented
 
-Content Factory V2 is a production system, not a single AI script. A production job is tracked from execution through validated artifacts.
+The current `main` branch contains a certified execution foundation plus the first real content-production layers.
 
-```text
-Production
-    ↓
-Pipeline Run
-    ↓
-Stage
-    ↓
-Attempt
-    ↓
-Provider
-    ↓
-Artifact
-    ↓
-Artifact Version
-    ↓
-Validation
-    ↓
-Storage
-```
+### Execution foundation
 
-The system separates execution state, stage state, retry/attempt history, AI provider configuration, production artifacts, artifact versions, validation results, persistent storage, continuity, and shot-planning data.
+- PostgreSQL-backed production/job/stage state
+- deterministic canonical stage ordering
+- attempts and retry handling
+- concurrent job/stage ownership
+- lease fencing and stale-owner protection
+- crash/recovery paths
+- heartbeat support for long-running stages
+- stage input propagation and input fingerprints
 
-## Current Certified Foundation
-
-The V2 foundation currently includes:
-
-- PostgreSQL-backed pipeline state
-- deterministic stage sequencing
-- stage ownership and concurrency protection
-- attempt and retry tracking
-- recovery/idempotency contracts
-- artifact and artifact-version data model
-- validation records
-- provider capability registry
-- NVIDIA-first provider configuration
-- storage adapter foundation
-- CI validation on Node.js 22
-
-The execution foundation and PostgreSQL concurrency certification are protected by automated tests.
-
-## Production Pipeline
-
-The current production planning flow is:
+### Provider boundary
 
 ```text
-NVIDIA
-  ↓
-SCRIPT
-  ↓
-PRODUCTION_BIBLE
-  ↓
-SHOTS
-  ↓
-CONTINUITY
-  ↓
-ASSET_REQUIREMENTS
-  ↓
-ARTIFACTS
-  ↓
-VALIDATION
-```
-
-V2 currently provides the text, planning, production-package, tracking, and validation foundation. Full image/video/voice/audio generation, final assembly, rendering, and publishing are downstream capabilities and are developed as V2.1 integrations.
-
-## Provider Architecture
-
-Providers are configuration-driven and NVIDIA-first.
-
-```text
-Execution
-   ↓
-Provider Gateway / routing boundary
-   ↓
+Production Stage
+      ↓
+Provider Gateway / Routing
+      ↓
 Provider Adapter
-   ↓
-NVIDIA or another enabled provider
-   ↓
+      ↓
 Normalized Provider Result
 ```
 
-The execution system must not depend directly on a vendor-specific response format. Provider results are normalized before becoming production artifacts.
+Provider-specific logic stays behind the gateway/adapter boundary. The registry supports capability-aware selection, provider availability, explicit providers, priorities, and fallbacks. Additional providers can be added without changing the execution contract.
 
-Additional providers can be added without changing the execution contract.
+### Artifact and storage layer
+
+- immutable artifact versions
+- deterministic artifact idempotency
+- artifact provenance
+- storage adapter boundary
+- durable input hydration between stages
+- PostgreSQL system truth plus external artifact storage
+
+### Validation and publication
+
+- explicit validation records and publication gates
+- database-backed publication idempotency
+- duplicate-publication protection under concurrency
+- durable `UNKNOWN` publication state
+- reconciliation of ambiguous external publication outcomes
+
+## Real Production Pipeline
+
+The canonical V2.1 production graph is:
+
+```text
+SIGNAL
+  ↓
+IDEA
+  ↓
+BRIEF
+  ↓
+BIBLE
+  ↓
+CONCEPT
+  ↓
+SCRIPT
+  ↓
+SHOT_PLAN
+  ↓
+ASSET_PLAN
+  ↓
+ASSETS
+  ↓
+EDIT
+  ↓
+PLATFORM_ADAPTATION
+  ↓
+VALIDATION
+  ↓
+PUBLISH
+  ↓
+ANALYZE
+  ↓
+LEARN
+```
+
+The first real vertical production slice is implemented through `SCRIPT`. Structured production planning then extends the pipeline through `SHOT_PLAN` and `ASSET_PLAN`.
+
+Continuity is currently represented as a required structured object in the shot plan rather than as a separate database stage. This keeps the canonical stage graph stable while making continuity constraints explicit and machine-checkable.
+
+## Structured Production Planning
+
+Planning outputs are no longer treated as arbitrary free-form text for the structured stages.
+
+```text
+SCRIPT
+  ↓
+SHOT_PLAN
+  ├── shots
+  └── continuity
+        ↓
+ASSET_PLAN
+  └── assets
+```
+
+The structured contracts validate required fields and cross-stage references before a stage can complete. This is the content-plane foundation for downstream asset generation and rendering.
+
+## Asset Orchestrator
+
+The current asset layer is reuse-first:
+
+```text
+ASSET_PLAN
+    ↓
+Find reusable asset
+    ├── found → reuse
+    └── missing
+          ↓
+      Provider routing
+          ↓
+       Generate
+          ↓
+ Immutable artifact version
+          ↓
+ Durable asset registry
+```
+
+The asset orchestrator is capability-aware for text, image, video, voice, and audio. It uses deterministic idempotency keys and the existing immutable Artifact Service. Existing reusable assets are selected before generation; missing assets are generated through the Provider Gateway.
+
+The architecture does **not** claim that every media provider is already connected. The orchestrator provides the production boundary so concrete image/video/voice/audio adapters can be added independently.
+
+## What Is Not Complete Yet
+
+The system is not yet the finished end-to-end media factory. The remaining production layers are deliberately explicit:
+
+1. concrete image/video/voice/audio provider adapters;
+2. asset generation at real media scale;
+3. stronger continuity enforcement across generated assets;
+4. deterministic edit manifests and media assembly;
+5. final rendering/export of master media;
+6. platform-specific adaptation;
+7. objective final QA and human approval workflow;
+8. production analytics and learning feedback.
+
+A capability is not considered complete merely because its schema or interface exists. It becomes part of the certified system only after implementation and automated verification.
+
+## Provider Architecture
+
+```text
+Execution / Orchestrator
+        ↓
+Provider Gateway
+        ↓
+Capability-aware routing
+        ↓
+Provider Registry
+        ↓
+NVIDIA / OpenAI / Claude / other enabled adapters
+        ↓
+Normalized Provider Result
+```
+
+The Factory is intentionally provider-agnostic at the execution boundary. One stage may use one model while another stage uses a different provider or model according to capability, availability, routing policy, cost, or quality requirements.
 
 See [`docs/PROVIDER-CONTRACT-V2.1.md`](docs/PROVIDER-CONTRACT-V2.1.md).
 
 ## Artifact Architecture
 
-Artifacts are production outputs, independent from execution state.
+Artifacts are independent from execution state and are immutable.
 
 ```text
 Artifact
@@ -116,17 +186,15 @@ Artifact
    └── Version 3
 ```
 
-Versions are immutable. Regeneration creates a new version rather than destructively replacing the previous result.
-
-Artifact provenance records the production context needed to understand where an output came from, including stage, attempt, provider/model context, and validation state.
+Regeneration creates a new version instead of destructively overwriting a previous result. Deterministic idempotency keys protect the system from duplicate artifact creation during retries or concurrent execution.
 
 ## Storage
 
 Storage is accessed through an adapter boundary rather than directly from business logic.
 
-PostgreSQL stores system truth and artifact metadata. Large media is stored through the configured storage backend.
-
-The current V2.1 storage architecture is designed to support filesystem/network-share development and a future move to S3-compatible, MinIO, NAS, or cloud object storage without changing artifact semantics.
+- PostgreSQL stores durable system truth and metadata.
+- Large artifact bytes are stored through the configured storage backend.
+- The adapter boundary supports filesystem development and future S3-compatible, MinIO, NAS, or cloud storage backends without changing artifact semantics.
 
 See:
 
@@ -135,30 +203,28 @@ See:
 
 ## Database
 
-V2 uses PostgreSQL for persistent production state.
+V2.1 uses PostgreSQL as the source of truth for execution and production state.
 
-Core structures include:
+Important durable concepts include:
 
 ```text
-factory_v2_builds
-pipeline_runs
-job_stages
-stage_attempts
-artifacts
-artifact_versions
-dead_letter_jobs
-provider_capabilities
-continuity_snapshots
-shots
-asset_requirements
-validation_results
+productions
+jobs
+stage_definitions
+stage_runs
+attempts / retry state
+artifacts / artifact versions
+validation state
+publication state
+asset registry
+provider configuration
 ```
 
-All database changes must be represented by migrations. Undocumented production schema changes are not allowed.
+All schema changes must be represented by migrations. Production behavior must not depend on undocumented schema changes.
 
-The V2.1 data-model target is documented in [`docs/V2.1-DATA-MODEL-CONTRACT.md`](docs/V2.1-DATA-MODEL-CONTRACT.md). That document is a contract for controlled future normalization, not permission to bypass current execution certification.
+The canonical stage contract is defined in [`worker/v2.1-production-contract.js`](worker/v2.1-production-contract.js).
 
-## Testing
+## Testing and Certification
 
 Install dependencies:
 
@@ -166,19 +232,19 @@ Install dependencies:
 npm ci
 ```
 
-Run the V2 smoke test:
+Run the basic smoke test:
 
 ```bash
 npm test
 ```
 
-Run the V2.1 stage-sequencing tests:
+Run the V2.1 contract suite:
 
 ```bash
 npm run test:v2.1
 ```
 
-CI additionally validates worker syntax, PostgreSQL execution/concurrency certification, migrations, required files, and Git whitespace.
+CI also verifies runtime syntax, provider routing, artifact/storage integration, multi-stage execution, PostgreSQL lifecycle, retries and recovery, concurrency ownership, lease fencing, artifact idempotency, crash recovery, reconciliation, validation, publication, structured production planning, and asset orchestration.
 
 ## Environment
 
@@ -196,10 +262,11 @@ Never commit `.env`, API keys, database passwords, credentials, or generated sec
 ```text
 content-factory-v2/
 ├── .github/workflows/       # CI
-├── docs/                    # canonical architecture and contract documents
+├── docs/                    # architecture and contract documents
 ├── migrations/              # versioned PostgreSQL changes
-├── tests/                   # smoke, contract and certification tests
-├── worker/                  # V2 execution worker
+├── src/                     # provider, artifact, storage and validation services
+├── worker/                  # V2.1 execution and orchestration workers
+├── tests/                   # smoke, contract, integration and certification tests
 ├── build-v2.sh              # controlled V2 build
 ├── package.json
 ├── package-lock.json
@@ -213,31 +280,29 @@ content-factory-v2/
 1. `main` is the stable V2 line.
 2. Development happens on dedicated branches.
 3. Database changes require migrations.
-4. Certified execution functions are not changed casually.
+4. Certified execution boundaries are changed deliberately and re-certified.
 5. Provider-specific logic stays behind provider boundaries.
 6. Artifacts are immutable; revisions create new versions.
 7. Validation is recorded separately from production output.
 8. Secrets never enter Git.
-9. Every meaningful change must pass CI before being considered certified.
-10. Architecture and contracts live in `docs/` and must be updated when their corresponding boundaries change.
+9. Every meaningful change must pass CI before it is considered certified.
+10. Architecture and contracts in `docs/` and canonical runtime contracts must stay synchronized with implementation.
 
-## V2.1 Roadmap
+## Roadmap to a Full Media Factory
 
-V2.1 is built incrementally on the certified V2 foundation:
+The remaining path is intentionally ordered from production semantics to media output:
 
-1. Provider Gateway and normalized provider contract
-2. NVIDIA provider adapter
-3. Artifact Service integration
-4. Storage Adapter integration
-5. End-to-end Stage → Provider → Artifact → Validation → Storage certification
-6. Image/video/voice/audio provider integrations
-7. Asset generation orchestration
-8. Stronger continuity enforcement and asset reuse
-9. Final media assembly
-10. Publishing workflows
-11. Production dashboard and analytics
+1. concrete media provider adapters;
+2. production-scale asset generation;
+3. continuity enforcement and asset reuse improvements;
+4. deterministic edit manifest;
+5. media assembly and rendering;
+6. platform adaptation;
+7. objective QA and human approval;
+8. publication operations;
+9. analytics and learning feedback.
 
-The rule is simple: a capability is called **certified** only after implementation and automated verification. Architecture or schema alone is not considered complete functionality.
+The goal is not merely to execute jobs reliably. The goal is a Factory that can accept a production request, create coherent structured plans, resolve or generate the required assets, assemble them into a finished result, validate that result, and publish it with durable provenance and recovery semantics.
 
 ## Security
 
