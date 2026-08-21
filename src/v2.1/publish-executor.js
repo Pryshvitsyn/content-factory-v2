@@ -2,6 +2,8 @@ const { createHash } = require('node:crypto');
 
 const PUBLICATION_BLOCKED = 'PUBLICATION_BLOCKED';
 const PUBLICATION_IN_PROGRESS = 'PUBLICATION_IN_PROGRESS';
+const PUBLICATION_REJECTED = 'PUBLICATION_REJECTED';
+const AMBIGUOUS_DELIVERY_STATES = new Set(['ACCEPTED', 'UNKNOWN']);
 
 function publicationKey({ artifactVersionId, destination, idempotencyKey }) {
   const raw = idempotencyKey || `${artifactVersionId}:${destination}`;
@@ -29,17 +31,64 @@ function executePublication({ artifactVersionId, destination, gate, idempotencyK
     artifactVersionId,
     destination,
     status: 'PUBLISHING',
+    deliveryState: null,
+    executionStatus: 'EXECUTING',
     result: null,
   };
   store.set(key, intent);
 
   try {
     const result = publisher({ artifactVersionId, destination, idempotencyKey: key });
-    const record = { ...intent, status: 'PUBLISHED', result };
+    const delivery = result?.delivery;
+
+    if (AMBIGUOUS_DELIVERY_STATES.has(delivery)) {
+      const record = {
+        ...intent,
+        status: 'UNKNOWN',
+        deliveryState: 'UNKNOWN',
+        executionStatus: 'RECONCILING',
+        result,
+      };
+      store.set(key, record);
+      return { ...record, reused: false };
+    }
+
+    if (delivery === 'REJECTED') {
+      const error = new Error(PUBLICATION_REJECTED);
+      error.code = PUBLICATION_REJECTED;
+      error.result = result;
+      throw error;
+    }
+
+    const record = {
+      ...intent,
+      status: 'PUBLISHED',
+      deliveryState: 'CONFIRMED',
+      executionStatus: 'COMPLETED',
+      result,
+    };
     store.set(key, record);
     return { ...record, reused: false };
   } catch (error) {
-    store.set(key, { ...intent, status: 'FAILED', error: { message: error.message, code: error.code } });
+    if (error?.delivery === 'UNKNOWN' || error?.code === 'UNKNOWN') {
+      const record = {
+        ...intent,
+        status: 'UNKNOWN',
+        deliveryState: 'UNKNOWN',
+        executionStatus: 'RECONCILING',
+        error: { message: error.message, code: error.code },
+      };
+      store.set(key, record);
+      return { ...record, reused: false };
+    }
+
+    store.set(key, {
+      ...intent,
+      status: 'FAILED',
+      deliveryState: 'UNKNOWN',
+      executionStatus: 'FAILED',
+      error: { message: error.message, code: error.code },
+    });
     throw error;
   }
 }
@@ -49,4 +98,5 @@ module.exports = {
   publicationKey,
   PUBLICATION_BLOCKED,
   PUBLICATION_IN_PROGRESS,
+  PUBLICATION_REJECTED,
 };
