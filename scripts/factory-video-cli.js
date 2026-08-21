@@ -14,6 +14,8 @@
 
 const path = require('path');
 const { VideoFactory, VideoFactoryConfig } = require('../src/v2.1/video-factory');
+const { MockProvider } = require('../src/providers/mock-provider');
+const { ProviderRegistry } = require('../src/providers/provider-registry');
 
 /**
  * Parse command line arguments
@@ -75,10 +77,25 @@ function loadConfig() {
 }
 
 /**
+ * Register providers
+ */
+function registerProviders() {
+  const registry = ProviderRegistry.getInstance();
+  
+  // Register mock provider for testing
+  registry.register('mock', new MockProvider());
+  
+  console.log('[FactoryVideoCLI] Providers registered: mock');
+}
+
+/**
  * Main entry point
  */
 async function main() {
   console.log('[FactoryVideoCLI] Starting video production...\n');
+  
+  // Register providers
+  registerProviders();
   
   const args = parseArgs();
   
