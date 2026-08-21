@@ -19,7 +19,7 @@ class ProviderGateway {
     return this.registry.select(options);
   }
 
-  async generate({ capability = 'text-generation', provider, model, routeKey = capability, ...request } = {}) {
+  async generate({ capability = 'text-generation', provider, model, routeKey = capability, idempotencyKey, ...request } = {}) {
     const selection = this.select({ capability, provider, model, routeKey });
     const attempts = [selection, ...this.registry.getFallbacks({ capability, model, excludeProvider: selection.provider })];
     let lastError;
@@ -28,7 +28,11 @@ class ProviderGateway {
       const current = attempts[index];
       const adapter = this.get(current.provider);
       try {
-        const result = await adapter.generate({ ...request, model: current.model });
+        const result = await adapter.generate({
+          ...request,
+          model: current.model,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        });
         return {
           ...result,
           provenance: {
@@ -37,6 +41,7 @@ class ProviderGateway {
             model: result.model || current.model,
             selectionReason: index === 0 ? current.selectionReason : 'fallback',
             attemptedProviders: attempts.slice(0, index + 1).map(({ provider: name }) => name),
+            ...(idempotencyKey ? { idempotencyKey } : {}),
           },
         };
       } catch (error) {
