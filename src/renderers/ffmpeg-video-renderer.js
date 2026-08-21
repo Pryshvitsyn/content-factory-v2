@@ -35,19 +35,15 @@ class FFmpegVideoRenderer {
       const tempDir = path.join(process.cwd(), 'temp', `render-${Date.now()}`);
       await fs.mkdir(tempDir, { recursive: true });
 
-      // Save visual elements as images
       const imageFiles = await this._saveImages(artifacts.visuals, tempDir);
       console.log(`[FFmpegRenderer] Saved ${imageFiles.length} images`);
       
-      // Save audio (voiceover)
       const audioFile = await this._saveAudio(artifacts.audio, tempDir);
       console.log(`[FFmpegRenderer] Saved audio: ${audioFile}`);
       
-      // Calculate scene duration
       const sceneDuration = this._calculateSceneDuration(input, imageFiles.length);
       console.log(`[FFmpegRenderer] Scene duration: ${sceneDuration}s`);
       
-      // Create FFmpeg command
       const ffmpegArgs = this._buildFFmpegCommand(
         input, 
         imageFiles, 
@@ -56,17 +52,14 @@ class FFmpegVideoRenderer {
         sceneDuration
       );
       
-      // Execute FFmpeg
       console.log(`[FFmpegRenderer] Executing FFmpeg...`);
       await this._executeFFmpeg(ffmpegArgs);
       
-      // Verify output file exists
       const outputExists = await this._fileExists(outputPath);
       if (!outputExists) {
         throw new Error('Output file was not created');
       }
       
-      // Cleanup temp files
       await this._cleanup(tempDir);
       
       const duration = Date.now() - startTime;
@@ -156,17 +149,25 @@ class FFmpegVideoRenderer {
     // Input audio (voiceover)
     args.push('-i', audioFile);
     
-    // Build filter complex
+    // Build filter complex with scale
     const numScenes = imageFiles.length;
     const audioInputIndex = numScenes;
     
-    // Simple approach: concatenate all images, then overlay audio
-    // [0:v][1:v][2:v]...concat=n=3:v=1[outv]
+    // Scale each input to 1080x1920, then concat, then add audio
+    // [0:v]scale=1080x1920[s0];[1:v]scale=1080x1920[s1];[2:v]scale=1080x1920[s2];
+    // [s0][s1][s2]concat=n=3:v=1:a=0[outv];
     // [3:a]anull[outa]
-    // [outv][outa]map
     
-    const videoInputs = Array.from({ length: numScenes }, (_, i) => `[${i}:v]`).join('');
-    const filterComplex = `${videoInputs}concat=n=${numScenes}:v=1:a=0[outv];[${audioInputIndex}:a]anull[outa]`;
+    let filterComplex = '';
+    const scaledInputs = [];
+    
+    for (let i = 0; i < numScenes; i++) {
+      filterComplex += `[${i}:v]scale=1080:1920[s${i}];`;
+      scaledInputs.push(`[s${i}]`);
+    }
+    
+    const videoInputs = scaledInputs.join('');
+    filterComplex += `${videoInputs}concat=n=${numScenes}:v=1:a=0[outv];[${audioInputIndex}:a]anull[outa]`;
     
     args.push('-filter_complex', filterComplex);
     
@@ -245,6 +246,8 @@ class FFmpegVideoRenderer {
   }
 
   async _createPlaceholderImage(width, height) {
+    // Create a simple colored PNG using pure JS
+    // For now, create minimal PNG and let FFmpeg scale it
     const pngHeader = Buffer.from([
       0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
       0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
