@@ -30,10 +30,7 @@ async function recoverExpiredWork(client) {
 async function claimJob(client, { workerId, leaseSeconds = 120 } = {}) {
   requireClient(client);
   requireWorker(workerId);
-  const result = await client.query(
-    'SELECT * FROM v2_1.claim_job($1, $2)',
-    [workerId, Math.max(5, leaseSeconds)]
-  );
+  const result = await client.query('SELECT * FROM v2_1.claim_job($1, $2)', [workerId, Math.max(5, leaseSeconds)]);
   return result.rows[0] || null;
 }
 
@@ -41,20 +38,14 @@ async function claimJobForProduction(client, { jobId, productionId, workerId, le
   requireClient(client);
   requireWorker(workerId);
   if (!jobId || !productionId) throw new Error('jobId and productionId are required');
-  const result = await client.query(
-    'SELECT * FROM v2_1.claim_job_for_production($1, $2, $3, $4)',
-    [jobId, productionId, workerId, Math.max(5, leaseSeconds)]
-  );
+  const result = await client.query('SELECT * FROM v2_1.claim_job_for_production($1, $2, $3, $4)', [jobId, productionId, workerId, Math.max(5, leaseSeconds)]);
   return result.rows[0] || null;
 }
 
 async function heartbeatJob(client, { jobId, workerId, leaseSeconds = 120 } = {}) {
   requireClient(client);
   requireWorker(workerId);
-  const result = await client.query(
-    'SELECT v2_1.heartbeat_job($1, $2, $3) AS renewed',
-    [jobId, workerId, Math.max(5, leaseSeconds)]
-  );
+  const result = await client.query('SELECT v2_1.heartbeat_job($1, $2, $3) AS renewed', [jobId, workerId, Math.max(5, leaseSeconds)]);
   if (!result.rows[0]?.renewed) throw new Error('Job lease is not owned by this worker or is no longer running');
   return true;
 }
@@ -62,45 +53,27 @@ async function heartbeatJob(client, { jobId, workerId, leaseSeconds = 120 } = {}
 async function claimNextStage(client, { jobId, workerId, leaseSeconds = 120 } = {}) {
   requireClient(client);
   requireWorker(workerId);
-  const result = await client.query(
-    'SELECT * FROM v2_1.claim_stage($1, $2, $3)',
-    [jobId, workerId, Math.max(5, leaseSeconds)]
-  );
+  const result = await client.query('SELECT * FROM v2_1.claim_stage($1, $2, $3)', [jobId, workerId, Math.max(5, leaseSeconds)]);
   return result.rows[0] || null;
 }
 
 async function heartbeatStage(client, { stageRunId, workerId, leaseSeconds = 120 } = {}) {
   requireClient(client);
   requireWorker(workerId);
-  const result = await client.query(
-    'SELECT v2_1.heartbeat_stage($1, $2, $3) AS renewed',
-    [stageRunId, workerId, Math.max(5, leaseSeconds)]
-  );
+  const result = await client.query('SELECT v2_1.heartbeat_stage($1, $2, $3) AS renewed', [stageRunId, workerId, Math.max(5, leaseSeconds)]);
   if (!result.rows[0]?.renewed) throw new Error('Stage lease is not owned by this worker or is no longer running');
   return true;
 }
 
-async function completeStage(client, {
-  stageRunId,
-  workerId,
-  outputArtifacts = [],
-  outputFingerprint = null,
-} = {}) {
+async function completeStage(client, { stageRunId, workerId, outputArtifacts = [], outputFingerprint = null } = {}) {
   requireClient(client);
   requireWorker(workerId);
   const outputs = [...new Set(outputArtifacts)];
   const result = await client.query(
     `UPDATE v2_1.stage_runs
-        SET status = 'COMPLETED',
-            output_artifacts = $1::jsonb,
-            output_fingerprint = $2,
-            completed_at = now(),
-            heartbeat_at = now(),
-            lease_expires_at = NULL,
-            worker_id = NULL
-      WHERE id = $3
-        AND status = 'RUNNING'
-        AND worker_id = $4
+        SET status = 'COMPLETED', output_artifacts = $1::jsonb, output_fingerprint = $2,
+            completed_at = now(), heartbeat_at = now(), lease_expires_at = NULL, worker_id = NULL
+      WHERE id = $3 AND status = 'RUNNING' AND worker_id = $4
       RETURNING id, job_id, stage, attempt, status`,
     [JSON.stringify(outputs), outputFingerprint, stageRunId, workerId]
   );
@@ -108,12 +81,7 @@ async function completeStage(client, {
   return result.rows[0];
 }
 
-async function failStage(client, {
-  stageRunId,
-  workerId,
-  error,
-  retryable = true,
-} = {}) {
+async function failStage(client, { stageRunId, workerId, error, retryable = true } = {}) {
   requireClient(client);
   requireWorker(workerId);
   await client.query('BEGIN');
@@ -127,13 +95,15 @@ async function failStage(client, {
     );
     if (!current.rowCount) throw new Error('Stage failure rejected: lease ownership or stage state is invalid');
     const row = current.rows[0];
+    const inputArtifactsJson = JSON.stringify(row.input_artifacts ?? []);
+    const failureJson = JSON.stringify(error || { code: 'STAGE_FAILED' });
 
     await client.query(
       `UPDATE v2_1.stage_runs
           SET status = 'FAILED', error = $1::jsonb, completed_at = now(),
               lease_expires_at = NULL, heartbeat_at = now(), worker_id = NULL
         WHERE id = $2`,
-      [JSON.stringify(error || { code: 'STAGE_FAILED' }), stageRunId]
+      [failureJson, stageRunId]
     );
 
     if (retryable && row.attempt < row.max_attempts) {
@@ -143,7 +113,7 @@ async function failStage(client, {
           (job_id, stage, attempt, status, input_artifacts, input_fingerprint, max_attempts, next_attempt_at, error)
          VALUES ($1, $2, $3, 'RETRYING', $4::jsonb, $5, $6,
                  now() + make_interval(secs => LEAST(300, 2 ^ LEAST($3, 8))), $7::jsonb)`,
-        [row.job_id, row.stage, nextAttempt, row.input_artifacts, row.input_fingerprint, row.max_attempts, JSON.stringify(error || { code: 'STAGE_RETRYING' })]
+        [row.job_id, row.stage, nextAttempt, inputArtifactsJson, row.input_fingerprint, row.max_attempts, JSON.stringify(error || { code: 'STAGE_RETRYING' })]
       );
     } else {
       await client.query(
@@ -151,7 +121,7 @@ async function failStage(client, {
             SET status = 'FAILED', error = $1::jsonb, last_error = $1::jsonb,
                 completed_at = now(), worker_id = NULL, lease_expires_at = NULL, heartbeat_at = now()
           WHERE id = $2 AND status = 'RUNNING' AND worker_id = $3`,
-        [JSON.stringify(error || { code: 'STAGE_FAILED_PERMANENT' }), row.job_id, workerId]
+        [failureJson, row.job_id, workerId]
       );
     }
 
@@ -168,50 +138,22 @@ async function completeJob(client, { jobId, workerId } = {}) {
   requireWorker(workerId);
   await client.query('BEGIN');
   try {
-    const job = await client.query(
-      `SELECT id, production_id FROM v2_1.jobs
-        WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2
-        FOR UPDATE`,
-      [jobId, workerId]
-    );
+    const job = await client.query(`SELECT id, production_id FROM v2_1.jobs WHERE id = $1 AND status = 'RUNNING' AND worker_id = $2 FOR UPDATE`, [jobId, workerId]);
     if (!job.rowCount) throw new Error('Job completion rejected: lease ownership or job state is invalid');
-
     const incomplete = await client.query(
-      `SELECT sr.stage
-         FROM v2_1.stage_runs sr
-        WHERE sr.job_id = $1
-          AND NOT EXISTS (
-            SELECT 1 FROM v2_1.stage_runs done
-             WHERE done.job_id = sr.job_id AND done.stage = sr.stage AND done.status = 'COMPLETED'
-          )
-        ORDER BY sr.stage`,
+      `SELECT sr.stage FROM v2_1.stage_runs sr
+        WHERE sr.job_id = $1 AND NOT EXISTS (
+          SELECT 1 FROM v2_1.stage_runs done WHERE done.job_id = sr.job_id AND done.stage = sr.stage AND done.status = 'COMPLETED'
+        ) ORDER BY sr.stage`,
       [jobId]
     );
     if (incomplete.rowCount) throw new Error(`Job cannot complete; incomplete stages: ${incomplete.rows.map((row) => row.stage).join(', ')}`);
-
-    const terminal = await client.query(
-      `SELECT 1 FROM v2_1.stage_runs WHERE job_id = $1 AND stage = 'LEARN' AND status = 'COMPLETED' LIMIT 1`,
-      [jobId]
-    );
+    const terminal = await client.query(`SELECT 1 FROM v2_1.stage_runs WHERE job_id = $1 AND stage = 'LEARN' AND status = 'COMPLETED' LIMIT 1`, [jobId]);
     if (!terminal.rowCount) throw new Error('Job cannot complete without a completed LEARN stage');
-
-    await client.query(
-      `UPDATE v2_1.jobs
-          SET status = 'COMPLETED', completed_at = now(), worker_id = NULL,
-              lease_expires_at = NULL, heartbeat_at = now()
-        WHERE id = $1`,
-      [jobId]
-    );
-
+    await client.query(`UPDATE v2_1.jobs SET status = 'COMPLETED', completed_at = now(), worker_id = NULL, lease_expires_at = NULL, heartbeat_at = now() WHERE id = $1`, [jobId]);
     if (job.rows[0].production_id) {
-      await client.query(
-        `UPDATE v2_1.productions
-            SET status = 'COMPLETED', completed_at = now(), updated_at = now()
-          WHERE id = $1 AND status = 'RUNNING'`,
-        [job.rows[0].production_id]
-      );
+      await client.query(`UPDATE v2_1.productions SET status = 'COMPLETED', completed_at = now(), updated_at = now() WHERE id = $1 AND status = 'RUNNING'`, [job.rows[0].production_id]);
     }
-
     await client.query('COMMIT');
     return true;
   } catch (error) {
@@ -220,26 +162,7 @@ async function completeJob(client, { jobId, workerId } = {}) {
   }
 }
 
-function stageContract(stage) {
-  return getStageDefinition(stage);
-}
+function stageContract(stage) { return getStageDefinition(stage); }
+function allStageNames() { return Object.keys(STAGE_DEFINITIONS); }
 
-function allStageNames() {
-  return Object.keys(STAGE_DEFINITIONS);
-}
-
-module.exports = {
-  fingerprint,
-  stableStringify,
-  recoverExpiredWork,
-  claimJob,
-  claimJobForProduction,
-  heartbeatJob,
-  claimNextStage,
-  heartbeatStage,
-  completeStage,
-  failStage,
-  completeJob,
-  stageContract,
-  allStageNames,
-};
+module.exports = { fingerprint, stableStringify, recoverExpiredWork, claimJob, claimJobForProduction, heartbeatJob, claimNextStage, heartbeatStage, completeStage, failStage, completeJob, stageContract, allStageNames };
