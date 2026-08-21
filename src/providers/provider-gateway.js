@@ -1,56 +1,55 @@
-'use strict';
+/**
+ * Provider Gateway
+ * 
+ * Unified interface for interacting with different media providers
+ * (NVIDIA, and future providers)
+ */
 
 const { ProviderRegistry } = require('./provider-registry');
 
 class ProviderGateway {
-  constructor({ providers, priorities, routing } = {}) {
-    this.registry = new ProviderRegistry({ providers, priorities, routing });
+  /**
+   * @param {ProviderRegistry} registry - Optional registry instance (for testing)
+   */
+  constructor(registry = null) {
+    this.registry = registry || new ProviderRegistry();
   }
 
-  register(name, adapter, options) {
-    this.registry.register(name, adapter, options);
+  /**
+   * Select a provider by name
+   * @param {string} providerName - Provider name
+   * @returns {Object} - Provider instance
+   */
+  select(providerName) {
+    return this.registry.select(providerName);
   }
 
-  get(name) {
-    return this.registry.get(name);
+  /**
+   * Generate content using a specific provider
+   * @param {Object} options - Generation options
+   * @param {string} options.provider - Provider name
+   * @param {string} options.type - Content type (text, audio, image)
+   * @param {Object} options.input - Input data
+   * @returns {Promise<Object>} - Generated content
+   */
+  async generate(options) {
+    const { provider, type, input } = options;
+    
+    const providerInstance = this.select(provider);
+    
+    return providerInstance.generate({
+      type,
+      input
+    });
   }
 
-  select(options) {
-    return this.registry.select(options);
-  }
-
-  async generate({ capability = 'text-generation', provider, model, routeKey = capability, idempotencyKey, ...request } = {}) {
-    const selection = this.select({ capability, provider, model, routeKey });
-    const attempts = [selection, ...this.registry.getFallbacks({ capability, model, excludeProvider: selection.provider })];
-    let lastError;
-
-    for (let index = 0; index < attempts.length; index += 1) {
-      const current = attempts[index];
-      const adapter = this.get(current.provider);
-      try {
-        const result = await adapter.generate({
-          ...request,
-          model: current.model,
-          ...(idempotencyKey ? { idempotencyKey } : {}),
-        });
-        return {
-          ...result,
-          provenance: {
-            ...(result.provenance || {}),
-            provider: result.provider || current.provider,
-            model: result.model || current.model,
-            selectionReason: index === 0 ? current.selectionReason : 'fallback',
-            attemptedProviders: attempts.slice(0, index + 1).map(({ provider: name }) => name),
-            ...(idempotencyKey ? { idempotencyKey } : {}),
-          },
-        };
-      } catch (error) {
-        lastError = error;
-        if (provider || !this.registry.routing.fallbackOnError) throw error;
-      }
-    }
-
-    throw lastError || new Error(`No provider could generate capability '${capability}'`);
+  /**
+   * Register a provider (convenience method)
+   * @param {string} name - Provider name
+   * @param {Object} provider - Provider instance
+   */
+  register(name, provider) {
+    this.registry.register(name, provider);
   }
 }
 
