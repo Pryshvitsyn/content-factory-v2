@@ -3,6 +3,8 @@ BEGIN;
 -- V2.1 retry/recovery contract.
 -- Expired leases are converted into durable retry attempts. A retry keeps the
 -- exact stage input snapshot so recovery cannot accidentally consume newer data.
+-- If a stage lease expires, its worker is considered lost: release the parent
+-- job ownership so another worker can reclaim the job and continue the retry.
 CREATE OR REPLACE FUNCTION v2_1.recover_expired_work()
 RETURNS TABLE(
   jobs_recovered integer,
@@ -49,6 +51,19 @@ BEGIN
         now(), jsonb_build_object('code','LEASE_EXPIRED','previous_attempt',stage_row.attempt)
       );
       s_recovered := s_recovered + 1;
+
+      -- A stage lease belongs to a worker. If it expires, that worker is no
+      -- longer trusted to continue the job. Release the parent job lease so a
+      -- different worker can reclaim the job and claim the RETRYING stage.
+      UPDATE v2_1.jobs
+         SET status='RETRYING',
+             worker_id=NULL,
+             lease_expires_at=NULL,
+             heartbeat_at=now(),
+             next_attempt_at=now(),
+             last_error=jsonb_build_object('code','STAGE_LEASE_EXPIRED','stage',stage_row.stage,'previous_attempt',stage_row.attempt),
+             updated_at=now()
+       WHERE id=stage_row.job_id AND status='RUNNING';
     ELSE
       UPDATE v2_1.stage_runs
          SET status='DEAD_LETTER',
