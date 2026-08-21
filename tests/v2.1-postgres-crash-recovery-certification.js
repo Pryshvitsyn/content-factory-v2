@@ -11,6 +11,7 @@ const execution = require('../worker/v2.1-execution-engine');
 
 const root = path.resolve(__dirname, '..');
 const WORKSPACE_ID = '00000000-0000-0000-0000-000000000041';
+const TEST_LEASE_SECONDS = 60;
 
 function client() {
   return new Client({
@@ -48,6 +49,7 @@ async function run() {
     const production = (await db.query(
       `SELECT id FROM v2_1.productions WHERE workspace_id=$1 ORDER BY created_at DESC LIMIT 1`, [WORKSPACE_ID]
     )).rows[0];
+    assert.ok(production?.id, 'production must be created');
 
     await db.query(
       `INSERT INTO v2_1.jobs(production_id,stage,idempotency_key,status,max_attempts)
@@ -57,18 +59,22 @@ async function run() {
     const job = (await db.query(
       `SELECT id FROM v2_1.jobs WHERE production_id=$1 ORDER BY created_at DESC LIMIT 1`, [production.id]
     )).rows[0];
+    assert.ok(job?.id, 'job must be created');
 
-    await execution.claimJobForProduction(db, {
+    const claimedJob = await execution.claimJobForProduction(db, {
       jobId: job.id,
       productionId: production.id,
       workerId: 'crash-worker-a',
-      leaseSeconds: 5,
+      leaseSeconds: TEST_LEASE_SECONDS,
     });
+    assert.ok(claimedJob?.id, 'job must be claimed');
+
     const first = await execution.claimNextStage(db, {
       jobId: job.id,
       workerId: 'crash-worker-a',
-      leaseSeconds: 5,
+      leaseSeconds: TEST_LEASE_SECONDS,
     });
+    assert.ok(first?.id, 'first stage must be claimed');
 
     const storage = new FilesystemStorageAdapter({ root: storageRoot });
     const artifacts = new ArtifactService({ storage });
@@ -76,7 +82,7 @@ async function run() {
     const logicalKey = `${job.id}:SIGNAL:${logicalArtifactId}`;
 
     // Simulate provider success and durable artifact commit, then crash before
-    // completeStage. This deliberately models the real crash boundary.
+    // completeStage. The job lease remains valid; only the stage lease expires.
     providerCalls += 1;
     const firstArtifact = await artifacts.createVersion({
       artifactId: logicalArtifactId,
@@ -93,12 +99,15 @@ async function run() {
     await db.query(`UPDATE v2_1.stage_runs SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, [first.id]);
     const recovered = await execution.recoverExpiredWork(db);
     assert.equal(recovered.stages_recovered, 1);
+    assert.equal(recovered.jobs_recovered, 0);
+    assert.equal(recovered.jobs_failed, 0);
 
     const second = await execution.claimNextStage(db, {
       jobId: job.id,
       workerId: 'crash-worker-b',
-      leaseSeconds: 5,
+      leaseSeconds: TEST_LEASE_SECONDS,
     });
+    assert.ok(second?.id, 'recovered retry stage must be claimable');
     assert.equal(second.attempt, 2);
 
     // The artifact boundary is exactly-once/idempotent even though provider
