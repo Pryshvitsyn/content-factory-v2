@@ -1,0 +1,17 @@
+{
+  "contract_version": "v1.0.0",
+  "name": "Quality Gate Decision",
+  "required": ["artifact_id","status","findings","repair_attempts"],
+  "status_enum": ["PASS","REPAIR","BLOCK","HUMAN_REVIEW"],
+  "finding": {
+    "required": ["rule_id","severity","message","scope"],
+    "severity_enum": ["BLOCK","WARN","INFO"],
+    "scope_required": ["scene_id"]
+  },
+  "decision_rules": [
+    "any unexcepted BLOCK finding yields BLOCK or REPAIR",
+    "REPAIR is permitted only when a targeted repair strategy exists",
+    "PASS requires zero unresolved BLOCK findings",
+    "HUMAN_REVIEW is required when objective validation cannot resolve the finding or the issue is subjective"
+  ]
+}
