@@ -12,7 +12,6 @@ class VideoRenderer {
   constructor() {
     this.tempDir = path.join(process.cwd(), 'temp');
     
-    // Create temp directory if it doesn't exist
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
@@ -23,43 +22,35 @@ class VideoRenderer {
     
     console.log('[VideoRenderer] Starting render...');
     
+    const timestamp = Date.now();
+    
     // Save image to temp file
-    const imagePath = path.join(this.tempDir, `image_${Date.now()}.jpg`);
+    const imagePath = path.join(this.tempDir, `image_${timestamp}.jpg`);
     fs.writeFileSync(imagePath, images[0]);
     
     // Save audio to temp file
-    const audioPath = path.join(this.tempDir, `audio_${Date.now()}.wav`);
+    const audioPath = path.join(this.tempDir, `audio_${timestamp}.wav`);
     fs.writeFileSync(audioPath, audio);
     
     // Output video path
-    const outputPath = path.join(this.tempDir, `video_${Date.now()}.${format}`);
+    const outputPath = path.join(this.tempDir, `video_${timestamp}.${format}`);
     
     // FFmpeg command
-    const ffmpegCommand = `
-      ffmpeg -y 
-      -loop 1 -i "${imagePath}" 
-      -i "${audioPath}" 
-      -c:v libx264 
-      -tune stillimage 
-      -c:a aac 
-      -b:a 192k 
-      -pix_fmt yuv420p 
-      -shortest 
-      -vf "scale=${resolution.replace('x', ':')}" 
-      "${outputPath}"
-    `.trim().replace(/\s+/g, ' ');
+    const ffmpegCommand = `ffmpeg -y -loop 1 -i "${imagePath}" -i "${audioPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest -vf "scale=${resolution.replace('x', ':')}" "${outputPath}"`;
     
     console.log('[VideoRenderer] Running FFmpeg...');
+    console.log('[VideoRenderer] Command:', ffmpegCommand);
     
-    // Execute FFmpeg
+    // Execute FFmpeg with increased buffer
     await new Promise((resolve, reject) => {
-      exec(ffmpegCommand, (error, stdout, stderr) => {
+      exec(ffmpegCommand, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
         if (error) {
           console.error('[VideoRenderer] FFmpeg error:', error.message);
+          console.error('[VideoRenderer] stderr:', stderr);
           reject(error);
           return;
         }
-        console.log('[VideoRenderer] FFmpeg output:', stderr);
+        console.log('[VideoRenderer] FFmpeg complete');
         resolve();
       });
     });
@@ -67,10 +58,16 @@ class VideoRenderer {
     // Read video file
     const videoBuffer = fs.readFileSync(outputPath);
     
+    console.log('[VideoRenderer] Video size:', videoBuffer.length, 'bytes');
+    
     // Cleanup temp files
-    fs.unlinkSync(imagePath);
-    fs.unlinkSync(audioPath);
-    fs.unlinkSync(outputPath);
+    try {
+      fs.unlinkSync(imagePath);
+      fs.unlinkSync(audioPath);
+      fs.unlinkSync(outputPath);
+    } catch (e) {
+      console.warn('[VideoRenderer] Cleanup warning:', e.message);
+    }
     
     console.log('[VideoRenderer] Render complete');
     
