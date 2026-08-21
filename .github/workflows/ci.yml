@@ -57,6 +57,7 @@ jobs:
           node --check worker/v2.4-production-brain-executor.js
           node --check worker/v2.4-ai-production-brain.js
           node --check worker/v2.5-research-intelligence.js
+          node --check worker/v2.5-research-collector.js
 
       - name: Run V2.1 execution foundation tests
         run: npm run test:v2.1
@@ -100,6 +101,9 @@ jobs:
       - name: Run V2.5 research intelligence certification
         run: node tests/v2.5-research-intelligence-test.js
 
+      - name: Run V2.5 bounded research collector certification
+        run: node tests/v2.5-research-collector-test.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -125,6 +129,7 @@ jobs:
           test -s tests/v2.4-ai-production-brain-test.js
           test -s tests/v2.5-opportunity-gate-test.js
           test -s tests/v2.5-research-intelligence-test.js
+          test -s tests/v2.5-research-collector-test.js
 
       - name: Check required project files
         run: |
