@@ -5,7 +5,7 @@ const { getStageDefinition } = require('./v2.1-production-contract');
 
 function requireDependency(name, value) {
   if (!value) throw new Error(`${name} is required`);
-  }
+}
 
 class StageRunner {
   constructor({ execution, providerGateway, artifactService, handlers = {}, heartbeatIntervalMs = null } = {}) {
@@ -40,6 +40,17 @@ class StageRunner {
     return { get error() { return heartbeatError; }, stop() { clearInterval(timer); } };
   }
 
+  async hydrateInputs(inputArtifacts) {
+    if (!Array.isArray(inputArtifacts) || inputArtifacts.length === 0) return [];
+    if (!this.artifactService.storage || typeof this.artifactService.storage.get !== 'function') {
+      throw new Error('Artifact storage does not support input hydration');
+    }
+    return Promise.all(inputArtifacts.map(async (key) => {
+      const bytes = await this.artifactService.storage.get({ key });
+      return Buffer.isBuffer(bytes) ? bytes.toString('utf8') : String(bytes);
+    }));
+  }
+
   async run({ client, stageRun, workerId } = {}) {
     if (!client) throw new Error('client is required');
     if (!stageRun?.id || !stageRun.stage) throw new Error('stageRun.id and stageRun.stage are required');
@@ -58,7 +69,8 @@ class StageRunner {
           throw error;
         }
       }
-      const result = await handler({ stage: definition, stageRun, providerGateway: this.providerGateway, inputArtifacts });
+      const inputContents = await this.hydrateInputs(inputArtifacts);
+      const result = await handler({ stage: definition, stageRun, providerGateway: this.providerGateway, inputArtifacts, inputContents });
       if (heartbeat?.error) throw heartbeat.error;
       const produced = Array.isArray(result?.artifacts) ? result.artifacts : (result?.artifact ? [result.artifact] : []);
       const outputArtifacts = [];
