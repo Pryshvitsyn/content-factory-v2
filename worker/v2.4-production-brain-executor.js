@@ -7,13 +7,14 @@ const { fingerprint, planNextStage, contract } = require('./v2.4-production-brai
  * The provider generates only; validation and artifact commitment remain outside it.
  */
 async function executeStage({ stage, artifacts = {}, provider, validate, repair }) {
-  if (typeof provider !== 'function') throw new TypeError('provider must be a function');
-  if (typeof validate !== 'function') throw new TypeError('validate must be a function');
-
   const plan = planNextStage({ artifacts, requestedStage: stage });
   if (plan.status !== 'READY') return plan;
 
-  const inputs = Object.fromEntries(contract.stages.find((item) => item.id === stage).inputs.map((key) => [key, artifacts[key]]));
+  if (typeof provider !== 'function') throw new TypeError('provider must be a function');
+  if (typeof validate !== 'function') throw new TypeError('validate must be a function');
+
+  const stageDefinition = contract.stages.find((item) => item.id === stage);
+  const inputs = Object.fromEntries(stageDefinition.inputs.map((key) => [key, artifacts[key]]));
   let attempt = 0;
   let proposal = await provider({ stage, inputs, inputFingerprint: plan.input_fingerprint });
 
@@ -21,7 +22,7 @@ async function executeStage({ stage, artifacts = {}, provider, validate, repair 
     const validation = await validate({ stage, proposal, inputs, attempt });
     if (validation?.status === 'PASS') {
       const artifact = {
-        type: contract.stages.find((item) => item.id === stage).output,
+        type: stageDefinition.output,
         version: 1,
         fingerprint: fingerprint(proposal),
         source_input_fingerprint: plan.input_fingerprint,
