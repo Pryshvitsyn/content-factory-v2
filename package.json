@@ -29,7 +29,9 @@
     "test:v2.1:validation": "node tests/v2.1-validation-engine-test.js",
     "test:v2.1:publish": "node tests/v2.1-publish-executor-test.js",
     "test:v2.1:recovery-executor": "node tests/v2.1-recovery-executor-test.js",
-    "test:v2.1:production-orchestrator": "node tests/v2.1-production-orchestrator-test.js"
+    "test:v2.1:production-orchestrator": "node tests/v2.1-production-orchestrator-test.js",
+    "test:v2.1:asset-orchestrator": "node tests/v2.1-asset-orchestrator-test.js",
+    "test:v2.1:asset-repository": "node tests/v2.1-asset-repository-test.js"
   },
   "keywords": ["content-factory", "ai", "pipeline", "production"],
   "author": "",

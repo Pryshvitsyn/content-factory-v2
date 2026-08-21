@@ -109,6 +109,7 @@ jobs:
           node --check worker/v2.1-production-contract.js
           node --check worker/v2.1-production-orchestrator.js
           node --check worker/v2.1-structured-production.js
+          node --check worker/v2.1-asset-orchestrator.js
           node --check worker/v2.1-execution-engine.js
           node --check worker/v2.1-stage-runner.js
           node --check worker/v2.1-pipeline-executor.js
@@ -117,6 +118,7 @@ jobs:
           node --check src/providers/provider-gateway.js
           node --check src/artifacts/artifact-service.js
           node --check src/storage/storage-adapter.js
+          node --check src/v2.1/asset-repository.js
           node --check src/v2.1/reconciliation.js
           node --check src/v2.1/validation-engine.js
           node --check src/v2.1/publish-executor.js
@@ -140,7 +142,9 @@ jobs:
           node --check tests/v2.1-recovery-executor-test.js
           node --check tests/v2.1-validation-engine-test.js
           node --check tests/v2.1-publish-executor-test.js
-          node -e "require('./worker/v2.1-production-orchestrator'); require('./worker/v2.1-structured-production'); require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./worker/v2.1-recovery-executor'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/artifacts/artifact-service'); require('./src/v2.1/reconciliation'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
+          node --check tests/v2.1-asset-orchestrator-test.js
+          node --check tests/v2.1-asset-repository-test.js
+          node -e "require('./worker/v2.1-production-orchestrator'); require('./worker/v2.1-structured-production'); require('./worker/v2.1-asset-orchestrator'); require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./worker/v2.1-recovery-executor'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/artifacts/artifact-service'); require('./src/v2.1/asset-repository'); require('./src/v2.1/reconciliation'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
@@ -206,6 +210,12 @@ jobs:
       - name: Run V2.1 structured production planning certification
         run: npm run test:v2.1:production-orchestrator
         timeout-minutes: 3
+      - name: Run V2.1 asset orchestrator certification
+        run: npm run test:v2.1:asset-orchestrator
+        timeout-minutes: 3
+      - name: Run V2.1 asset repository certification
+        run: npm run test:v2.1:asset-repository
+        timeout-minutes: 2
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
@@ -222,6 +232,7 @@ jobs:
           test -s migrations/20260820_v2_1_concurrency_certification.sql
           test -s migrations/20260820_v2_1_publication_execution.sql
           test -s migrations/20260821_v2_1_stage_claim_job_lease_fencing.sql
+          test -s migrations/20260821_v2_1_asset_registry.sql
         timeout-minutes: 2
       - name: Check required project files
         run: |
