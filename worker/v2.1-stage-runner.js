@@ -45,7 +45,9 @@ class StageRunner {
     if (!this.artifactService.storage || typeof this.artifactService.storage.get !== 'function') {
       throw new Error('Artifact storage does not support input hydration');
     }
-    return Promise.all(inputArtifacts.map(async (key) => {
+    return Promise.all(inputArtifacts.map(async (input) => {
+      const key = typeof input === 'string' ? input : input?.storageKey;
+      if (!key) throw new Error('Stage input artifact is missing storageKey');
       const bytes = await this.artifactService.storage.get({ key });
       return Buffer.isBuffer(bytes) ? bytes.toString('utf8') : String(bytes);
     }));
