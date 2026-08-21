@@ -6,9 +6,13 @@ on:
       - main
       - "release/**"
       - "develop/**"
+      - "feat/**"
   pull_request:
     branches:
       - main
+      - "release/**"
+      - "develop/**"
+      - "feat/**"
 
 jobs:
   validate:
