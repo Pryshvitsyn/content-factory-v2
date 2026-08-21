@@ -46,12 +46,13 @@ async function run() {
   runner.register('CONCEPT', async ({ providerGateway: gateway, inputArtifacts }) => {
     const result = await gateway.generate({
       capability: 'text-generation',
-      prompt: `build:${inputArtifacts.join(',')}`,
+      prompt: `build:${inputArtifacts.map(({ artifactId }) => artifactId).join(',')}`,
     });
     return {
       output: result.output,
       provenance: result.provenance,
       artifacts: [{
+        artifactId: 'concept-output-1',
         type: 'text',
         content: result.output,
         provider: result.provider,
@@ -67,7 +68,7 @@ async function run() {
       id: 'stage-run-1',
       stage: 'CONCEPT',
       attempt: 1,
-      input_artifacts: ['input-1'],
+      input_artifacts: [{ artifactId: 'input-1' }],
     },
   });
 
@@ -75,6 +76,7 @@ async function run() {
   assert.equal(calls[0].capability, 'text-generation');
   assert.equal(calls[0].prompt, 'build:input-1');
   assert.equal(createdArtifacts.length, 1);
+  assert.equal(createdArtifacts[0].artifactId, 'concept-output-1');
   assert.equal(createdArtifacts[0].provider, 'nvidia');
   assert.equal(createdArtifacts[0].model, 'nvidia/test-model');
   assert.deepEqual(completed, {
