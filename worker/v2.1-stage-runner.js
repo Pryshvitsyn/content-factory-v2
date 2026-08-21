@@ -5,7 +5,7 @@ const { getStageDefinition } = require('./v2.1-production-contract');
 
 function requireDependency(name, value) {
   if (!value) throw new Error(`${name} is required`);
-}
+  }
 
 class StageRunner {
   constructor({ execution, providerGateway, artifactService, handlers = {}, heartbeatIntervalMs = null } = {}) {
@@ -63,10 +63,10 @@ class StageRunner {
       const produced = Array.isArray(result?.artifacts) ? result.artifacts : (result?.artifact ? [result.artifact] : []);
       const outputArtifacts = [];
       const provenance = result?.provenance || {};
+      const logicalJobId = stageRun.job_id || stageRun.jobId || stageRun.production_job_id;
       for (const artifact of produced) {
-        const logicalArtifactId = artifact.artifactId;
-        if (!logicalArtifactId) throw new Error('Artifact artifactId is required for stage execution');
-        const idempotencyKey = artifact.idempotencyKey || `${stageRun.id}:${logicalArtifactId}`;
+        if (!artifact.artifactId) throw new Error('Artifact artifactId is required for stage execution');
+        const idempotencyKey = artifact.idempotencyKey || `${logicalJobId || stageRun.id}:${stageRun.stage}:${artifact.artifactId}`;
         const created = await this.artifactService.createVersion({
           ...artifact,
           stageId: artifact.stageId || stageRun.id,
