@@ -84,9 +84,26 @@ async function run() {
     assert.deepEqual(attempts[1].input_artifacts, attempts[0].input_artifacts);
     assert.equal(attempts[1].input_fingerprint, attempts[0].input_fingerprint);
 
+    const recoveredJob = (await db.query(
+      `SELECT status,worker_id FROM v2_1.jobs WHERE id=$1`, [job.id]
+    )).rows[0];
+    assert.equal(recoveredJob.status, 'RETRYING');
+    assert.equal(recoveredJob.worker_id, null);
+
+    // Recovery explicitly releases the crashed worker's ownership. A new worker must reclaim the job.
+    const reclaimed = await execution.claimJobForProduction(db, {
+      jobId: job.id,
+      productionId: production.id,
+      workerId: 'retry-worker-b',
+      leaseSeconds: 5,
+    });
+    assert.ok(reclaimed);
+    assert.equal(reclaimed.worker_id, 'retry-worker-b');
+    assert.equal(reclaimed.status, 'RUNNING');
+
     const second = await execution.claimNextStage(db, {
       jobId: job.id,
-      workerId: 'retry-worker-a',
+      workerId: 'retry-worker-b',
       leaseSeconds: 5,
     });
     assert.equal(second.stage, 'SIGNAL');
@@ -94,14 +111,14 @@ async function run() {
 
     await execution.completeStage(db, {
       stageRunId: second.id,
-      workerId: 'retry-worker-a',
+      workerId: 'retry-worker-b',
       outputArtifacts: ['retry-signal-output'],
       outputFingerprint: execution.fingerprint(['retry-signal-output']),
     });
 
     const next = await execution.claimNextStage(db, {
       jobId: job.id,
-      workerId: 'retry-worker-a',
+      workerId: 'retry-worker-b',
       leaseSeconds: 5,
     });
     assert.equal(next.stage, 'IDEA');
