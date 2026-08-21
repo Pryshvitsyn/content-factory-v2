@@ -36,6 +36,12 @@ async function run() {
   };
 
   const artifactService = {
+    storage: {
+      async get({ key }) {
+        assert.equal(key, 'artifacts/input-1/v1');
+        return Buffer.from('previous-stage-output');
+      },
+    },
     async createVersion(artifact) {
       createdArtifacts.push(artifact);
       return { storageKey: 'artifacts/stage-run-1/v1' };
@@ -68,7 +74,7 @@ async function run() {
       id: 'stage-run-1',
       stage: 'CONCEPT',
       attempt: 1,
-      input_artifacts: [{ artifactId: 'input-1' }],
+      input_artifacts: [{ artifactId: 'input-1', storageKey: 'artifacts/input-1/v1' }],
     },
   });
 
