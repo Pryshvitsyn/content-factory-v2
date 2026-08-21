@@ -22,6 +22,7 @@ async function setupDatabase(db) {
   await db.query(fs.readFileSync(path.join(root, 'migrations/002_v2_1_execution.sql'), 'utf8'));
   await db.query(fs.readFileSync(path.join(root, 'migrations/20260819_v2_1_stage_input_propagation.sql'), 'utf8'));
   await db.query(fs.readFileSync(path.join(root, 'migrations/20260819_v2_1_retry_recovery.sql'), 'utf8'));
+  await db.query(fs.readFileSync(path.join(root, 'migrations/20260821_v2_1_stage_claim_job_lease_fencing.sql'), 'utf8'));
 }
 
 async function setup(db) {
@@ -71,7 +72,11 @@ async function main() {
     const persistedStage = await db.query(`SELECT stage, status, worker_id, attempt FROM v2_1.stage_runs WHERE job_id=$1 ORDER BY created_at DESC LIMIT 1`, [jobId]);
     if (!persistedStage.rowCount || persistedStage.rows[0].status !== 'RUNNING' || persistedStage.rows[0].worker_id !== owner) throw new Error('Concurrency certification failed: persisted stage ownership is inconsistent');
 
-    console.log(`V2.1 CONCURRENCY CERTIFICATION PASSED: ${WORKERS} contenders -> exactly 1 job owner and exactly 1 stage owner`);
+    await db.query(`UPDATE v2_1.jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, [jobId]);
+    const staleStageClaim = await db.query('SELECT * FROM v2_1.claim_stage($1,$2,$3)', [jobId, owner, 30]);
+    if (staleStageClaim.rowCount !== 0) throw new Error('Lease fencing certification failed: expired job owner acquired a new stage');
+
+    console.log(`V2.1 CONCURRENCY CERTIFICATION PASSED: ${WORKERS} contenders -> exactly 1 job owner, exactly 1 stage owner, and stale job owner was fenced from a new stage`);
     console.log(`job=${jobId} worker=${owner} stage=${persistedStage.rows[0].stage} attempt=${persistedStage.rows[0].attempt}`);
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE').catch(() => {});

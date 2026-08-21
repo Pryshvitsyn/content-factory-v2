@@ -215,6 +215,7 @@ jobs:
           test -s migrations/20260819_v2_1_retry_recovery.sql
           test -s migrations/20260820_v2_1_concurrency_certification.sql
           test -s migrations/20260820_v2_1_publication_execution.sql
+          test -s migrations/20260821_v2_1_stage_claim_job_lease_fencing.sql
         timeout-minutes: 2
       - name: Check required project files
         run: |
