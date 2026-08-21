@@ -24,12 +24,12 @@ async function claimNextStage(client, { jobId, workerId, leaseSeconds = 60 }) {
 }
 
 async function completeStage(client, { stageRunId, workerId, outputArtifacts, outputFingerprint }) {
-  const result = await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED', output_artifacts=$3::jsonb, output_fingerprint=$4, worker_id=NULL, lease_expires_at=NULL, heartbeat_at=now(), completed_at=now(), updated_at=now() WHERE id=$1 AND worker_id=$2 AND status='RUNNING' RETURNING *`, [stageRunId, workerId, JSON.stringify(outputArtifacts || []), outputFingerprint]);
+  const result = await client.query(`UPDATE v2_1.stage_runs SET status='COMPLETED', output_artifacts=$3::jsonb, output_fingerprint=$4, worker_id=NULL, lease_expires_at=NULL, heartbeat_at=now(), completed_at=now(), updated_at=now() WHERE id=$1 AND worker_id=$2 AND status='RUNNING' AND lease_expires_at > now() RETURNING *`, [stageRunId, workerId, JSON.stringify(outputArtifacts || []), outputFingerprint]);
   return result.rows[0] || null;
 }
 
 async function completeJob(client, { jobId, workerId }) {
-  const result = await client.query(`UPDATE v2_1.jobs SET status='COMPLETED', worker_id=NULL, lease_expires_at=NULL, heartbeat_at=now(), completed_at=now(), updated_at=now() WHERE id=$1 AND worker_id=$2 AND status='RUNNING' RETURNING *`, [jobId, workerId]);
+  const result = await client.query(`UPDATE v2_1.jobs SET status='COMPLETED', worker_id=NULL, lease_expires_at=NULL, heartbeat_at=now(), completed_at=now(), updated_at=now() WHERE id=$1 AND worker_id=$2 AND status='RUNNING' AND lease_expires_at > now() RETURNING *`, [jobId, workerId]);
   const job = result.rows[0] || null;
   if (!job) return null;
 
@@ -38,7 +38,7 @@ async function completeJob(client, { jobId, workerId }) {
 }
 
 async function failStage(client, { stageRunId, workerId, error, retryable = false }) {
-  const result = await client.query(`UPDATE v2_1.stage_runs SET status=$3, error=$4::jsonb, worker_id=NULL, lease_expires_at=NULL, heartbeat_at=now(), completed_at=now(), updated_at=now() WHERE id=$1 AND worker_id=$2 AND status='RUNNING' RETURNING *`, [stageRunId, workerId, retryable ? 'RETRYING' : 'FAILED', JSON.stringify(error)]);
+  const result = await client.query(`UPDATE v2_1.stage_runs SET status=$3, error=$4::jsonb, worker_id=NULL, lease_expires_at=NULL, heartbeat_at=now(), completed_at=now(), updated_at=now() WHERE id=$1 AND worker_id=$2 AND status='RUNNING' AND lease_expires_at > now() RETURNING *`, [stageRunId, workerId, retryable ? 'RETRYING' : 'FAILED', JSON.stringify(error)]);
   return result.rows[0] || null;
 }
 

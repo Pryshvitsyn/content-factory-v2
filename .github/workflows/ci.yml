@@ -129,6 +129,7 @@ jobs:
           node --check tests/v2.1-multi-stage-postgres-integration-test.js
           node --check tests/v2.1-retry-recovery-postgres-integration-test.js
           node --check tests/v2.1-concurrency-postgres-certification.js
+          node --check tests/v2.1-lease-fencing-postgres-certification.js
           node --check tests/v2.1-artifact-idempotency-test.js
           node --check tests/v2.1-crash-consistency-test.js
           node --check tests/v2.1-postgres-crash-recovery-certification.js
@@ -174,6 +175,9 @@ jobs:
         timeout-minutes: 3
       - name: Run PostgreSQL concurrency ownership certification
         run: npm run test:v2.1:concurrency:postgres
+        timeout-minutes: 3
+      - name: Run PostgreSQL lease fencing certification
+        run: npm run test:v2.1:lease-fencing:postgres
         timeout-minutes: 3
       - name: Run artifact idempotency and concurrency certification
         run: npm run test:v2.1:artifact-idempotency
