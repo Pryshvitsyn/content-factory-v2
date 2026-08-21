@@ -7,9 +7,37 @@ on:
       - main
       - "release/**"
       - "develop/**"
+    paths:
+      - "src/**"
+      - "worker/**"
+      - "tests/**"
+      - "migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - "build-v2.sh"
+      - ".github/workflows/**"
   pull_request:
     branches:
       - main
+    paths:
+      - "src/**"
+      - "worker/**"
+      - "tests/**"
+      - "migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - "build-v2.sh"
+      - ".github/workflows/**"
+
+# PR-first CI: when several commits land quickly on the same branch/PR,
+# keep only the newest validation run. This prevents stale runs from
+# consuming runner time while preserving the latest full certification.
+concurrency:
+  group: content-factory-v2-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   validate:
