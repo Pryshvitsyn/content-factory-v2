@@ -41,16 +41,7 @@ async function claimJobForProduction(client, { jobId, productionId, workerId, le
 
 async function claimNextStage(client, { jobId, workerId, leaseSeconds = 60 }) {
   const result = await client.query(
-    `WITH candidate AS (
-       SELECT id FROM v2_1.stage_runs
-       WHERE job_id=$1 AND status IN ('QUEUED','RETRYING') AND (next_attempt_at IS NULL OR next_attempt_at <= now())
-       ORDER BY attempt ASC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
-     )
-     UPDATE v2_1.stage_runs s
-        SET status='RUNNING', worker_id=$2, lease_expires_at=now()+($3 * interval '1 second'), heartbeat_at=now(), updated_at=now()
-       FROM candidate c
-      WHERE s.id=c.id AND EXISTS (SELECT 1 FROM v2_1.jobs j WHERE j.id=s.job_id AND j.status='RUNNING' AND j.worker_id=$2)
-      RETURNING s.*`,
+    `SELECT * FROM v2_1.claim_stage($1, $2, $3)`,
     [jobId, workerId, leaseSeconds]
   );
   return result.rows[0] || null;
