@@ -1,0 +1,103 @@
+{
+  "providers": ["nvidia"],
+  "scoringWeights": {
+    "quality": 0.25,
+    "speed": 0.15,
+    "cost": 0.15,
+    "reliability": 0.15,
+    "feature_match": 0.15,
+    "latency": 0.10,
+    "availability": 0.05
+  },
+  "qualityGates": {
+    "pre_compose": true,
+    "post_render": true,
+    "final_qa": true
+  },
+  "budget": {
+    "enabled": true,
+    "maxCostPerVideo": 5.00,
+    "estimateBeforeRun": true
+  },
+  "cache": {
+    "enabled": true,
+    "ttl": 3600000
+  },
+  "rendering": {
+    "renderer": "ffmpeg",
+    "outputFormat": "mp4",
+    "aspectRatios": {
+      "vertical": "9:16",
+      "horizontal": "16:9",
+      "square": "1:1"
+    },
+    "defaultResolution": {
+      "vertical": "1080x1920",
+      "horizontal": "1920x1080",
+      "square": "1080x1080"
+    },
+    "framerate": 30,
+    "videoCodec": "libx264",
+    "audioCodec": "aac",
+    "videoBitrate": "5000k",
+    "audioBitrate": "128k"
+  },
+  "storage": {
+    "type": "local",
+    "basePath": "./output/videos",
+    "s3": {
+      "bucket": "content-factory-videos",
+      "region": "us-east-1",
+      "prefix": "videos/"
+    }
+  },
+  "voices": {
+    "en": {
+      "default": "en-US-Standard",
+      "tech": "en-US-Tech",
+      "luxury": "en-US-Premium",
+      "minimal": "en-US-Casual"
+    },
+    "it": {
+      "default": "it-IT-Standard",
+      "tech": "it-IT-Tech",
+      "luxury": "it-IT-Premium",
+      "minimal": "it-IT-Casual"
+    },
+    "ru": {
+      "default": "ru-RU-Standard",
+      "tech": "ru-RU-Tech",
+      "luxury": "ru-RU-Premium",
+      "minimal": "ru-RU-Casual"
+    }
+  },
+  "fonts": {
+    "tech": "Roboto",
+    "luxury": "Playfair Display",
+    "minimal": "Inter",
+    "default": "Arial"
+  },
+  "branding": {
+    "now": {
+      "logo": "./resource/logos/now.png",
+      "colors": {
+        "primary": "#007AFF",
+        "secondary": "#5856D6"
+      }
+    },
+    "attune": {
+      "logo": "./resource/logos/attune.png",
+      "colors": {
+        "primary": "#FF2D55",
+        "secondary": "#FF9500"
+      }
+    },
+    "luxuryitaly": {
+      "logo": "./resource/logos/luxuryitaly.png",
+      "colors": {
+        "primary": "#1D1D1F",
+        "secondary": "#C9A66B"
+      }
+    }
+  }
+}
