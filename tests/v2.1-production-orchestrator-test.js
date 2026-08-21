@@ -8,17 +8,17 @@ async function main() {
   const stored = new Map();
   const artifacts = [];
   let stageIndex = 0;
-  let sequence = 0;
+  let previousKey = null;
 
   const execution = {
     async claimJobForProduction() { return { id: 'job-1', production_id: 'production-1', status: 'RUNNING', worker_id: 'worker-1' }; },
     async claimNextStage() {
       const stage = PLANNING_STAGES[stageIndex++];
       if (!stage) return null;
-      return { id: `stage-${stage}`, job_id: 'job-1', stage, attempt: 1, input_artifacts: sequence ? [`artifacts/${PLANNING_STAGES[sequence - 1]}-${sequence}`] : [] };
+      return { id: `stage-${stage}`, job_id: 'job-1', stage, attempt: 1, input_artifacts: previousKey ? [previousKey] : [] };
     },
     async completeStage(_client, { stageRunId, outputArtifacts }) {
-      sequence += 1;
+      previousKey = outputArtifacts[0];
       return { id: stageRunId, status: 'COMPLETED', output_artifacts: outputArtifacts };
     },
     async failStage(_client, args) { throw new Error(`unexpected failStage: ${args.error?.message}`); },
