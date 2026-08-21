@@ -2,7 +2,7 @@ const { createHash } = require('node:crypto');
 
 const PUBLICATION_BLOCKED = 'PUBLICATION_BLOCKED';
 const PUBLICATION_IN_PROGRESS = 'PUBLICATION_IN_PROGRESS';
-const PUBLICATION_UNKNOWN = 'PUBLICATION_UNKNOWN';
+const PUBLICATION_REJECTED = 'PUBLICATION_REJECTED';
 const AMBIGUOUS_DELIVERY_STATES = new Set(['ACCEPTED', 'UNKNOWN']);
 
 function publicationKey({ artifactVersionId, destination, idempotencyKey }) {
@@ -54,16 +54,8 @@ function executePublication({ artifactVersionId, destination, gate, idempotencyK
     }
 
     if (delivery === 'REJECTED') {
-      const record = {
-        ...intent,
-        status: 'FAILED',
-        deliveryState: 'UNKNOWN',
-        executionStatus: 'FAILED',
-        result,
-      };
-      store.set(key, record);
-      const error = new Error(PUBLICATION_UNKNOWN);
-      error.code = PUBLICATION_UNKNOWN;
+      const error = new Error(PUBLICATION_REJECTED);
+      error.code = PUBLICATION_REJECTED;
       error.result = result;
       throw error;
     }
@@ -78,7 +70,7 @@ function executePublication({ artifactVersionId, destination, gate, idempotencyK
     store.set(key, record);
     return { ...record, reused: false };
   } catch (error) {
-    if (error?.delivery === 'UNKNOWN' || error?.code === 'UNKNOWN' || error?.code === PUBLICATION_UNKNOWN) {
+    if (error?.delivery === 'UNKNOWN' || error?.code === 'UNKNOWN') {
       const record = {
         ...intent,
         status: 'UNKNOWN',
@@ -106,5 +98,5 @@ module.exports = {
   publicationKey,
   PUBLICATION_BLOCKED,
   PUBLICATION_IN_PROGRESS,
-  PUBLICATION_UNKNOWN,
+  PUBLICATION_REJECTED,
 };
