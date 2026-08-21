@@ -13,9 +13,10 @@ CREATE OR REPLACE FUNCTION v2_1.claim_publication(
   p_destination text,
   p_publication_key text
 )
-RETURNS SETOF v2_1.publications
+RETURNS jsonb
 LANGUAGE plpgsql AS $$
-DECLARE r v2_1.publications;
+DECLARE
+  r v2_1.publications;
 BEGIN
   INSERT INTO v2_1.publications(
     artifact_version_id, destination, publication_key, status, started_at, updated_at
@@ -26,8 +27,7 @@ BEGIN
   RETURNING * INTO r;
 
   IF FOUND THEN
-    RETURN NEXT r;
-    RETURN;
+    RETURN jsonb_build_object('claimed', true, 'publication', to_jsonb(r));
   END IF;
 
   SELECT * INTO r
@@ -48,9 +48,10 @@ BEGIN
            error='{}'::jsonb
      WHERE publication_key=p_publication_key
     RETURNING * INTO r;
+    RETURN jsonb_build_object('claimed', true, 'publication', to_jsonb(r));
   END IF;
 
-  RETURN NEXT r;
+  RETURN jsonb_build_object('claimed', false, 'publication', to_jsonb(r));
 END $$;
 
 COMMIT;
