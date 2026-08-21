@@ -24,28 +24,27 @@ class VideoRenderer {
     
     const timestamp = Date.now();
     
-    // Save image to temp file
-    const imagePath = path.join(this.tempDir, `image_${timestamp}.jpg`);
+    // Save image to temp file (as PNG)
+    const imagePath = path.join(this.tempDir, `image_${timestamp}.png`);
     fs.writeFileSync(imagePath, images[0]);
     
     // Save audio to temp file
-    const audioPath = path.join(this.tempDir, `audio_${timestamp}.wav`);
+    const audioPath = path.join(this.tempDir, `audio_${timestamp}.mp3`);
     fs.writeFileSync(audioPath, audio);
     
     // Output video path
     const outputPath = path.join(this.tempDir, `video_${timestamp}.${format}`);
     
-    // Calculate duration from audio (3 seconds fallback)
-    const duration = Math.max(3, audio.length / (44100 * 2)); // ~3 sec minimum
+    // Use -t 10 seconds as default
+    const duration = 10;
     
-    // FFmpeg command with -t flag
-    const ffmpegCommand = `ffmpeg -y -loop 1 -i "${imagePath}" -i "${audioPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -t ${duration} -vf "scale=${resolution.replace('x', ':')}" "${outputPath}"`;
+    // FFmpeg command
+    const ffmpegCommand = `ffmpeg -y -loop 1 -i "${imagePath}" -i "${audioPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -t ${duration} -vf "scale=${resolution.replace('x', ':')}" "${outputPath}" 2>&1`;
     
     console.log('[VideoRenderer] Running FFmpeg...');
     console.log('[VideoRenderer] Command:', ffmpegCommand);
-    console.log('[VideoRenderer] Duration:', duration, 'seconds');
     
-    // Execute FFmpeg with increased buffer
+    // Execute FFmpeg
     await new Promise((resolve, reject) => {
       exec(ffmpegCommand, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
         if (error) {
