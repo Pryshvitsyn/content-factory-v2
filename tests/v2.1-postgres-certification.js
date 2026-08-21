@@ -12,6 +12,7 @@ const migrations = [
   'migrations/002_v2_1_execution.sql',
   'migrations/003_v2_1_execution_contract_fix.sql',
   'migrations/004_v2_1_retry_attempt_contract.sql',
+  'migrations/005_v2_1_contract_hardening.sql',
 ];
 
 function client() {
@@ -71,6 +72,19 @@ async function main() {
       );
     }
 
+    const canonicalStages = [
+      'SIGNAL','IDEA','BRIEF','RESEARCH','BIBLE','CONCEPT','SCRIPT','SHOT_PLAN',
+      'ASSET_PLAN','ASSETS','EDIT','MASTER','OBJECTIVE_QA','HUMAN_APPROVAL',
+      'DELIVERY','DELIVERY_QA','PUBLISH','ANALYZE','LEARN',
+    ];
+    const definitions = (await withTimeout(
+      admin.query(`SELECT stage, sequence_no, terminal FROM v2_1.stage_definitions ORDER BY sequence_no`),
+      'load canonical stage definitions'
+    )).rows;
+    assert.deepEqual(definitions.map((r) => r.stage), canonicalStages);
+    assert.deepEqual(definitions.map((r) => r.sequence_no), canonicalStages.map((_, i) => i + 1));
+    assert.equal(definitions.at(-1).terminal, true);
+
     await withTimeout(admin.query(`
       INSERT INTO workspaces(id, name)
       VALUES ('00000000-0000-0000-0000-000000000001', 'v2.1-cert')
@@ -95,7 +109,6 @@ async function main() {
     `), 'load certification job')).rows[0];
     assert.ok(job, 'certification job must exist');
 
-    // Two independent workers race for one job: exactly one may win.
     const a = client();
     const b = client();
     clients.push(a, b);
@@ -111,8 +124,6 @@ async function main() {
     assert.ok(['worker-a', 'worker-b'].includes(owner));
     await withTimeout(Promise.all([a.end(), b.end()]), 'job-race cleanup');
 
-    // Stage ownership is tied to the job owner. Race the owner against a
-    // different worker; exactly one stage claim may succeed.
     const c = client();
     const d = client();
     clients.push(c, d);
@@ -133,7 +144,6 @@ async function main() {
     );
     await withTimeout(Promise.all([c.end(), d.end()]), 'stage-race cleanup');
 
-    // Ownership is enforced for heartbeat.
     const stageRunId = stageWinners[0].id;
     const heartbeatWrong = await withTimeout(admin.query(
       `SELECT v2_1.heartbeat_stage($1,$2,$3) AS renewed`,
@@ -147,7 +157,6 @@ async function main() {
     ), 'owner heartbeat');
     assert.equal(heartbeatRight.rows[0].renewed, true);
 
-    // Completing SIGNAL makes IDEA the only legal next stage.
     await withTimeout(admin.query(`
       UPDATE v2_1.stage_runs
          SET status='COMPLETED', worker_id=NULL, lease_expires_at=NULL, completed_at=now()
@@ -157,7 +166,6 @@ async function main() {
     assert.equal(next.rows.length, 1);
     assert.equal(next.rows[0].stage, 'IDEA');
 
-    // Recovery turns an expired running stage into RETRYING and clears ownership.
     await withTimeout(admin.query(`
       UPDATE v2_1.stage_runs
          SET lease_expires_at=now()-interval '1 second'
@@ -170,7 +178,6 @@ async function main() {
     assert.equal(recovered.worker_id, null);
     assert.equal(recovered.lease_expires_at, null);
 
-    // Production idempotency is database-enforced.
     await assert.rejects(
       withTimeout(admin.query(`
         INSERT INTO v2_1.productions(workspace_id, idempotency_key)
@@ -181,18 +188,7 @@ async function main() {
 
     console.log('V2.1 PostgreSQL execution/concurrency certification: PASS');
   } finally {
-    // Best-effort cleanup must never leave the certification process hanging.
     await Promise.allSettled(clients.map((c) => c.end()));
-    if (admin._connected) {
-      try {
-        await admin.query(`DROP SCHEMA IF EXISTS v2_1 CASCADE`);
-        await admin.query(`DROP TABLE IF EXISTS generation_jobs`);
-        await admin.query(`DROP TABLE IF EXISTS workspaces`);
-      } catch (_) {
-        // The certification result is already determined; connection/process
-        // cleanup is handled by the client close above.
-      }
-    }
   }
 }
 
