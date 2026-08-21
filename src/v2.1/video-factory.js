@@ -1,5 +1,5 @@
 /**
- * Video Factory V2.1
+ * Video Factory V2.1 (Updated)
  * 
  * Production-grade video generation factory with:
  * - Scored provider selection (7-dimension scoring like OpenMontage)
@@ -7,15 +7,14 @@
  * - Decision audit trail
  * - Budget governance
  * - Multi-provider support (NVIDIA + future providers)
- * 
- * Architecture inspired by:
- * - MoneyPrinterTurbo (65K stars) - MVC, caching, multi-lang
- * - OpenMontage (38K stars) - agents, scoring, quality gates
- * - AutoVio - multi-provider, TypeScript/Node.js
+ * - FFmpeg rendering
+ * - Local/S3 storage
  */
 
 const { ProviderGateway } = require('../providers/provider-gateway');
 const { ProductionContract } = require('../../worker/v2.1-production-contract');
+const { FFmpegVideoRenderer } = require('../renderers/ffmpeg-video-renderer');
+const { VideoStorage } = require('../storage/video-storage');
 
 /**
  * Provider scoring dimensions (like OpenMontage)
@@ -68,6 +67,8 @@ class VideoFactoryConfig {
       enabled: true,
       ttl: 3600000 // 1 hour
     };
+    this.rendering = config.rendering || {};
+    this.storage = config.storage || {};
   }
 }
 
@@ -82,6 +83,8 @@ class VideoFactory {
     this.config = config;
     this.providerGateway = new ProviderGateway();
     this.contract = new ProductionContract();
+    this.renderer = new FFmpegVideoRenderer(config.rendering);
+    this.storage = new VideoStorage(config.storage);
     this.decisionLog = [];
   }
 
@@ -131,8 +134,8 @@ class VideoFactory {
       // Stage 5: Generate visuals
       const visuals = await this._generateVisuals(input, script, selectedProvider);
       
-      // Stage 6: Render video
-      const rendered = await this._renderVideo(input, { script, audio, visuals }, selectedProvider);
+      // Stage 6: Render video with FFmpeg
+      const rendered = await this._renderVideo(input, { script, audio, visuals }, selectedProvider, jobId);
       
       // Stage 7: Post-render quality gate
       if (this.config.qualityGates[QUALITY_GATES.POST_RENDER]) {
@@ -153,7 +156,7 @@ class VideoFactory {
       }
       
       // Stage 9: Store result
-      const outputPath = await this._storeResult(rendered, jobId);
+      const outputPath = await this._storeResult(rendered.outputPath, jobId);
       
       const duration = Date.now() - startTime;
       console.log(`[VideoFactory] Job ${jobId} completed in ${duration}ms`, { outputPath });
@@ -297,6 +300,10 @@ class VideoFactory {
       issues.push('No visual elements generated');
     }
     
+    if (!artifacts.rendered?.success) {
+      issues.push('Video rendering failed');
+    }
+    
     return {
       passed: issues.length === 0,
       issues
@@ -319,6 +326,11 @@ class VideoFactory {
     // Check visual count
     if (artifacts.visuals?.elements) {
       metrics.visualCount = artifacts.visuals.elements.length;
+    }
+    
+    // Check rendered video exists
+    if (artifacts.rendered?.outputPath) {
+      metrics.renderedPath = artifacts.rendered.outputPath;
     }
     
     // TODO: Add more QA metrics (sync, quality, etc.)
@@ -420,38 +432,32 @@ class VideoFactory {
   }
 
   /**
-   * Render video (placeholder - to be implemented with FFmpeg)
+   * Render video with FFmpeg
    * @private
    */
-  async _renderVideo(input, artifacts, provider) {
+  async _renderVideo(input, artifacts, provider, jobId) {
     console.log(`[VideoFactory] Rendering video with ${provider}...`);
     
-    // TODO: Implement FFmpeg-based renderer
+    // Create temporary output path
+    const tempOutputPath = `/tmp/${jobId}.mp4`;
     
-    return {
-      type: 'rendered',
-      status: 'placeholder',
-      provider,
-      metadata: {
-        input,
-        artifactsCount: {
-          visuals: artifacts.visuals.elements.length
-        },
-        renderedAt: new Date().toISOString()
-      }
-    };
+    const result = await this.renderer.render(input, artifacts, tempOutputPath);
+    
+    return result;
   }
 
   /**
-   * Store result (placeholder - to be implemented)
+   * Store result
    * @private
    */
-  async _storeResult(rendered, jobId) {
+  async _storeResult(outputPath, jobId) {
     console.log(`[VideoFactory] Storing result for ${jobId}...`);
     
-    // TODO: Implement actual storage (S3, local filesystem, etc.)
+    const storedPath = await this.storage.store(outputPath, jobId, {
+      storedAt: new Date().toISOString()
+    });
     
-    return `/output/videos/${jobId}.mp4`;
+    return storedPath;
   }
 
   /**
