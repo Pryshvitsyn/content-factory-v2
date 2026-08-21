@@ -79,6 +79,31 @@ jobs:
         run: npm ci
         timeout-minutes: 5
 
+      - name: Guard against committed secret patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          matches=0
+          scan_pattern() {
+            local label="$1"
+            local pattern="$2"
+            if git grep -nI -E "$pattern" -- ':!package-lock.json' ':!.gitignore' ':!.env.example'; then
+              echo "ERROR: potential $label detected in tracked repository content."
+              matches=1
+            fi
+          }
+          scan_pattern 'private key' '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'
+          scan_pattern 'OpenAI-style secret key' '\bsk-[A-Za-z0-9_-]{20,}\b'
+          scan_pattern 'NVIDIA API key' '\bnvapi-[A-Za-z0-9_-]{20,}\b'
+          scan_pattern 'AWS access key' '\bAKIA[0-9A-Z]{16}\b'
+          scan_pattern 'GitHub token' '\bgh[pousr]_[A-Za-z0-9_]{20,}\b'
+          scan_pattern 'database URL with embedded password' 'postgres(ql)?://[^[:space:]/:]+:[^[:space:]@]+@'
+          if [ "$matches" -ne 0 ]; then
+            exit 1
+          fi
+          echo 'Secret-pattern guard passed.'
+        timeout-minutes: 2
+
       - name: Check worker syntax
         run: |
           for file in worker/*.js; do node --check "$file"; done
