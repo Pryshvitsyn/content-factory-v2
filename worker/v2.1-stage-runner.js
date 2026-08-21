@@ -13,7 +13,7 @@ function requireDependency(name, value) {
  * engine remains the authority for leases, retries and durable state.
  */
 class StageRunner {
-  constructor({ execution, providerGateway, artifactService, handlers = {} } = {}) {
+  constructor({ execution, providerGateway, artifactService, handlers = {}, heartbeatIntervalMs = null } = {}) {
     requireDependency('execution', execution);
     requireDependency('providerGateway', providerGateway);
     requireDependency('artifactService', artifactService);
@@ -21,12 +21,35 @@ class StageRunner {
     this.providerGateway = providerGateway;
     this.artifactService = artifactService;
     this.handlers = { ...handlers };
+    this.heartbeatIntervalMs = heartbeatIntervalMs;
   }
 
   register(stage, handler) {
     getStageDefinition(stage);
     if (typeof handler !== 'function') throw new Error('Stage handler must be a function');
     this.handlers[stage] = handler;
+  }
+
+  startHeartbeat({ client, stageRun, workerId }) {
+    const configured = Number(this.heartbeatIntervalMs);
+    if (!Number.isFinite(configured) || configured <= 0 || typeof this.execution.heartbeatStage !== 'function') return null;
+
+    let heartbeatError = null;
+    const timer = setInterval(() => {
+      this.execution.heartbeatStage(client, {
+        stageRunId: stageRun.id,
+        workerId,
+        leaseSeconds: Math.max(5, Math.ceil(configured / 1000) * 3),
+      }).catch((error) => {
+        heartbeatError = error;
+      });
+    }, configured);
+
+    timer.unref?.();
+    return {
+      get error() { return heartbeatError; },
+      stop() { clearInterval(timer); },
+    };
   }
 
   async run({ client, stageRun, workerId } = {}) {
@@ -38,6 +61,7 @@ class StageRunner {
     const handler = this.handlers[stageRun.stage];
     if (!handler) throw new Error(`No handler registered for V2.1 stage: ${stageRun.stage}`);
 
+    const heartbeat = this.startHeartbeat({ client, stageRun, workerId });
     try {
       const inputArtifacts = stageRun.input_artifacts || [];
       if (stageRun.input_fingerprint) {
@@ -55,6 +79,8 @@ class StageRunner {
         providerGateway: this.providerGateway,
         inputArtifacts,
       });
+
+      if (heartbeat?.error) throw heartbeat.error;
 
       const produced = Array.isArray(result?.artifacts) ? result.artifacts : (result?.artifact ? [result.artifact] : []);
       const outputArtifacts = [];
@@ -90,6 +116,8 @@ class StageRunner {
         retryable: definition.retryable,
       });
       throw error;
+    } finally {
+      heartbeat?.stop();
     }
   }
 }
