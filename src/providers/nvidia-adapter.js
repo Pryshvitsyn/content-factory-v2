@@ -1,25 +1,18 @@
 /**
- * NVIDIA Provider with Unsplash for images
+ * Content Provider
  * 
- * Integration with NVIDIA API via OpenAI-compatible endpoint
- * Uses API key from environment variable: NVIDIA_API_KEY
- * Uses Unsplash API for images (free, no key required)
+ * Uses Pexels for images and simple TTS for audio
  */
 
-class NvidiaProvider {
+class ContentProvider {
   constructor() {
-    this.apiKey = process.env.NVIDIA_API_KEY;
-    this.baseUrl = 'https://integrate.api.nvidia.com/v1';
-    
-    if (!this.apiKey) {
-      throw new Error('NVIDIA_API_KEY not found in environment');
-    }
+    this.pexelsApiKey = process.env.PEXELS_API_KEY || 'demo';
   }
 
   async generate(options) {
     const { type, input } = options;
     
-    console.log(`[NvidiaProvider] Generating ${type}...`);
+    console.log(`[ContentProvider] Generating ${type}...`);
     
     switch (type) {
       case 'text':
@@ -37,44 +30,39 @@ class NvidiaProvider {
     const { prompt, maxTokens = 1024, temperature = 0.7 } = input;
     
     const https = require('https');
+    const apiKey = process.env.NVIDIA_API_KEY;
     
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
+      if (!apiKey) {
+        resolve({ content: `[Script about ${input.prompt?.substring(0, 50)}...]`, usage: {} });
+        return;
+      }
+      
       const options = {
         hostname: 'integrate.api.nvidia.com',
         port: 443,
         path: '/v1/chat/completions',
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
         }
       };
       
       const req = https.request(options, (res) => {
         let data = '';
-        
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        
+        res.on('data', chunk => data += chunk);
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.message?.content || '';
-            resolve({ content, usage: parsed.usage });
-          } catch (error) {
-            console.error('[NvidiaProvider] Failed to parse response:', error);
+            resolve({ content: parsed.choices?.[0]?.message?.content || '', usage: parsed.usage });
+          } catch {
             resolve({ content: data, usage: {} });
           }
         });
       });
       
-      req.on('error', (error) => {
-        console.error('[NvidiaProvider] API call failed:', error.message);
-        resolve({ content: `[NVIDIA API Error: ${error.message}]`, usage: {} });
-      });
-      
+      req.on('error', () => resolve({ content: `[Error]`, usage: {} }));
       req.write(JSON.stringify({
         model: 'nvidia/nemotron-3-super-120b-a12b',
         messages: [{ role: 'user', content: prompt }],
@@ -86,120 +74,115 @@ class NvidiaProvider {
   }
 
   async _generateAudio(input) {
-    const { text, lang = 'en', voice = 'default' } = input;
+    const { text, lang = 'en' } = input;
     
-    const sampleRate = 44100;
-    const duration = Math.min(30, text.length / 10);
-    const numChannels = 1;
-    const bitsPerSample = 16;
-    const numSamples = sampleRate * duration;
-    const dataSize = numSamples * numChannels * (bitsPerSample / 8);
-    
-    const header = Buffer.alloc(44);
-    header.write('RIFF', 0);
-    header.writeUInt32LE(36 + dataSize, 4);
-    header.write('WAVE', 8);
-    header.write('fmt ', 12);
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);
-    header.writeUInt16LE(numChannels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28);
-    header.writeUInt16LE(numChannels * (bitsPerSample / 8), 32);
-    header.writeUInt16LE(bitsPerSample, 34);
-    header.write('data', 36);
-    header.writeUInt32LE(dataSize, 40);
-    
-    const audioData = Buffer.alloc(dataSize);
-    
-    return {
-      audioData: Buffer.concat([header, audioData]),
-      duration: duration,
-      format: 'wav',
-      provider: 'nvidia',
-      lang,
-      voice
-    };
-  }
-
-  async _generateImage(input) {
-    const { prompt, style = 'tech', aspectRatio = '9:16' } = input;
-    
-    const query = encodeURIComponent(prompt);
-    const url = `https://source.unsplash.com/1080x1920/?${query}`;
-    
-    console.log(`[NvidiaProvider] Fetching image from Unsplash: ${url}`);
-    
+    // Use Google Translate TTS (free, no API key needed)
     const https = require('https');
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text.substring(0, 200))}&tl=${lang}&client=tw-ob`;
     
-    return new Promise((resolve, reject) => {
-      https.get(url, (res) => {
-        if (res.statusCode === 200) {
-          const chunks = [];
-          res.on('data', (chunk) => chunks.push(chunk));
-          res.on('end', () => {
-            const imageData = Buffer.concat(chunks);
-            // Validate JPEG magic bytes
-            if (imageData.length > 2 && imageData[0] === 0xFF && imageData[1] === 0xD8) {
-              resolve({
-                imageData,
-                format: 'jpg',
-                prompt,
-                style,
-                aspectRatio,
-                provider: 'unsplash'
-              });
-            } else {
-              console.warn('[NvidiaProvider] Invalid JPEG received, using fallback PNG');
-              resolve({
-                imageData: this._createFallbackPNG(),
-                format: 'png',
-                prompt,
-                style,
-                aspectRatio,
-                provider: 'fallback'
-              });
-            }
-          });
-        } else {
-          console.error(`[NvidiaProvider] Unsplash API error: ${res.statusCode}`);
+    console.log('[ContentProvider] Fetching TTS from Google...');
+    
+    return new Promise((resolve) => {
+      https.get(ttsUrl, (res) => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => {
+          const audioData = Buffer.concat(chunks);
+          const duration = Math.max(3, text.length / 15); // ~15 chars/sec
           resolve({
-            imageData: this._createFallbackPNG(),
-            format: 'png',
-            prompt,
-            style,
-            aspectRatio,
-            provider: 'fallback'
+            audioData,
+            duration,
+            format: 'mp3',
+            provider: 'google-tts'
           });
-        }
-      }).on('error', (error) => {
-        console.error('[NvidiaProvider] Unsplash API call failed:', error.message);
+        });
+      }).on('error', () => {
+        // Fallback: create silent audio
+        const sampleRate = 44100;
+        const numSamples = sampleRate * 3;
         resolve({
-          imageData: this._createFallbackPNG(),
-          format: 'png',
-          prompt,
-          style,
-          aspectRatio,
+          audioData: Buffer.alloc(numSamples * 2),
+          duration: 3,
+          format: 'wav',
           provider: 'fallback'
         });
       });
     });
   }
 
-  _createFallbackPNG() {
-    // Minimal valid 1x1 blue PNG
-    return Buffer.from([
-      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-      0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-      0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-      0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41,
-      0x54, 0x08, 0xD7, 0x63, 0x00, 0x01, 0x00, 0x00,
-      0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-      0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-      0x42, 0x60, 0x82
-    ]);
+  async _generateImage(input) {
+    const { prompt } = input;
+    
+    // Use Pexels API
+    const https = require('https');
+    const query = encodeURIComponent(prompt);
+    const url = `https://api.pexels.com/v1/search?query=${query}&per_page=1`;
+    
+    console.log('[ContentProvider] Fetching image from Pexels...');
+    
+    return new Promise((resolve) => {
+      const options = {
+        hostname: 'api.pexels.com',
+        path: `/v1/search?query=${query}&per_page=1`,
+        method: 'GET',
+        headers: {
+          'Authorization': this.pexelsApiKey
+        }
+      };
+      
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', async () => {
+          try {
+            const parsed = JSON.parse(data);
+            const photo = parsed.photos?.[0];
+            if (photo?.image) {
+              // Download the actual image
+              const imgUrl = photo.image;
+              const imgData = await this._downloadImage(imgUrl);
+              resolve({
+                imageData: imgData,
+                format: 'jpg',
+                provider: 'pexels'
+              });
+            } else {
+              resolve({ imageData: this._fallbackImage(), format: 'jpg', provider: 'fallback' });
+            }
+          } catch {
+            resolve({ imageData: this._fallbackImage(), format: 'jpg', provider: 'fallback' });
+          }
+        });
+      });
+      
+      req.on('error', () => resolve({ imageData: this._fallbackImage(), format: 'jpg', provider: 'fallback' }));
+      req.end();
+    });
+  }
+
+  async _downloadImage(url) {
+    const https = require('https');
+    return new Promise((resolve) => {
+      https.get(url, (res) => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      }).on('error', () => resolve(this._fallbackImage()));
+    });
+  }
+
+  _fallbackImage() {
+    // 1080x1920 blue gradient as placeholder
+    const width = 1080, height = 1920;
+    const size = width * height * 3;
+    const data = Buffer.alloc(size);
+    for (let i = 0; i < size; i += 3) {
+      data[i] = 30;     // R
+      data[i + 1] = 100; // G
+      data[i + 2] = 200; // B
+    }
+    return data;
   }
 }
 
-module.exports = { NvidiaProvider };
+module.exports = { ContentProvider };
