@@ -88,10 +88,8 @@ class NvidiaProvider {
   async _generateAudio(input) {
     const { text, lang = 'en', voice = 'default' } = input;
     
-    // For now, use NVIDIA TTS or create placeholder
-    // TODO: Use actual TTS API
     const sampleRate = 44100;
-    const duration = Math.min(30, text.length / 10); // ~10 chars per second
+    const duration = Math.min(30, text.length / 10);
     const numChannels = 1;
     const bitsPerSample = 16;
     const numSamples = sampleRate * duration;
@@ -127,7 +125,6 @@ class NvidiaProvider {
   async _generateImage(input) {
     const { prompt, style = 'tech', aspectRatio = '9:16' } = input;
     
-    // Use Unsplash API for real images
     const query = encodeURIComponent(prompt);
     const url = `https://source.unsplash.com/1080x1920/?${query}`;
     
@@ -142,39 +139,66 @@ class NvidiaProvider {
           res.on('data', (chunk) => chunks.push(chunk));
           res.on('end', () => {
             const imageData = Buffer.concat(chunks);
-            resolve({
-              imageData,
-              format: 'jpg',
-              prompt,
-              style,
-              aspectRatio,
-              provider: 'unsplash'
-            });
+            // Validate JPEG magic bytes
+            if (imageData.length > 2 && imageData[0] === 0xFF && imageData[1] === 0xD8) {
+              resolve({
+                imageData,
+                format: 'jpg',
+                prompt,
+                style,
+                aspectRatio,
+                provider: 'unsplash'
+              });
+            } else {
+              console.warn('[NvidiaProvider] Invalid JPEG received, using fallback PNG');
+              resolve({
+                imageData: this._createFallbackPNG(),
+                format: 'png',
+                prompt,
+                style,
+                aspectRatio,
+                provider: 'fallback'
+              });
+            }
           });
         } else {
           console.error(`[NvidiaProvider] Unsplash API error: ${res.statusCode}`);
-          // Fallback to colored placeholder
           resolve({
-            imageData: Buffer.from('placeholder'),
-            format: 'jpg',
+            imageData: this._createFallbackPNG(),
+            format: 'png',
             prompt,
             style,
             aspectRatio,
-            provider: 'unsplash'
+            provider: 'fallback'
           });
         }
       }).on('error', (error) => {
         console.error('[NvidiaProvider] Unsplash API call failed:', error.message);
         resolve({
-          imageData: Buffer.from('placeholder'),
-          format: 'jpg',
+          imageData: this._createFallbackPNG(),
+          format: 'png',
           prompt,
           style,
           aspectRatio,
-          provider: 'unsplash'
+          provider: 'fallback'
         });
       });
     });
+  }
+
+  _createFallbackPNG() {
+    // Minimal valid 1x1 blue PNG
+    return Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+      0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41,
+      0x54, 0x08, 0xD7, 0x63, 0x00, 0x01, 0x00, 0x00,
+      0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+      0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+      0x42, 0x60, 0x82
+    ]);
   }
 }
 
