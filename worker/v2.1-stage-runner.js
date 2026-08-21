@@ -7,11 +7,6 @@ function requireDependency(name, value) {
   if (!value) throw new Error(`${name} is required`);
 }
 
-/**
- * Runtime boundary between the execution engine and the production layers.
- * The runner owns orchestration of one claimed stage, while the execution
- * engine remains the authority for leases, retries and durable state.
- */
 class StageRunner {
   constructor({ execution, providerGateway, artifactService, handlers = {}, heartbeatIntervalMs = null } = {}) {
     requireDependency('execution', execution);
@@ -33,34 +28,25 @@ class StageRunner {
   startHeartbeat({ client, stageRun, workerId }) {
     const configured = Number(this.heartbeatIntervalMs);
     if (!Number.isFinite(configured) || configured <= 0 || typeof this.execution.heartbeatStage !== 'function') return null;
-
     let heartbeatError = null;
     const timer = setInterval(() => {
       this.execution.heartbeatStage(client, {
         stageRunId: stageRun.id,
         workerId,
         leaseSeconds: Math.max(5, Math.ceil(configured / 1000) * 3),
-      }).catch((error) => {
-        heartbeatError = error;
-      });
+      }).catch((error) => { heartbeatError = error; });
     }, configured);
-
     timer.unref?.();
-    return {
-      get error() { return heartbeatError; },
-      stop() { clearInterval(timer); },
-    };
+    return { get error() { return heartbeatError; }, stop() { clearInterval(timer); } };
   }
 
   async run({ client, stageRun, workerId } = {}) {
     if (!client) throw new Error('client is required');
     if (!stageRun?.id || !stageRun.stage) throw new Error('stageRun.id and stageRun.stage are required');
     if (!workerId) throw new Error('workerId is required');
-
     const definition = getStageDefinition(stageRun.stage);
     const handler = this.handlers[stageRun.stage];
     if (!handler) throw new Error(`No handler registered for V2.1 stage: ${stageRun.stage}`);
-
     const heartbeat = this.startHeartbeat({ client, stageRun, workerId });
     try {
       const inputArtifacts = stageRun.input_artifacts || [];
@@ -72,22 +58,15 @@ class StageRunner {
           throw error;
         }
       }
-
-      const result = await handler({
-        stage: definition,
-        stageRun,
-        providerGateway: this.providerGateway,
-        inputArtifacts,
-      });
-
+      const result = await handler({ stage: definition, stageRun, providerGateway: this.providerGateway, inputArtifacts });
       if (heartbeat?.error) throw heartbeat.error;
-
       const produced = Array.isArray(result?.artifacts) ? result.artifacts : (result?.artifact ? [result.artifact] : []);
       const outputArtifacts = [];
       const provenance = result?.provenance || {};
-
       for (const artifact of produced) {
-        const idempotencyKey = artifact.idempotencyKey || `${stageRun.job_id}:${stageRun.stage}:${artifact.artifactId}`;
+        const logicalArtifactId = artifact.artifactId;
+        if (!logicalArtifactId) throw new Error('Artifact artifactId is required for stage execution');
+        const idempotencyKey = artifact.idempotencyKey || `${stageRun.id}:${logicalArtifactId}`;
         const created = await this.artifactService.createVersion({
           ...artifact,
           stageId: artifact.stageId || stageRun.id,
@@ -98,17 +77,9 @@ class StageRunner {
         });
         outputArtifacts.push(created.storageKey);
       }
-
       const output = result?.output !== undefined ? result.output : produced.map((artifact) => artifact.content);
       const outputFingerprint = fingerprint({ stage: stageRun.stage, output });
-
-      const completed = await this.execution.completeStage(client, {
-        stageRunId: stageRun.id,
-        workerId,
-        outputArtifacts,
-        outputFingerprint,
-      });
-
+      const completed = await this.execution.completeStage(client, { stageRunId: stageRun.id, workerId, outputArtifacts, outputFingerprint });
       return { stage: stageRun.stage, status: completed.status, outputArtifacts, outputFingerprint, result };
     } catch (error) {
       await this.execution.failStage(client, {
