@@ -1,5 +1,5 @@
 /**
- * CLI script for generating promotional videos
+ * CLI script for generating promotional videos with NVIDIA
  * 
  * Usage:
  *   node scripts/factory-video-cli.js --app=now --lang=en --duration=30 --style=tech --topic="Smart scheduling"
@@ -7,7 +7,6 @@
 
 const path = require('path');
 const { VideoFactory, VideoFactoryConfig } = require('../src/v2.1/video-factory');
-const { MockProvider } = require('../src/providers/mock-provider');
 const { ProviderGateway } = require('../src/providers/provider-gateway');
 const { ProviderRegistry } = require('../src/providers/provider-registry');
 
@@ -76,18 +75,25 @@ function loadConfig() {
 function createProviderGateway(config) {
   const registry = new ProviderRegistry();
   
-  // Register mock provider for testing
+  // Register NVIDIA provider
+  if (config.providers && config.providers.includes('nvidia')) {
+    try {
+      const { NvidiaProvider } = require('../src/providers/nvidia-adapter');
+      const nvidia = new NvidiaProvider();
+      registry.register('nvidia', nvidia);
+      console.log('[FactoryVideoCLI] NVIDIA provider registered ✓');
+    } catch (error) {
+      console.error('[FactoryVideoCLI] Failed to register NVIDIA provider:', error.message);
+      throw error;
+    }
+  }
+  
+  // Register mock provider for fallback
   if (config.providers && config.providers.includes('mock')) {
+    const { MockProvider } = require('../src/providers/mock-provider');
     registry.register('mock', new MockProvider());
     console.log('[FactoryVideoCLI] Mock provider registered');
   }
-  
-  // TODO: Register NVIDIA provider if API key is available
-  // if (config.providers && config.providers.includes('nvidia')) {
-  //   const { NvidiaProvider } = require('../src/providers/nvidia-adapter');
-  //   registry.register('nvidia', new NvidiaProvider());
-  //   console.log('[FactoryVideoCLI] NVIDIA provider registered');
-  // }
   
   return new ProviderGateway(registry);
 }
@@ -176,6 +182,7 @@ async function main() {
       console.log(`  - Rendered: ${result.artifacts.rendered ? '✓' : '✗'}`);
       
       console.log(`\n[FactoryVideoCLI] Video saved to: ${result.outputPath}`);
+      console.log(`\n[FactoryVideoCLI] Open with: open ${result.outputPath}`);
     } else {
       console.error('\n[FactoryVideoCLI] Error:');
       console.error(`  ${result.error}`);
