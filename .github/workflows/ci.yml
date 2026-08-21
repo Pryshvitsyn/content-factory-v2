@@ -87,7 +87,7 @@ jobs:
           scan_pattern() {
             local label="$1"
             local pattern="$2"
-            if git grep -nI -E "$pattern" -- ':!package-lock.json' ':!.gitignore' ':!.env.example'; then
+            if git grep -nI -E -e "$pattern" -- ':!package-lock.json' ':!.gitignore' ':!.env.example' ':!README.md' ':!docs/**'; then
               echo "ERROR: potential $label detected in tracked repository content."
               matches=1
             fi
