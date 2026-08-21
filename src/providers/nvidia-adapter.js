@@ -15,13 +15,13 @@ function createNvidiaAdapter({ client, apiKey = process.env.NVIDIA_API_KEY, mode
     provider: 'nvidia',
     model,
 
-    async generate({ system, prompt, temperature = 0.2, maxTokens = 1024, metadata = {} }) {
+    async generate({ system, prompt, temperature = 0.2, maxTokens = 1024, metadata = {}, idempotencyKey }) {
       if (!prompt || typeof prompt !== 'string') {
         throw new ProviderError('NVIDIA request requires a non-empty prompt', { provider: 'nvidia', model });
       }
 
       try {
-        const response = await openai.chat.completions.create({
+        const request = {
           model,
           messages: [
             ...(system ? [{ role: 'system', content: system }] : []),
@@ -29,7 +29,11 @@ function createNvidiaAdapter({ client, apiKey = process.env.NVIDIA_API_KEY, mode
           ],
           temperature,
           max_tokens: maxTokens,
-        });
+        };
+        const requestOptions = idempotencyKey
+          ? { headers: { 'Idempotency-Key': idempotencyKey } }
+          : undefined;
+        const response = await openai.chat.completions.create(request, requestOptions);
 
         const output = response?.choices?.[0]?.message?.content;
         if (typeof output !== 'string' || output.length === 0) {
