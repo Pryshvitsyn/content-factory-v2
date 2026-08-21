@@ -28,7 +28,6 @@ function executePublication({ artifactVersionId, destination, gate, idempotencyK
     error.code = PUBLICATION_BLOCKED;
     throw error;
   }
-
   const key = publicationKey({ artifactVersionId, destination, idempotencyKey });
   const existing = store.get(key);
   if (existing?.status === 'PUBLISHED') return { ...existing, reused: true };
@@ -37,7 +36,6 @@ function executePublication({ artifactVersionId, destination, gate, idempotencyK
     error.code = PUBLICATION_IN_PROGRESS;
     throw error;
   }
-
   const intent = buildIntent({ artifactVersionId, destination, key });
   store.set(key, intent);
   return executeClaimedPublication({ intent, publisher, store });
@@ -53,14 +51,16 @@ async function executePublicationWithDb({ artifactVersionId, destination, gate, 
 
   const key = publicationKey({ artifactVersionId, destination, idempotencyKey });
   const claim = await db.query(
-    'SELECT * FROM v2_1.claim_publication($1,$2,$3)',
+    'SELECT v2_1.claim_publication($1,$2,$3) AS claim',
     [artifactVersionId, destination, key],
   );
-  const row = claim.rows[0];
-  if (!row) throw new Error('Publication claim returned no row');
+  const payload = claim.rows[0]?.claim;
+  if (!payload) throw new Error('Publication claim returned no result');
+  const row = payload.publication;
+  if (!row) throw new Error('Publication claim returned no publication');
 
-  if (row.status === 'PUBLISHED') return { ...row, reused: true };
-  if (row.status === 'PUBLISHING') {
+  if (!payload.claimed) {
+    if (row.status === 'PUBLISHED') return { ...row, reused: true };
     const error = new Error(PUBLICATION_IN_PROGRESS);
     error.code = PUBLICATION_IN_PROGRESS;
     throw error;
@@ -79,24 +79,20 @@ async function executePublicationWithDb({ artifactVersionId, destination, gate, 
   try {
     const result = await publisher({ artifactVersionId, destination, idempotencyKey: key });
     const delivery = result?.delivery;
-
     if (AMBIGUOUS_DELIVERY_STATES.has(delivery)) {
       const updated = await db.query(
-        `UPDATE v2_1.publications
-         SET status='UNKNOWN', result=$2, updated_at=now()
+        `UPDATE v2_1.publications SET status='UNKNOWN', result=$2, updated_at=now()
          WHERE publication_key=$1 RETURNING *`,
         [key, JSON.stringify(result)],
       );
       return { ...(updated.rows[0] || intent), reused: false };
     }
-
     if (delivery === 'REJECTED') {
       const error = new Error(PUBLICATION_REJECTED);
       error.code = PUBLICATION_REJECTED;
       error.result = result;
       throw error;
     }
-
     const updated = await db.query(
       `UPDATE v2_1.publications
        SET status='PUBLISHED', external_id=$2, result=$3, published_at=now(), updated_at=now()
@@ -114,20 +110,17 @@ async function executePublicationWithDb({ artifactVersionId, destination, gate, 
       );
       return { ...(updated.rows[0] || intent), reused: false };
     }
-
     await db.query(
-      `UPDATE v2_1.publications
-       SET status='FAILED', error=$2, updated_at=now()
-       WHERE publication_key=$1`,
+      `UPDATE v2_1.publications SET status='FAILED', error=$2, updated_at=now() WHERE publication_key=$1`,
       [key, JSON.stringify({ message: error.message, code: error.code })],
     );
     throw error;
   }
 }
 
-async function executeClaimedPublication({ intent, publisher, store }) {
+function executeClaimedPublication({ intent, publisher, store }) {
   try {
-    const result = await publisher({ artifactVersionId: intent.artifactVersionId, destination: intent.destination, idempotencyKey: intent.publicationKey });
+    const result = publisher({ artifactVersionId: intent.artifactVersionId, destination: intent.destination, idempotencyKey: intent.publicationKey });
     const delivery = result?.delivery;
     if (AMBIGUOUS_DELIVERY_STATES.has(delivery)) {
       const record = { ...intent, status: 'UNKNOWN', deliveryState: 'UNKNOWN', executionStatus: 'RECONCILING', result };
