@@ -7,6 +7,7 @@ const tests = [
   'v2.1-contract-test.js',
   'v2.1-stage-sequence-test.js',
   'v2.1-execution-engine-test.js',
+  'v2.2-production-orchestrator-test.js',
 ];
 
 for (const test of tests) {
@@ -14,4 +15,4 @@ for (const test of tests) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
-console.log('V2.1 execution foundation: PASS');
+console.log('V2.1 execution foundation + V2.2 vertical slice bootstrap: PASS');
