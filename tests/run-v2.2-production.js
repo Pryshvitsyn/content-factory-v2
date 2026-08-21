@@ -7,6 +7,7 @@ const tests = [
   'v2.2-stage-spec-test.js',
   'v2.2-production-orchestrator-test.js',
   'v2.2-artifact-contract-test.js',
+  'v2.2-intelligence-pipeline-test.js',
 ];
 
 for (const test of tests) {
