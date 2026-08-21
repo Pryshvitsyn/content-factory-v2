@@ -2,27 +2,97 @@
 
 ## Overview
 
-Video production pipeline — это end-to-end пайплайн для генерации промо-видео для приложений (Now, Attune, luxuryitaly.net и др.) с использованием NVIDIA API.
+Video production pipeline — это production-grade пайплайн для генерации промо-видео для приложений (Now, Attune, luxuryitaly.net и др.) с использованием NVIDIA API и других провайдеров.
 
 ## Architecture
+
+### Best Practices from Top Projects
+
+Наша архитектура взяла лучшее из топовых open-source проектов:
+
+- **MoneyPrinterTurbo** (65K звёзд) — MVC, кэширование, мульти-язычность
+- **OpenMontage** (38K звёзд) — агентовая архитектура, scored provider selection, quality gates
+- **AutoVio** — multi-provider AI pipeline, TypeScript/Node.js
+
+### Pipeline Stages
 
 ```
 Input (app, lang, duration, style, topic)
   ↓
-Stage 1: Script Generation (NVIDIA text)
+Stage 0: Budget Estimation
   ↓
-Stage 2: Audio Generation (NVIDIA TTS)
+Stage 1: Provider Selection (7-dimension scoring)
   ↓
-Stage 3: Visual Elements (NVIDIA images)
+Stage 2: Pre-Compose Quality Gate
   ↓
-Stage 4: Video Rendering (FFmpeg / renderer)
+Stage 3: Script Generation (LLM)
   ↓
-Stage 5: QA Checks
+Stage 4: Audio Generation (TTS)
   ↓
-Stage 6: Storage
+Stage 5: Visual Elements (Image Generation)
+  ↓
+Stage 6: Video Rendering (FFmpeg)
+  ↓
+Stage 7: Post-Render Quality Gate
+  ↓
+Stage 8: Final QA
+  ↓
+Stage 9: Storage
   ↓
 Output: MP4 video file
 ```
+
+## Key Features
+
+### 1. Scored Provider Selection
+
+Выбор лучшего провайдера по 7 измерениям (как в OpenMontage):
+
+- **Quality** — качество генерации
+- **Speed** — скорость выполнения
+- **Cost** — стоимость
+- **Reliability** — надёжность
+- **Feature Match** — соответствие требованиям задачи
+- **Latency** — задержка
+- **Availability** — доступность
+
+Веса настраиваются в конфигурации:
+
+```json
+{
+  "scoringWeights": {
+    "quality": 0.25,
+    "speed": 0.15,
+    "cost": 0.15,
+    "reliability": 0.15,
+    "feature_match": 0.15,
+    "latency": 0.10,
+    "availability": 0.05
+  }
+}
+```
+
+### 2. Quality Gates
+
+Три уровня контроля качества:
+
+1. **Pre-Compose Gate** — валидация входных данных перед генерацией
+2. **Post-Render Gate** — проверка артефактов после рендеринга
+3. **Final QA** — финальные метрики качества
+
+### 3. Budget Governance
+
+- Оценка стоимости перед запуском
+- Лимиты на стоимость видео
+- Audit trail всех решений
+
+### 4. Decision Audit Trail
+
+Логирование всех решений для отладки и анализа:
+
+- Выбор провайдера
+- Пройденные quality gates
+- Метрики качества
 
 ## Usage
 
@@ -82,125 +152,101 @@ node scripts/factory-video-cli.js \
   --topic="Premium real estate in Italy"
 ```
 
-## Pipeline Stages
+## Configuration
 
-### Stage 1: Script Generation
+Конфигурация находится в `config/video-factory.json`:
 
-- **Provider**: NVIDIA (text generation)
-- **Input**: app, lang, duration, style, topic
-- **Output**: Structured script/scenario
-- **File**: `video-production-pipeline.js::_generateScript()`
-
-### Stage 2: Audio Generation
-
-- **Provider**: NVIDIA (TTS / voiceover)
-- **Input**: script content, lang, voice selection
-- **Output**: Audio data (duration, voice characteristics)
-- **File**: `video-production-pipeline.js::_generateAudio()`
-
-### Stage 3: Visual Elements
-
-- **Provider**: NVIDIA (image generation)
-- **Input**: script, style, aspect ratio
-- **Output**: Array of visual elements (scenes)
-- **File**: `video-production-pipeline.js::_generateVisuals()`
-
-### Stage 4: Video Rendering
-
-- **Renderer**: FFmpeg-based (TODO: implement)
-- **Input**: script, audio, visuals
-- **Output**: Rendered video structure
-- **File**: `video-production-pipeline.js::_renderVideo()`
-
-### Stage 5: QA Checks
-
-- **Checks**:
-  - Script content is not empty
-  - Audio data is present
-  - Visual elements are generated
-  - Duration is within expected range
-- **Output**: QA result (passed/failed, issues list)
-- **File**: `video-production-pipeline.js::_runQA()`
-
-### Stage 6: Storage
-
-- **Storage**: S3 / local filesystem (TODO: implement)
-- **Output**: Path/URL to final video file
-- **File**: `video-production-pipeline.js::_storeResult()`
+- **providers** — список провайдеров
+- **scoringWeights** — веса для scoring
+- **qualityGates** — включение/выключение gates
+- **budget** — лимиты и настройки бюджета
+- **rendering** — настройки FFmpeg (кодеки, битрейты, resolution)
+- **storage** — настройки хранилища (local/S3)
+- **voices** — голоса по языкам и стилям
+- **fonts** — шрифты по стилям
+- **branding** — логотипы и цвета для приложений
 
 ## Output Structure
 
 ```javascript
 {
   jobId: "video-now-1724281234567",
+  status: "success",
+  duration: 15000, // ms
   artifacts: {
-    script: {
-      type: "script",
-      content: "...",
-      metadata: { ... }
-    },
-    audio: {
-      type: "audio",
-      data: "...",
-      duration: 30,
-      metadata: { ... }
-    },
-    visuals: {
-      type: "visuals",
-      elements: [ ... ],
-      metadata: { ... }
-    },
-    rendered: {
-      type: "rendered",
-      status: "placeholder",
-      metadata: { ... }
-    }
+    script: { type: "script", content: "...", provider: "nvidia" },
+    audio: { type: "audio", data: "...", duration: 30, provider: "nvidia" },
+    visuals: { type: "visuals", elements: [...], provider: "nvidia" },
+    rendered: { type: "rendered", status: "success", provider: "nvidia" }
   },
+  outputPath: "/output/videos/video-now-1724281234567.mp4",
+  decisionLog: [
+    { type: "budget_check", data: { passed: true, estimate: 0.50 } },
+    { type: "provider_selection", data: { selected: "nvidia", scores: {...} } },
+    { type: "pre_compose_gate", data: { passed: true } },
+    { type: "post_render_gate", data: { passed: true } },
+    { type: "final_qa", data: { passed: true, metrics: {...} } }
+  ],
   qa: {
-    passed: true,
-    issues: [],
-    checkedAt: "2026-08-21T22:00:00.000Z"
-  },
-  outputPath: "/output/videos/video-now-1724281234567.mp4"
+    preCompose: true,
+    postRender: true,
+    finalQA: true
+  }
 }
 ```
 
+## Files
+
+- `src/v2.1/video-factory.js` — основная фабрика с scoring и quality gates
+- `src/v2.1/video-production-pipeline.js` — базовый пайплайн
+- `src/renderers/ffmpeg-video-renderer.js` — FFmpeg-рендерер
+- `scripts/factory-video-cli.js` — CLI для запуска
+- `config/video-factory.json` — конфигурация
+- `docs/VIDEO_PIPELINE.md` — документация
+
 ## TODO / Next Steps
 
-1. **Implement video renderer**
-   - FFmpeg-based renderer
-   - Support for vertical (9:16) and horizontal (16:9) formats
-   - Text overlay (subtitles, branding)
+1. **Реализовать FFmpeg-рендерер полностью**
+   - Сохранение изображений из base64
+   - Сохранение аудио из buffer
+   - Реальное выполнение FFmpeg
+   - Текст overlay (субтитры, branding)
+   - Переходы между сценами
 
-2. **Implement storage**
+2. **Реализовать хранилище**
+   - Local filesystem
    - S3 integration
-   - Local filesystem fallback
-   - CDN integration (optional)
+   - CDN integration (опционально)
 
-3. **Improve QA**
-   - Video duration validation
-   - Audio/video sync check
-   - Visual quality metrics
+3. **Улучшить scoring провайдеров**
+   - Реальные метрики для каждого измерения
+   - Кэширование результатов scoring
+   - Адаптивные веса
 
-4. **Add API endpoint**
+4. **Добавить API endpoint**
    - `POST /factory/video`
    - Async job processing
    - Status endpoint: `GET /factory/video/:jobId`
 
-5. **Provider selection**
-   - Support for multiple providers (not just NVIDIA)
-   - Provider scoring/rating per task type
-   - Automatic provider selection based on task
+5. **Добавить WebUI**
+   - Next.js dashboard
+   - Форма для создания видео
+   - Галерея сгенерированных видео
+
+6. **Тесты на реальных сценариях**
+   - Генерация видео для Now
+   - Генерация видео для Attune
+   - Генерация видео для luxuryitaly.net
 
 ## Branch
 
-This implementation is on branch: `feat/v2.1-video-pipeline-perplexity`
+`feat/v2.1-video-pipeline-perplexity`
 
 ## Integration with Main
 
-After testing and validation:
+После тестирования и валидации:
 
-1. Test with real video generation scenarios
-2. Fix any issues
-3. Open PR to `main`
-4. Merge after approval
+1. Протестировать с реальной генерацией видео
+2. Исправить ошибки
+3. Открыть PR в `main`
+4. Merge после approval
