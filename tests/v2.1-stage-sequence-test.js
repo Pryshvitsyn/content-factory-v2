@@ -33,8 +33,8 @@ for (let i = 0; i < STAGE_ORDER.length; i += 1) {
 
 assert.equal(getStageDefinition('SIGNAL').requiresPreviousStage, false);
 assert.equal(getStageDefinition('LEARN').terminal, true);
-assert.throws(() => getStageDefinition('NOT_A_STAGE'), /Unknown V2\\.1 stage/);
-assert.throws(() => assertStageTransition('SIGNAL', 'BRIEF'), /Invalid V2\\.1 stage transition/);
-assert.throws(() => assertStageTransition('LEARN', 'SIGNAL'), /Invalid V2\\.1 stage transition/);
+assert.throws(() => getStageDefinition('NOT_A_STAGE'), /Unknown V2\.1 stage/);
+assert.throws(() => assertStageTransition('SIGNAL', 'BRIEF'), /Invalid V2\.1 stage transition/);
+assert.throws(() => assertStageTransition('LEARN', 'SIGNAL'), /Invalid V2\.1 stage transition/);
 
 console.log('V2.1 stage sequence: PASS');
