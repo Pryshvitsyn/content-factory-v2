@@ -8,6 +8,26 @@ function fingerprint(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+async function claimJob(client, { workerId, leaseSeconds = 60 }) {
+  const result = await client.query(
+    `WITH candidate AS (
+       SELECT id FROM v2_1.jobs
+       WHERE status IN ('QUEUED','RETRYING')
+         AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+       ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+     )
+     UPDATE v2_1.jobs j
+        SET status='RUNNING', worker_id=$1,
+            lease_expires_at=now()+($2 * interval '1 second'),
+            heartbeat_at=now(), started_at=COALESCE(started_at, now()), updated_at=now()
+       FROM candidate c
+      WHERE j.id=c.id
+      RETURNING j.*`,
+    [workerId, leaseSeconds]
+  );
+  return result.rows[0] || null;
+}
+
 async function claimJobForProduction(client, { jobId, productionId, workerId, leaseSeconds = 60 }) {
   const result = await client.query(
     `UPDATE v2_1.jobs
@@ -67,6 +87,7 @@ async function recoverExpiredWork(client) {
 module.exports = {
   RETRYABLE_CODES,
   fingerprint,
+  claimJob,
   claimJobForProduction,
   claimNextStage,
   completeStage,
