@@ -1,0 +1,43 @@
+{
+  "contract_version": "v2.3.0",
+  "name": "Content Factory Quality & Reality Policy",
+  "default_mode": "realistic",
+  "principles": [
+    "generated output is never its own final judge",
+    "hard constraints block progression",
+    "creative exceptions must be explicit and scoped",
+    "repairs are targeted and bounded",
+    "human approval remains the subjective creative gate"
+  ],
+  "severity": {
+    "BLOCK": "objective violation that prevents progression",
+    "WARN": "non-blocking issue requiring review or telemetry",
+    "INFO": "informational observation"
+  },
+  "rules": [
+    {"id":"ANATOMY.EXTRA_LIMB","domain":"anatomy","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"ANATOMY.EXTRA_DIGIT","domain":"anatomy","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"ANATOMY.EXTRA_EYE","domain":"anatomy","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"ANATOMY.DISCONNECTED_BODY","domain":"anatomy","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"PHYSICS.IMPOSSIBLE_MOTION","domain":"physics","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"PHYSICS.OBJECT_INTERSECTION","domain":"physics","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"PHYSICS.INCONSISTENT_LIGHT","domain":"physics","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"SPATIAL.PERSPECTIVE_BREAK","domain":"spatial","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"CONTINUITY.IDENTITY_BREAK","domain":"continuity","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"CONTINUITY.PROP_STATE_BREAK","domain":"continuity","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"ACTION.UNSUPPORTED_TRANSITION","domain":"action","severity":"BLOCK","default_allowed":false,"exception_required":true},
+    {"id":"AV.DESYNC","domain":"audiovisual","severity":"BLOCK","default_allowed":false,"exception_required":false},
+    {"id":"STRUCTURE.MISSING_REQUIRED_ARTIFACT","domain":"structure","severity":"BLOCK","default_allowed":false,"exception_required":false},
+    {"id":"STRUCTURE.INVALID_SCHEMA","domain":"structure","severity":"BLOCK","default_allowed":false,"exception_required":false}
+  ],
+  "repair": {
+    "max_attempts": 2,
+    "strategy": "targeted",
+    "full_regeneration_default": false,
+    "escalate_after_exhaustion": true
+  },
+  "human_gate": {
+    "required_before_master_lock": true,
+    "required_before_publication": true
+  }
+}
