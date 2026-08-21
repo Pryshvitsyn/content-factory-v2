@@ -3,18 +3,13 @@
  * 
  * Usage:
  *   node scripts/factory-video-cli.js --app=now --lang=en --duration=30 --style=tech --topic="Smart scheduling"
- * 
- * Options:
- *   --app       Application identifier (now, attune, luxuryitaly)
- *   --lang      Language code (en, it, ru)
- *   --duration  Target duration in seconds (default: 30)
- *   --style     Visual style (tech, luxury, minimal)
- *   --topic     Topic/theme for the video (required)
  */
 
 const path = require('path');
 const { VideoFactory, VideoFactoryConfig } = require('../src/v2.1/video-factory');
 const { MockProvider } = require('../src/providers/mock-provider');
+const { ProviderGateway } = require('../src/providers/provider-gateway');
+const { ProviderRegistry } = require('../src/providers/provider-registry');
 
 /**
  * Parse command line arguments
@@ -76,6 +71,28 @@ function loadConfig() {
 }
 
 /**
+ * Create ProviderGateway with registered providers
+ */
+function createProviderGateway(config) {
+  const registry = new ProviderRegistry();
+  
+  // Register mock provider for testing
+  if (config.providers && config.providers.includes('mock')) {
+    registry.register('mock', new MockProvider());
+    console.log('[FactoryVideoCLI] Mock provider registered');
+  }
+  
+  // TODO: Register NVIDIA provider if API key is available
+  // if (config.providers && config.providers.includes('nvidia')) {
+  //   const { NvidiaProvider } = require('../src/providers/nvidia-adapter');
+  //   registry.register('nvidia', new NvidiaProvider());
+  //   console.log('[FactoryVideoCLI] NVIDIA provider registered');
+  // }
+  
+  return new ProviderGateway(registry);
+}
+
+/**
  * Main entry point
  */
 async function main() {
@@ -97,7 +114,7 @@ async function main() {
     console.error('[FactoryVideoCLI] Validation errors:');
     errors.forEach(err => console.error(`  - ${err}`));
     console.error('\nUsage:');
-    console.error('  node scripts/factory-video-cli.js --app=now --lang=en --duration=30 --style=tech --topic="Your topic"');
+    console.error('  node scripts/factory-video-cli.js --app=now --lang=en --duration=30 --topic="Your topic"');
     process.exit(1);
   }
   
@@ -113,7 +130,10 @@ async function main() {
     // Load configuration
     const config = loadConfig();
     
-    // Initialize factory with config
+    // Create provider gateway with registered providers
+    const providerGateway = createProviderGateway(config);
+    
+    // Initialize factory with config and provider gateway
     const factoryConfig = new VideoFactoryConfig({
       ...config,
       rendering: {
@@ -126,15 +146,7 @@ async function main() {
       }
     });
     
-    const factory = new VideoFactory(factoryConfig);
-    
-    // Register mock provider if using mock
-    if (config.providers && config.providers.includes('mock')) {
-      const { ProviderRegistry } = require('../src/providers/provider-registry');
-      const registry = new ProviderRegistry();
-      registry.register('mock', new MockProvider());
-      console.log('[FactoryVideoCLI] Mock provider registered');
-    }
+    const factory = new VideoFactory(factoryConfig, providerGateway);
     
     // Execute factory
     console.log('[FactoryVideoCLI] Executing video factory...\n');
