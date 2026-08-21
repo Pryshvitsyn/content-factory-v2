@@ -9,12 +9,12 @@ function fingerprint(value) {
 }
 
 async function claimJob(client, { workerId, leaseSeconds = 60 }) {
-  const result = await client.query(`WITH candidate AS (SELECT id FROM v2_1.jobs WHERE status IN ('QUEUED','RETRYING') AND (next_attempt_at IS NULL OR next_attempt_at <= now()) ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED) UPDATE v2_1.jobs j SET status='RUNNING', worker_id=$1, lease_expires_at=now()+($2 * interval '1 second'), heartbeat_at=now(), started_at=COALESCE(started_at, now()), updated_at=now() FROM candidate c WHERE j.id=c.id RETURNING j.*`, [workerId, leaseSeconds]);
+  const result = await client.query(`SELECT * FROM v2_1.claim_job($1, $2)`, [workerId, leaseSeconds]);
   return result.rows[0] || null;
 }
 
 async function claimJobForProduction(client, { jobId, productionId, workerId, leaseSeconds = 60 }) {
-  const result = await client.query(`UPDATE v2_1.jobs SET status='RUNNING', worker_id=$3, lease_expires_at=now()+($4 * interval '1 second'), heartbeat_at=now(), updated_at=now() WHERE id=$1 AND production_id=$2 AND status IN ('QUEUED','RETRYING') RETURNING *`, [jobId, productionId, workerId, leaseSeconds]);
+  const result = await client.query(`SELECT * FROM v2_1.claim_job_for_production($1, $2, $3, $4)`, [jobId, productionId, workerId, leaseSeconds]);
   return result.rows[0] || null;
 }
 
