@@ -13,6 +13,7 @@
     "test:v2.1:availability": "node tests/v2.1-provider-availability-test.js",
     "test:v2.1:stage-runner": "node tests/v2.1-stage-runner-integration-test.js",
     "test:v2.1:stage-runner:postgres": "node tests/v2.1-stage-runner-postgres-integration-test.js",
+    "test:v2.1:single-stage": "node tests/v2.1-single-stage-execution-certification.js",
     "test:v2.1:multi-stage": "node tests/v2.1-multi-stage-integration-test.js",
     "test:v2.1:multi-stage:postgres": "node tests/v2.1-multi-stage-postgres-integration-test.js",
     "test:v2.1:retry-recovery:postgres": "node tests/v2.1-retry-recovery-postgres-integration-test.js",
