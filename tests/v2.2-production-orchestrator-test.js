@@ -17,7 +17,7 @@ assert.equal(validateGraph(graph), true);
 assert.throws(() => validateGraph(graph.slice(0, -1)), /canonical V2\.1 stage sequence/);
 assert.equal(idempotencyKey('ws-1', 'content-1'), 'v2.2:ws-1:content-1');
 
-function dbMock() {
+function dbMock({ conflict = false, fail = false } = {}) {
   const calls = [];
   const rows = [];
   return {
@@ -25,8 +25,16 @@ function dbMock() {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [], rowCount: 0 };
-      if (sql.includes('FROM content_units')) return { rows: [], rowCount: 0 };
-      if (sql.includes('INSERT INTO content_units')) return { rows: [{ id: 'content-1', status: 'planned' }], rowCount: 1 };
+      if (sql.includes('INSERT INTO content_units')) {
+        if (fail) throw new Error('fixture failure');
+        if (conflict) return { rows: [], rowCount: 0 };
+        return { rows: [{ id: 'content-1', status: 'planned' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM content_units')) {
+        return conflict
+          ? { rows: [{ id: 'content-existing', current_revision_id: 'revision-existing', status: 'in_progress' }], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
+      }
       if (sql.includes('INSERT INTO content_revisions')) return { rows: [{ id: 'revision-1' }], rowCount: 1 };
       if (sql.includes('INSERT INTO production_nodes')) {
         const id = `node-${rows.length + 1}`;
@@ -56,6 +64,24 @@ function dbMock() {
   assert.deepEqual(result.repairStages, ['OBJECTIVE_QA', 'DELIVERY_QA']);
   assert.equal(db.calls[0].sql, 'BEGIN');
   assert.equal(db.calls.at(-1).sql, 'COMMIT');
+
+  const reusedDb = dbMock({ conflict: true });
+  const reused = await startProduction(reusedDb, {
+    workspaceId: 'ws-1',
+    idea: 'same idea',
+    contentKey: 'signal-story-001',
+  });
+  assert.equal(reused.reused, true);
+  assert.equal(reused.contentUnitId, 'content-existing');
+  assert.equal(reused.revisionId, 'revision-existing');
+  assert.equal(reusedDb.calls.at(-1).sql, 'COMMIT');
+
+  const failingDb = dbMock({ fail: true });
+  await assert.rejects(
+    startProduction(failingDb, { workspaceId: 'ws-1', idea: 'x', contentKey: 'failure-case' }),
+    /fixture failure/
+  );
+  assert.equal(failingDb.calls.at(-1).sql, 'ROLLBACK');
 
   console.log('V2.2 production vertical slice bootstrap: PASS');
 })().catch((error) => {
