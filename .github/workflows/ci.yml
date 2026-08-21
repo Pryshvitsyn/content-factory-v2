@@ -29,9 +29,6 @@ on:
       - "build-v2.sh"
       - ".github/workflows/**"
 
-# PR-first CI: when several commits land quickly on the same branch/PR,
-# keep only the newest validation run. This prevents stale runs from
-# consuming runner time while preserving the latest full certification.
 concurrency:
   group: content-factory-v2-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -121,6 +118,7 @@ jobs:
           node --check src/v2.1/validation-engine.js
           node --check src/v2.1/publish-executor.js
           node --check tests/v2.1-provider-artifact-integration-test.js
+          node --check tests/v2.1-provider-routing-test.js
           node --check tests/v2.1-stage-runner-integration-test.js
           node --check tests/v2.1-stage-runner-postgres-integration-test.js
           node --check tests/v2.1-multi-stage-integration-test.js
@@ -129,7 +127,7 @@ jobs:
           node --check tests/v2.1-concurrency-postgres-certification.js
           node --check tests/v2.1-validation-engine-test.js
           node --check tests/v2.1-publish-executor-test.js
-          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
+          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
@@ -139,6 +137,10 @@ jobs:
       - name: Run provider-artifact-storage integration
         run: npm run test:v2.1:integration
         timeout-minutes: 3
+
+      - name: Run provider routing certification
+        run: npm run test:v2.1:routing
+        timeout-minutes: 2
 
       - name: Run execution-stage-provider-storage integration
         run: npm run test:v2.1:stage-runner
