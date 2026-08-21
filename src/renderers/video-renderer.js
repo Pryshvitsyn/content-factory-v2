@@ -35,11 +35,15 @@ class VideoRenderer {
     // Output video path
     const outputPath = path.join(this.tempDir, `video_${timestamp}.${format}`);
     
-    // FFmpeg command
-    const ffmpegCommand = `ffmpeg -y -loop 1 -i "${imagePath}" -i "${audioPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest -vf "scale=${resolution.replace('x', ':')}" "${outputPath}"`;
+    // Calculate duration from audio (3 seconds fallback)
+    const duration = Math.max(3, audio.length / (44100 * 2)); // ~3 sec minimum
+    
+    // FFmpeg command with -t flag
+    const ffmpegCommand = `ffmpeg -y -loop 1 -i "${imagePath}" -i "${audioPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -t ${duration} -vf "scale=${resolution.replace('x', ':')}" "${outputPath}"`;
     
     console.log('[VideoRenderer] Running FFmpeg...');
     console.log('[VideoRenderer] Command:', ffmpegCommand);
+    console.log('[VideoRenderer] Duration:', duration, 'seconds');
     
     // Execute FFmpeg with increased buffer
     await new Promise((resolve, reject) => {
