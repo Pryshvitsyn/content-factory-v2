@@ -20,6 +20,7 @@
     "test:v2.1:retry-recovery:postgres": "node tests/v2.1-retry-recovery-postgres-integration-test.js",
     "test:v2.1:concurrency:postgres": "node tests/v2.1-concurrency-postgres-certification.js",
     "test:v2.1:lease-fencing:postgres": "node tests/v2.1-lease-fencing-postgres-certification.js",
+    "test:v2.1:publication-idempotency:postgres": "node tests/v2.1-publication-db-idempotency-postgres-certification.js",
     "test:v2.1:artifact-idempotency": "node tests/v2.1-artifact-idempotency-test.js",
     "test:v2.1:crash-consistency": "node tests/v2.1-crash-consistency-test.js",
     "test:v2.1:postgres-crash-recovery": "node tests/v2.1-postgres-crash-recovery-certification.js",
