@@ -12,8 +12,8 @@
  *   --topic     Topic/theme for the video (required)
  */
 
-const { VideoProductionPipeline } = require('../src/v2.1/video-production-pipeline');
-const { ProviderGateway } = require('../src/providers/provider-gateway');
+const path = require('path');
+const { VideoFactory, VideoFactoryConfig } = require('../src/v2.1/video-factory');
 
 /**
  * Parse command line arguments
@@ -59,6 +59,22 @@ function validateInput(input) {
 }
 
 /**
+ * Load configuration
+ */
+function loadConfig() {
+  const configPath = path.join(process.cwd(), 'config', 'video-factory.json');
+  
+  try {
+    const fs = require('fs');
+    const configData = fs.readFileSync(configPath, 'utf-8');
+    return JSON.parse(configData);
+  } catch (error) {
+    console.warn('[FactoryVideoCLI] Config not found, using defaults');
+    return {};
+  }
+}
+
+/**
  * Main entry point
  */
 async function main() {
@@ -93,34 +109,65 @@ async function main() {
   console.log('');
   
   try {
-    // Initialize pipeline
-    const providerGateway = new ProviderGateway();
-    const pipeline = new VideoProductionPipeline({
-      providerGateway,
-      config: {
-        verbose: true
+    // Load configuration
+    const config = loadConfig();
+    
+    // Initialize factory with config
+    const factoryConfig = new VideoFactoryConfig({
+      ...config,
+      rendering: {
+        ...config.rendering,
+        ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg'
+      },
+      storage: config.storage || {
+        type: 'local',
+        basePath: './output/videos'
       }
     });
     
-    // Execute pipeline
-    console.log('[FactoryVideoCLI] Executing video production pipeline...\n');
-    const result = await pipeline.execute(input);
+    const factory = new VideoFactory(factoryConfig);
+    
+    // Execute factory
+    console.log('[FactoryVideoCLI] Executing video factory...\n');
+    const result = await factory.generateVideo(input);
     
     console.log('\n[FactoryVideoCLI] Video production completed!');
     console.log(`  Job ID:      ${result.jobId}`);
+    console.log(`  Status:      ${result.status}`);
     console.log(`  Output Path: ${result.outputPath}`);
-    console.log(`  QA Passed:   ${result.qa.passed}`);
+    console.log(`  Duration:    ${result.duration}ms`);
     
-    if (result.qa.issues.length > 0) {
-      console.log('  QA Issues:');
-      result.qa.issues.forEach(issue => console.log(`    - ${issue}`));
+    if (result.status === 'success') {
+      console.log('\n[FactoryVideoCLI] Quality Assurance:');
+      console.log(`  Pre-Compose:  ${result.qa.preCompose ? '✓' : '✗'}`);
+      console.log(`  Post-Render:  ${result.qa.postRender ? '✓' : '✗'}`);
+      console.log(`  Final QA:     ${result.qa.finalQA ? '✓' : '✗'}`);
+      
+      console.log('\n[FactoryVideoCLI] Decision Log:');
+      result.decisionLog.forEach(decision => {
+        console.log(`  - ${decision.type}: ${JSON.stringify(decision.data)}`);
+      });
+      
+      console.log('\n[FactoryVideoCLI] Artifacts generated:');
+      console.log(`  - Script:   ${result.artifacts.script ? '✓' : '✗'}`);
+      console.log(`  - Audio:    ${result.artifacts.audio ? '✓' : '✗'}`);
+      console.log(`  - Visuals:  ${result.artifacts.visuals ? '✓' : '✗'}`);
+      console.log(`  - Rendered: ${result.artifacts.rendered ? '✓' : '✗'}`);
+      
+      console.log(`\n[FactoryVideoCLI] Video saved to: ${result.outputPath}`);
+    } else {
+      console.error('\n[FactoryVideoCLI] Error:');
+      console.error(`  ${result.error}`);
+      
+      if (result.decisionLog.length > 0) {
+        console.error('\n[FactoryVideoCLI] Decision log (for debugging):');
+        result.decisionLog.forEach(decision => {
+          console.error(`  - ${decision.type}: ${JSON.stringify(decision.data)}`);
+        });
+      }
+      
+      process.exit(1);
     }
-    
-    console.log('\n[FactoryVideoCLI] Artifacts generated:');
-    console.log(`  - Script:   ${result.artifacts.script ? '✓' : '✗'}`);
-    console.log(`  - Audio:    ${result.artifacts.audio ? '✓' : '✗'}`);
-    console.log(`  - Visuals:  ${result.artifacts.visuals ? '✓' : '✗'}`);
-    console.log(`  - Rendered: ${result.artifacts.rendered ? '✓' : '✗'}`);
     
   } catch (error) {
     console.error('\n[FactoryVideoCLI] Error during video production:');
