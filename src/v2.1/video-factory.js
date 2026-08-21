@@ -12,7 +12,6 @@
  */
 
 const { ProviderGateway } = require('../providers/provider-gateway');
-const ProductionContract = require('../../worker/v2.1-production-contract');
 const { FFmpegVideoRenderer } = require('../renderers/ffmpeg-video-renderer');
 const { VideoStorage } = require('../storage/video-storage');
 
@@ -82,7 +81,6 @@ class VideoFactory {
   constructor(config = new VideoFactoryConfig()) {
     this.config = config;
     this.providerGateway = new ProviderGateway();
-    this.contract = new ProductionContract();
     this.renderer = new FFmpegVideoRenderer(config.rendering);
     this.storage = new VideoStorage(config.storage);
     this.decisionLog = [];
