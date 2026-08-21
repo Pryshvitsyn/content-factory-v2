@@ -39,11 +39,21 @@ class StageRunner {
     if (!handler) throw new Error(`No handler registered for V2.1 stage: ${stageRun.stage}`);
 
     try {
+      const inputArtifacts = stageRun.input_artifacts || [];
+      if (stageRun.input_fingerprint) {
+        const actualInputFingerprint = fingerprint(inputArtifacts);
+        if (actualInputFingerprint !== stageRun.input_fingerprint) {
+          const error = new Error('Stage input fingerprint mismatch');
+          error.code = 'STAGE_INPUT_FINGERPRINT_MISMATCH';
+          throw error;
+        }
+      }
+
       const result = await handler({
         stage: definition,
         stageRun,
         providerGateway: this.providerGateway,
-        inputArtifacts: stageRun.input_artifacts || [],
+        inputArtifacts,
       });
 
       const produced = Array.isArray(result?.artifacts) ? result.artifacts : (result?.artifact ? [result.artifact] : []);
