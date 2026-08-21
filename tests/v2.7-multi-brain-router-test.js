@@ -9,6 +9,6 @@ const router = new MultiBrainRouter({
   assert.equal(await router.route('research',{}),'research');
   assert.equal(await router.route('creative',{}),'creative');
   assert.equal(await router.route('validation',{}),'critic');
-  await assert.rejects(()=>router.route('missing',{}),/stage not routed/);
+  await assert.rejects(async()=>router.route('missing',{}),/stage not routed/);
   console.log('V2.7 multi-brain routing certification: PASS');
 })().catch(err=>{console.error(err);process.exit(1);});
