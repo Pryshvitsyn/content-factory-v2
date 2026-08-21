@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"content-factory/feedback-loop.v1",
+  "title":"Production Feedback Loop",
+  "type":"object",
+  "required":["prediction_id","opportunity_id","actual","calibration"],
+  "properties":{
+    "prediction_id":{"type":"string"},
+    "opportunity_id":{"type":"string"},
+    "actual":{"type":"object","required":["observed_at","metrics"],"properties":{"observed_at":{"type":"string","format":"date-time"},"metrics":{"type":"object","additionalProperties":{"type":"number"}}}},
+    "calibration":{"type":"object","required":["status","errors"],"properties":{"status":{"enum":["PENDING","CALIBRATED"]},"errors":{"type":"object","additionalProperties":{"type":"number"}}}}
+  }
+}
