@@ -128,6 +128,7 @@ jobs:
           node --check tests/v2.1-retry-recovery-postgres-integration-test.js
           node --check tests/v2.1-concurrency-postgres-certification.js
           node --check tests/v2.1-artifact-idempotency-test.js
+          node --check tests/v2.1-crash-consistency-test.js
           node --check tests/v2.1-validation-engine-test.js
           node --check tests/v2.1-publish-executor-test.js
           node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/artifacts/artifact-service'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
@@ -136,59 +137,48 @@ jobs:
       - name: Run V2.1 stage contract
         run: npm run test:v2.1:contract
         timeout-minutes: 2
-
       - name: Run provider-artifact-storage integration
         run: npm run test:v2.1:integration
         timeout-minutes: 3
-
       - name: Run provider routing certification
         run: npm run test:v2.1:routing
         timeout-minutes: 2
-
       - name: Run provider availability certification
         run: npm run test:v2.1:availability
         timeout-minutes: 2
-
       - name: Run single-stage execution certification
         run: npm run test:v2.1:single-stage
         timeout-minutes: 2
-
       - name: Run sequential pipeline executor certification
         run: npm run test:v2.1:pipeline-executor
         timeout-minutes: 2
-
       - name: Run execution-stage-provider-storage integration
         run: npm run test:v2.1:stage-runner
         timeout-minutes: 3
-
       - name: Run full V2.1 multi-stage integration
         run: npm run test:v2.1:multi-stage
         timeout-minutes: 3
-
       - name: Run PostgreSQL execution-stage integration
         run: npm run test:v2.1:stage-runner:postgres
         timeout-minutes: 3
-
       - name: Run PostgreSQL full multi-stage lifecycle
         run: npm run test:v2.1:multi-stage:postgres
         timeout-minutes: 5
-
       - name: Run PostgreSQL retry and lease recovery certification
         run: npm run test:v2.1:retry-recovery:postgres
         timeout-minutes: 3
-
       - name: Run PostgreSQL concurrency ownership certification
         run: npm run test:v2.1:concurrency:postgres
         timeout-minutes: 3
-
       - name: Run artifact idempotency and concurrency certification
         run: npm run test:v2.1:artifact-idempotency
         timeout-minutes: 2
-
+      - name: Run crash consistency certification
+        run: npm run test:v2.1:crash-consistency
+        timeout-minutes: 2
       - name: Run V2.1 validation engine certification
         run: npm run test:v2.1:validation
         timeout-minutes: 2
-
       - name: Run V2.1 publish execution certification
         run: npm run test:v2.1:publish
         timeout-minutes: 2
@@ -196,11 +186,9 @@ jobs:
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
         timeout-minutes: 2
-
       - name: Check build script syntax
         run: bash -n build-v2.sh
         timeout-minutes: 2
-
       - name: Check canonical migrations
         run: |
           test -s migrations/001_v2.sql
@@ -210,7 +198,6 @@ jobs:
           test -s migrations/20260820_v2_1_concurrency_certification.sql
           test -s migrations/20260820_v2_1_publication_execution.sql
         timeout-minutes: 2
-
       - name: Check required project files
         run: |
           test -s package.json
@@ -218,7 +205,6 @@ jobs:
           test -s README.md
           test -s .env.example
         timeout-minutes: 2
-
       - name: Check Git whitespace
         run: git diff --check
         timeout-minutes: 2
