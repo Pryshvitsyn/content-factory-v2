@@ -4,29 +4,27 @@ BEGIN;
 -- predicate matches no row. NULL is not a valid negative result for callers.
 CREATE OR REPLACE FUNCTION v2_1.heartbeat_job(p_job_id uuid, p_worker_id text, p_lease_seconds integer)
 RETURNS boolean
-LANGUAGE sql AS $$
-  SELECT COALESCE((
-    UPDATE v2_1.jobs
-       SET lease_expires_at=now()+make_interval(secs=>greatest(5,$3)),
-           heartbeat_at=now(), updated_at=now()
-     WHERE id=$1 AND status='RUNNING' AND worker_id=$2
-       AND (lease_expires_at IS NULL OR lease_expires_at >= now())
-     RETURNING true
-  ), false);
-$$;
+LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE v2_1.jobs
+     SET lease_expires_at=now()+make_interval(secs=>greatest(5,p_lease_seconds)),
+         heartbeat_at=now(), updated_at=now()
+   WHERE id=p_job_id AND status='RUNNING' AND worker_id=p_worker_id
+     AND (lease_expires_at IS NULL OR lease_expires_at >= now());
+  RETURN FOUND;
+END $$;
 
 CREATE OR REPLACE FUNCTION v2_1.heartbeat_stage(p_stage_run_id uuid, p_worker_id text, p_lease_seconds integer)
 RETURNS boolean
-LANGUAGE sql AS $$
-  SELECT COALESCE((
-    UPDATE v2_1.stage_runs
-       SET lease_expires_at=now()+make_interval(secs=>greatest(5,$3)),
-           heartbeat_at=now()
-     WHERE id=$1 AND status='RUNNING' AND worker_id=$2
-       AND (lease_expires_at IS NULL OR lease_expires_at >= now())
-     RETURNING true
-  ), false);
-$$;
+LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE v2_1.stage_runs
+     SET lease_expires_at=now()+make_interval(secs=>greatest(5,p_lease_seconds)),
+         heartbeat_at=now()
+   WHERE id=p_stage_run_id AND status='RUNNING' AND worker_id=p_worker_id
+     AND (lease_expires_at IS NULL OR lease_expires_at >= now());
+  RETURN FOUND;
+END $$;
 
 -- The worker's 19-stage production contract is the canonical execution order.
 -- Keep the database representation aligned with it so PostgreSQL cannot drift
