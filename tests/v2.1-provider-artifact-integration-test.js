@@ -39,13 +39,13 @@ async function run() {
     assert.deepEqual(selection, {
       provider: 'nvidia',
       model: 'nvidia/test-model',
-      selectionReason: 'priority',
+      selectionReason: 'single-available-provider',
     });
 
     const result = await gateway.generate({ capability: 'text-generation', prompt: 'hello V2' });
     assert.equal(result.provider, 'nvidia');
     assert.equal(result.model, 'nvidia/test-model');
-    assert.equal(result.provenance.selectionReason, 'priority');
+    assert.equal(result.provenance.selectionReason, 'single-available-provider');
 
     const artifact = await artifacts.createVersion({
       artifactId: 'integration-test-artifact',
