@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const engine = require('../worker/v2.1-execution-engine');
+const { STAGE_ORDER } = require('../worker/v2.1-production-contract');
 
 function mockClient(expectedSql, row = {}) {
   const calls = [];
@@ -19,11 +20,7 @@ function mockClient(expectedSql, row = {}) {
   const input = { z: 2, nested: { b: 1, a: 3 }, a: 1 };
   assert.equal(engine.stableStringify(input), '{"a":1,"nested":{"a":3,"b":1},"z":2}');
   assert.equal(engine.fingerprint(input), engine.fingerprint({ a: 1, nested: { a: 3, b: 1 }, z: 2 }));
-  assert.deepEqual(engine.allStageNames(), [
-    'SIGNAL', 'IDEA', 'BRIEF', 'BIBLE', 'CONCEPT', 'SCRIPT', 'SHOT_PLAN',
-    'ASSET_PLAN', 'ASSETS', 'EDIT', 'PLATFORM_ADAPTATION', 'VALIDATION',
-    'PUBLISH', 'ANALYZE', 'LEARN',
-  ]);
+  assert.deepEqual(engine.allStageNames(), STAGE_ORDER);
 
   const claim = mockClient('claim_job', { id: 'job-1', status: 'RUNNING' });
   const claimed = await engine.claimJob(claim, { workerId: 'worker-1', leaseSeconds: 120 });
@@ -36,12 +33,11 @@ function mockClient(expectedSql, row = {}) {
   });
   assert.deepEqual(scoped.calls[0].params, ['job-1', 'prod-1', 'worker-1', 60]);
 
-  const stage = mockClient('claim_stage', { id: 'stage-1', stage: 'SIGNAL' });
+  const stage = mockClient('claim_stage', { id: 'stage-1', stage: STAGE_ORDER[0] });
   const claimedStage = await engine.claimNextStage(stage, { jobId: 'job-1', workerId: 'worker-1' });
-  assert.equal(claimedStage.stage, 'SIGNAL');
+  assert.equal(claimedStage.stage, STAGE_ORDER[0]);
 
-  // Completion is ownership-scoped and must send canonical, de-duplicated artifact JSON.
-  const complete = mockClient('UPDATE v2_1.stage_runs', { id: 'stage-1', job_id: 'job-1', stage: 'SIGNAL', attempt: 1, status: 'COMPLETED' });
+  const complete = mockClient('UPDATE v2_1.stage_runs', { id: 'stage-1', job_id: 'job-1', stage: STAGE_ORDER[0], attempt: 1, status: 'COMPLETED' });
   const result = await engine.completeStage(complete, {
     stageRunId: 'stage-1', workerId: 'worker-1', outputArtifacts: ['a1', 'a1', 'a2'], outputFingerprint: 'fp',
   });

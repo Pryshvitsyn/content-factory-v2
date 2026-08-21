@@ -1,0 +1,12 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { selectPortfolio, recordPrediction, calibrate } = require('../worker/v2.6-portfolio-predictor');
+const items = Array.from({length:10}, (_,i)=>({opportunity_id:`o${i}`, expected_value:100-i}));
+const selected = selectPortfolio(items,{maxItems:5,explorationRate:0.2});
+assert.equal(selected.length,5);
+assert.ok(selected.some(x=>x.opportunity_id==='o4'));
+const prediction = recordPrediction({opportunityId:'o1',modelVersion:'v2.6.0',expectedValue:80,predictedMetrics:{retention:50}});
+const calibration = calibrate(prediction,{value:92,observed_at:'2026-08-21T08:00:00.000Z'});
+assert.equal(calibration.error,12);
+assert.equal(calibration.absolute_error,12);
+console.log('V2.6 portfolio/prediction certification: PASS');

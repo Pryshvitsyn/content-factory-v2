@@ -1,0 +1,21 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"content-factory/opportunity.v2",
+  "title":"Decision-grade Opportunity Intelligence Contract",
+  "type":"object",
+  "required":["opportunity_id","objective","type","potential","feasibility","confidence","risk","decision_policy","portfolio_policy"],
+  "properties":{
+    "opportunity_id":{"type":"string"},
+    "objective":{"enum":["GROWTH","REVENUE","AUTHORITY","LEAD_GENERATION","EXPERIMENT"]},
+    "type":{"enum":["TREND","EVERGREEN","NEWS","EDUCATIONAL","PRODUCT","AFFILIATE","LEAD_GENERATION","BRAND","AUTHORITY"]},
+    "potential":{"type":"object","required":["demand","momentum","content_gap","audience_fit","monetization","platform_fit"]},
+    "feasibility":{"type":"object","required":["production_cost","complexity","asset_availability","time_to_publish"]},
+    "confidence":{"type":"number","minimum":0,"maximum":100},
+    "risk":{"type":"object","required":["policy","factual","brand"]},
+    "freshness":{"type":"object","required":["observed_at","decay_class"]},
+    "uncertainty":{"type":"object","required":["research_completeness","value_of_information"]},
+    "decision_policy":{"type":"object","required":["human_approval_required","hard_gates"]},
+    "portfolio_policy":{"type":"object","required":["exploration_allowed","allocation_class"]},
+    "prediction":{"type":"object","required":["model_version","expected_value"]}
+  }
+}

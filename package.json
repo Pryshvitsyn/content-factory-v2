@@ -6,7 +6,8 @@
   "main": "worker/factory-worker-v2.js",
   "scripts": {
     "test:v2.1": "node tests/run-v2.1-foundation.js",
-    "test": "npm run test:v2.1"
+    "test:v2.2": "node tests/run-v2.2-production.js",
+    "test": "npm run test:v2.1 && npm run test:v2.2"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

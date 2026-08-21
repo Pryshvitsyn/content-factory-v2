@@ -4,10 +4,10 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
 const tests = [
-  'v2.1-contract-test.js',
-  'v2.1-stage-sequence-test.js',
-  'v2.1-execution-engine-test.js',
+  'v2.2-stage-spec-test.js',
   'v2.2-production-orchestrator-test.js',
+  'v2.2-artifact-contract-test.js',
+  'v2.2-intelligence-pipeline-test.js',
 ];
 
 for (const test of tests) {
@@ -15,4 +15,4 @@ for (const test of tests) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
-console.log('V2.1 execution foundation + V2.2 vertical slice bootstrap: PASS');
+console.log('V2.2 production vertical slice certification: PASS');

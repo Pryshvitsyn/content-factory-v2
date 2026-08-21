@@ -1,0 +1,19 @@
+{
+  "contract_version": "v1.0.0",
+  "name": "Quality Rule Exception",
+  "required": ["exception_id","rule_id","scope","reason","approved_by_policy"],
+  "properties": {
+    "exception_id": {"type":"string","format":"uuid"},
+    "rule_id": {"type":"string"},
+    "scope": {"type":"object","required":["scene_id"],"properties":{"scene_id":{"type":"string"},"shot_id":{"type":"string"},"entity_id":{"type":"string"}}},
+    "reason": {"type":"string","minLength":1},
+    "approved_by_policy": {"type":"boolean","const":true},
+    "expires_at": {"type":"string","format":"date-time"}
+  },
+  "constraints": [
+    "exceptions are never global by default",
+    "exceptions must be attached to a specific production scope",
+    "an exception cannot weaken structural schema or artifact integrity rules",
+    "expired exceptions are invalid"
+  ]
+}

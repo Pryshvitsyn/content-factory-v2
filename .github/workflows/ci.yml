@@ -6,9 +6,13 @@ on:
       - main
       - "release/**"
       - "develop/**"
+      - "feat/**"
   pull_request:
     branches:
       - main
+      - "release/**"
+      - "develop/**"
+      - "feat/**"
 
 jobs:
   validate:
@@ -45,6 +49,21 @@ jobs:
           node --check worker/factory-worker-v2.js
           node --check worker/v2.1-production-contract.js
           node --check worker/v2.1-execution-engine.js
+          node --check worker/v2.2-production-orchestrator.js
+          node --check worker/v2.2-stage-spec.js
+          node --check worker/v2.2-artifact-contract.js
+          node --check worker/v2.3-quality-engine.js
+          node --check worker/v2.4-production-brain.js
+          node --check worker/v2.4-production-brain-executor.js
+          node --check worker/v2.4-ai-production-brain.js
+          node --check worker/v2.5-research-intelligence.js
+          node --check worker/v2.5-research-collector.js
+          node --check worker/v2.5-evidence-reconciliation.js
+          node --check worker/v2.6-opportunity-intelligence.js
+          node --check worker/v2.6-portfolio-predictor.js
+          node --check worker/v2.6-production-feedback-loop.js
+          node --check worker/v2.7-ai-provider-router.js
+          node --check worker/v2.7-multi-brain-router.js
 
       - name: Run V2.1 execution foundation tests
         run: npm run test:v2.1
@@ -58,6 +77,57 @@ jobs:
           PGDATABASE: content_os
         run: node tests/v2.1-postgres-certification.js
 
+      - name: Run autonomous production contract certification
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: content_os
+        run: node tests/v2.1-production-contract-certification.js
+
+      - name: Run V2.2 production vertical slice certification
+        run: npm run test:v2.2
+
+      - name: Run V2.3 quality engine certification
+        run: node tests/v2.3-quality-engine-test.js
+
+      - name: Run V2.4 production brain certification
+        run: node tests/v2.4-production-brain-test.js
+
+      - name: Run V2.4 production brain executor certification
+        run: node tests/v2.4-production-brain-executor-test.js
+
+      - name: Run V2.4 AI production brain certification
+        run: node tests/v2.4-ai-production-brain-test.js
+
+      - name: Run V2.5 opportunity gate certification
+        run: node tests/v2.5-opportunity-gate-test.js
+
+      - name: Run V2.5 research intelligence certification
+        run: node tests/v2.5-research-intelligence-test.js
+
+      - name: Run V2.5 bounded research collector certification
+        run: node tests/v2.5-research-collector-test.js
+
+      - name: Run V2.5 evidence reconciliation certification
+        run: node tests/v2.5-evidence-reconciliation-test.js
+
+      - name: Run V2.6 opportunity intelligence certification
+        run: node tests/v2.6-opportunity-intelligence-test.js
+
+      - name: Run V2.6 portfolio and prediction certification
+        run: node tests/v2.6-portfolio-predictor-test.js
+
+      - name: Run V2.6 production feedback loop certification
+        run: node tests/v2.6-production-feedback-loop-test.js
+
+      - name: Run V2.7 AI provider router certification
+        run: node tests/v2.7-ai-provider-router-test.js
+
+      - name: Run V2.7 multi-brain routing certification
+        run: node tests/v2.7-multi-brain-router-test.js
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
 
@@ -70,8 +140,26 @@ jobs:
           test -s migrations/002_v2_1_execution.sql
           test -s migrations/003_v2_1_execution_contract_fix.sql
           test -s migrations/004_v2_1_retry_attempt_contract.sql
+          test -s migrations/002_content_production_contract.sql
           test -s tests/v2.1-database-contract.sql
           test -s tests/v2.1-postgres-certification.js
+          test -s tests/v2.1-production-contract-certification.js
+          test -s tests/v2.2-production-orchestrator-test.js
+          test -s tests/v2.2-stage-spec-test.js
+          test -s tests/v2.2-artifact-contract-test.js
+          test -s tests/v2.3-quality-engine-test.js
+          test -s tests/v2.4-production-brain-test.js
+          test -s tests/v2.4-production-brain-executor-test.js
+          test -s tests/v2.4-ai-production-brain-test.js
+          test -s tests/v2.5-opportunity-gate-test.js
+          test -s tests/v2.5-research-intelligence-test.js
+          test -s tests/v2.5-research-collector-test.js
+          test -s tests/v2.5-evidence-reconciliation-test.js
+          test -s tests/v2.6-opportunity-intelligence-test.js
+          test -s tests/v2.6-portfolio-predictor-test.js
+          test -s tests/v2.6-production-feedback-loop-test.js
+          test -s tests/v2.7-ai-provider-router-test.js
+          test -s tests/v2.7-multi-brain-router-test.js
 
       - name: Check required project files
         run: |

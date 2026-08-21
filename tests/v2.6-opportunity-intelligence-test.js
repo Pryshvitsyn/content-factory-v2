@@ -1,0 +1,14 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { evaluateOpportunity, decideAfterHuman } = require('../worker/v2.6-opportunity-intelligence');
+const base = { objective:'REVENUE', type:'TREND', potential:{demand:90,momentum:85,content_gap:80,audience_fit:88,monetization:92,platform_fit:86}, feasibility:{production_cost:80,complexity:25,asset_availability:90,time_to_publish:85}, confidence:90, risk:{policy:5,factual:10,brand:5} };
+const result = evaluateOpportunity(base);
+assert.equal(result.decision,'HUMAN_APPROVAL_REQUIRED');
+assert.ok(result.expected_value > 70);
+assert.equal(decideAfterHuman(result,'APPROVE'),'APPROVE');
+const risky = evaluateOpportunity({...base, risk:{policy:90,factual:10,brand:5}});
+assert.equal(risky.decision,'HOLD');
+const uncertain = evaluateOpportunity({...base, confidence:30});
+assert.equal(uncertain.decision,'HOLD');
+assert.throws(()=>decideAfterHuman(risky,'APPROVE'),/decision gate not open/);
+console.log('V2.6 opportunity intelligence certification: PASS');

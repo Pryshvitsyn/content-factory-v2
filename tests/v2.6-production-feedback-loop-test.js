@@ -1,0 +1,10 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { recordOutcome } = require('../worker/v2.6-production-feedback-loop');
+const prediction = { prediction_id:'p1', opportunity_id:'o1', predicted_metrics:{views:1000, retention:40} };
+const outcome = recordOutcome(prediction,{observed_at:'2026-08-21T09:00:00.000Z',metrics:{views:1250,retention:45}});
+assert.equal(outcome.calibration.status,'CALIBRATED');
+assert.equal(outcome.calibration.errors.views,250);
+assert.equal(outcome.calibration.errors.retention,5);
+assert.throws(()=>recordOutcome(prediction,{observed_at:'2026-08-21T09:00:00.000Z',metrics:{views:'bad'}}),/must be numeric/);
+console.log('V2.6 production feedback loop certification: PASS');
