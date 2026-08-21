@@ -27,22 +27,16 @@ BEGIN
 END $$;
 
 -- The worker's 19-stage production contract is the canonical execution order.
--- Keep the database representation aligned with it so PostgreSQL cannot drift
--- back to the historical 15-stage model.
+-- The sequence number is UNIQUE, so replace the old stage catalog atomically
+-- before inserting the canonical catalog; otherwise 15->19 remapping can
+-- collide on transient sequence numbers (e.g. old 4 and new 4).
+DELETE FROM v2_1.stage_definitions;
+
 INSERT INTO v2_1.stage_definitions(stage, sequence_no, terminal) VALUES
 ('SIGNAL',1,false),('IDEA',2,false),('BRIEF',3,false),('RESEARCH',4,false),
 ('BIBLE',5,false),('CONCEPT',6,false),('SCRIPT',7,false),('SHOT_PLAN',8,false),
 ('ASSET_PLAN',9,false),('ASSETS',10,false),('EDIT',11,false),('MASTER',12,false),
 ('OBJECTIVE_QA',13,false),('HUMAN_APPROVAL',14,false),('DELIVERY',15,false),
-('DELIVERY_QA',16,false),('PUBLISH',17,false),('ANALYZE',18,false),('LEARN',19,true)
-ON CONFLICT(stage) DO UPDATE
-SET sequence_no=EXCLUDED.sequence_no, terminal=EXCLUDED.terminal;
-
-DELETE FROM v2_1.stage_definitions
-WHERE stage NOT IN (
-  'SIGNAL','IDEA','BRIEF','RESEARCH','BIBLE','CONCEPT','SCRIPT','SHOT_PLAN',
-  'ASSET_PLAN','ASSETS','EDIT','MASTER','OBJECTIVE_QA','HUMAN_APPROVAL',
-  'DELIVERY','DELIVERY_QA','PUBLISH','ANALYZE','LEARN'
-);
+('DELIVERY_QA',16,false),('PUBLISH',17,false),('ANALYZE',18,false),('LEARN',19,true);
 
 COMMIT;
