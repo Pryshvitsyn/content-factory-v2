@@ -81,8 +81,6 @@ async function run() {
     const logicalArtifactId = 'pg-crash-signal-output';
     const logicalKey = `${job.id}:SIGNAL:${logicalArtifactId}`;
 
-    // Simulate provider success and durable artifact commit, then crash before
-    // completeStage. The job lease remains valid; only the stage lease expires.
     providerCalls += 1;
     const firstArtifact = await artifacts.createVersion({
       artifactId: logicalArtifactId,
@@ -102,6 +100,21 @@ async function run() {
     assert.equal(recovered.jobs_recovered, 0);
     assert.equal(recovered.jobs_failed, 0);
 
+    const recoveredJob = (await db.query(
+      `SELECT status, worker_id, lease_expires_at FROM v2_1.jobs WHERE id=$1`, [job.id]
+    )).rows[0];
+    assert.equal(recoveredJob.status, 'RETRYING');
+    assert.equal(recoveredJob.worker_id, null);
+    assert.equal(recoveredJob.lease_expires_at, null);
+
+    const reclaimedJob = await execution.claimJobForProduction(db, {
+      jobId: job.id,
+      productionId: production.id,
+      workerId: 'crash-worker-b',
+      leaseSeconds: TEST_LEASE_SECONDS,
+    });
+    assert.ok(reclaimedJob?.id, 'recovered job must be claimable by another worker');
+
     const second = await execution.claimNextStage(db, {
       jobId: job.id,
       workerId: 'crash-worker-b',
@@ -110,8 +123,6 @@ async function run() {
     assert.ok(second?.id, 'recovered retry stage must be claimable');
     assert.equal(second.attempt, 2);
 
-    // The artifact boundary is exactly-once/idempotent even though provider
-    // execution is currently at-least-once across a worker crash.
     providerCalls += 1;
     const retryArtifact = await artifacts.createVersion({
       artifactId: logicalArtifactId,
@@ -144,7 +155,7 @@ async function run() {
     const stored = await storage.get({ key: firstArtifact.storageKey });
     assert.equal(stored.toString('utf8'), 'stable-output');
 
-    console.log('V2.1 PostgreSQL crash recovery: durable retry + exactly-once artifact + at-least-once provider PASS');
+    console.log('V2.1 PostgreSQL crash recovery: durable retry + worker handoff + exactly-once artifact + at-least-once provider PASS');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE').catch(() => {});
     await db.query('DROP TABLE IF EXISTS generation_jobs').catch(() => {});
