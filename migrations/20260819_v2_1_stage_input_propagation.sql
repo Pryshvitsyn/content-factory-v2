@@ -3,6 +3,9 @@ BEGIN;
 -- V2.1 canonical stage-boundary fix:
 -- every newly claimed stage receives the completed output of the immediately
 -- preceding stage as its durable input_artifacts/input_fingerprint.
+-- The input fingerprint is a fingerprint of the INPUT ARTIFACT LIST itself.
+-- It must not reuse the previous stage's output fingerprint because that
+-- fingerprint includes the previous stage name/output payload.
 CREATE OR REPLACE FUNCTION v2_1.claim_stage(p_job_id uuid, p_worker_id text, p_lease_seconds integer)
 RETURNS SETOF v2_1.stage_runs LANGUAGE plpgsql AS $$
 DECLARE
@@ -68,13 +71,16 @@ BEGIN
   IF NOT FOUND THEN
     SELECT
       COALESCE(prev.output_artifacts, '[]'::jsonb),
-      prev.output_fingerprint
+      CASE
+        WHEN prev.output_artifacts IS NULL THEN NULL
+        ELSE encode(digest(prev.output_artifacts::text, 'sha256'), 'hex')
+      END
     INTO previous_outputs, previous_fingerprint
     FROM v2_1.stage_definitions current_stage
     LEFT JOIN v2_1.stage_definitions previous_stage
       ON previous_stage.sequence_no = current_stage.sequence_no - 1
     LEFT JOIN LATERAL (
-      SELECT s.output_artifacts, s.output_fingerprint
+      SELECT s.output_artifacts
       FROM v2_1.stage_runs s
       WHERE s.job_id=p_job_id
         AND s.stage=previous_stage.stage
