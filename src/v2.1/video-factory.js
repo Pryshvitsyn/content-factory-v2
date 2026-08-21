@@ -77,10 +77,11 @@ class VideoFactoryConfig {
 class VideoFactory {
   /**
    * @param {VideoFactoryConfig} config - Factory configuration
+   * @param {ProviderGateway} providerGateway - Optional provider gateway (for testing)
    */
-  constructor(config = new VideoFactoryConfig()) {
+  constructor(config = new VideoFactoryConfig(), providerGateway = null) {
     this.config = config;
-    this.providerGateway = new ProviderGateway();
+    this.providerGateway = providerGateway || new ProviderGateway();
     this.renderer = new FFmpegVideoRenderer(config.rendering);
     this.storage = new VideoStorage(config.storage);
     this.decisionLog = [];
