@@ -51,24 +51,34 @@ async function startProduction(db, {
 
   await db.query('BEGIN');
   try {
-    const existing = await db.query(
-      `SELECT id, current_revision_id, status FROM content_units
-        WHERE workspace_id = $1 AND content_key = $2`,
-      [workspaceId, contentKey]
-    );
-    if (existing.rowCount) {
-      await db.query('COMMIT');
-      return { reused: true, contentUnitId: existing.rows[0].id, revisionId: existing.rows[0].current_revision_id, status: existing.rows[0].status, idempotencyKey: key };
-    }
-
-    const content = (await db.query(
+    const inserted = await db.query(
       `INSERT INTO content_units
         (workspace_id, content_key, idea, audience, goal, constraints, metadata, status)
        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, 'planned')
+       ON CONFLICT (workspace_id, content_key) DO NOTHING
        RETURNING id, status`,
       [workspaceId, contentKey, idea.trim(), audience, goal, JSON.stringify(constraints), JSON.stringify(metadata)]
-    )).rows[0];
+    );
 
+    if (!inserted.rowCount) {
+      const existing = await db.query(
+        `SELECT id, current_revision_id, status FROM content_units
+          WHERE workspace_id = $1 AND content_key = $2
+          FOR UPDATE`,
+        [workspaceId, contentKey]
+      );
+      if (!existing.rowCount) throw new Error('Production idempotency conflict could not be resolved');
+      await db.query('COMMIT');
+      return {
+        reused: true,
+        contentUnitId: existing.rows[0].id,
+        revisionId: existing.rows[0].current_revision_id,
+        status: existing.rows[0].status,
+        idempotencyKey: key,
+      };
+    }
+
+    const content = inserted.rows[0];
     const revision = (await db.query(
       `INSERT INTO content_revisions
         (content_unit_id, revision_no, revision_type, status)
