@@ -109,6 +109,7 @@ jobs:
           node --check worker/v2.1-production-contract.js
           node --check worker/v2.1-execution-engine.js
           node --check worker/v2.1-stage-runner.js
+          node --check worker/v2.1-pipeline-executor.js
           node --check src/providers/provider-registry.js
           node --check src/providers/provider-gateway.js
           node --check src/artifacts/artifact-service.js
@@ -119,6 +120,7 @@ jobs:
           node --check tests/v2.1-provider-routing-test.js
           node --check tests/v2.1-provider-availability-test.js
           node --check tests/v2.1-single-stage-execution-certification.js
+          node --check tests/v2.1-pipeline-executor-test.js
           node --check tests/v2.1-stage-runner-integration-test.js
           node --check tests/v2.1-stage-runner-postgres-integration-test.js
           node --check tests/v2.1-multi-stage-integration-test.js
@@ -127,7 +129,7 @@ jobs:
           node --check tests/v2.1-concurrency-postgres-certification.js
           node --check tests/v2.1-validation-engine-test.js
           node --check tests/v2.1-publish-executor-test.js
-          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
+          node -e "require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
@@ -148,6 +150,10 @@ jobs:
 
       - name: Run single-stage execution certification
         run: npm run test:v2.1:single-stage
+        timeout-minutes: 2
+
+      - name: Run sequential pipeline executor certification
+        run: npm run test:v2.1:pipeline-executor
         timeout-minutes: 2
 
       - name: Run execution-stage-provider-storage integration
