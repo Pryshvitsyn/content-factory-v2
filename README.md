@@ -11,6 +11,7 @@ A controlled production architecture for AI-assisted content generation.
 - **Database:** PostgreSQL
 - **Runtime:** Node.js 22
 - **Stable branch:** `main`
+- **Repository:** Public development repository
 
 V2 replaces the legacy V1 execution model with explicit production state, deterministic stages, attempts, artifacts, validation, provider configuration, and persistent database contracts.
 
@@ -254,4 +255,4 @@ Use `.env.example` as the safe configuration template.
 
 ## License
 
-Private project.
+No open-source license has been selected yet. Public visibility does not grant permission to reuse or redistribute the code beyond rights granted by applicable law.
