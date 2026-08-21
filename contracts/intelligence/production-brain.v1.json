@@ -1,0 +1,24 @@
+{
+  "contract_version":"v2.4.0",
+  "name":"Production Brain Pipeline",
+  "purpose":"Transform a user idea into validated production planning artifacts before media generation.",
+  "stages":[
+    {"id":"INTENT","inputs":["IDEA"],"output":"INTENT"},
+    {"id":"RESEARCH","inputs":["IDEA","INTENT"],"output":"RESEARCH"},
+    {"id":"BIBLE","inputs":["IDEA","INTENT","RESEARCH"],"output":"CONTENT_BIBLE"},
+    {"id":"CONCEPT","inputs":["CONTENT_BIBLE"],"output":"CONCEPT"},
+    {"id":"SCRIPT","inputs":["CONTENT_BIBLE","CONCEPT"],"output":"SCRIPT"},
+    {"id":"SHOT_PLAN","inputs":["SCRIPT","CONTENT_BIBLE"],"output":"SHOT_PLAN"},
+    {"id":"ASSET_PLAN","inputs":["SHOT_PLAN","CONTENT_BIBLE"],"output":"ASSET_PLAN"}
+  ],
+  "execution_rules":[
+    "A stage cannot execute until every declared input artifact exists and validates.",
+    "Every output is versioned and fingerprinted.",
+    "A generated output must pass structural and semantic validation before becoming an input.",
+    "The generating model cannot approve its own output.",
+    "Failed stages may use bounded targeted repair; exhausted failures escalate to HUMAN_REVIEW.",
+    "Downstream stages cannot silently rewrite upstream truth; changes require a new artifact version."
+  ],
+  "human_gate":"before_master_lock",
+  "platform_independent":true
+}
