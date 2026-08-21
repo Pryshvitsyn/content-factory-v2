@@ -12,7 +12,7 @@ const {
   assertStageTransition,
 } = require('../worker/v2.1-production-contract');
 
-assert.equal(STAGE_ORDER.length, 15);
+assert.equal(STAGE_ORDER.length, 19);
 assert.equal(STAGE_ORDER[0], 'SIGNAL');
 assert.equal(TERMINAL_STAGE, 'LEARN');
 
