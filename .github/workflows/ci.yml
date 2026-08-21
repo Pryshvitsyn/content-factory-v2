@@ -51,6 +51,7 @@ jobs:
           node --check worker/v2.1-execution-engine.js
           node --check worker/v2.2-production-orchestrator.js
           node --check worker/v2.2-stage-spec.js
+          node --check worker/v2.2-artifact-contract.js
 
       - name: Run V2.1 execution foundation tests
         run: npm run test:v2.1
@@ -94,6 +95,7 @@ jobs:
           test -s tests/v2.1-production-contract-certification.js
           test -s tests/v2.2-production-orchestrator-test.js
           test -s tests/v2.2-stage-spec-test.js
+          test -s tests/v2.2-artifact-contract-test.js
 
       - name: Check required project files
         run: |
