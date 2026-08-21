@@ -11,6 +11,7 @@ const { FilesystemStorageAdapter } = require('../src/storage/storage-adapter');
 const { assertProviderResult } = require('../src/providers/provider-contract');
 const { StageRunner } = require('../worker/v2.1-stage-runner');
 const { STAGE_ORDER } = require('../worker/v2.1-production-contract');
+const { fingerprint } = require('../worker/v2.1-execution-engine');
 
 async function run() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'content-factory-v2.1-multi-stage-'));
@@ -72,6 +73,7 @@ async function run() {
 
     for (let index = 0; index < STAGE_ORDER.length; index += 1) {
       const stage = STAGE_ORDER[index];
+      const inputFingerprint = fingerprint(inputArtifacts);
       const result = await runner.run({
         client: {},
         workerId: 'multi-stage-worker',
@@ -80,6 +82,7 @@ async function run() {
           stage,
           attempt: 1,
           input_artifacts: inputArtifacts,
+          input_fingerprint: inputFingerprint,
         },
       });
 
@@ -97,7 +100,25 @@ async function run() {
     assert.equal(failed.length, 0);
     assert.equal(completed.at(-1).stageRunId, `stage-run-${STAGE_ORDER.length}`);
 
-    console.log(`V2.1 full multi-stage runtime (${STAGE_ORDER.length} stages): PASS`);
+    const beforeMismatchCalls = calls.length;
+    await assert.rejects(
+      runner.run({
+        client: {},
+        workerId: 'multi-stage-worker',
+        stageRun: {
+          id: 'stage-run-fingerprint-mismatch',
+          stage: STAGE_ORDER[0],
+          attempt: 1,
+          input_artifacts: inputArtifacts,
+          input_fingerprint: fingerprint(['tampered-input']),
+        },
+      }),
+      (error) => error.code === 'STAGE_INPUT_FINGERPRINT_MISMATCH'
+    );
+    assert.equal(calls.length, beforeMismatchCalls);
+    assert.equal(failed.at(-1).error.code, 'STAGE_INPUT_FINGERPRINT_MISMATCH');
+
+    console.log(`V2.1 full multi-stage runtime (${STAGE_ORDER.length} stages) + input integrity: PASS`);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
