@@ -1,6 +1,6 @@
 {
   "name": "content-factory-v2",
-  "version": "2.2.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Content Factory V2 production infrastructure",
   "main": "worker/factory-worker-v2.js",
