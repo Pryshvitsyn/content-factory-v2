@@ -6,6 +6,7 @@ const path = require('node:path');
 const tests = [
   'v2.2-stage-spec-test.js',
   'v2.2-production-orchestrator-test.js',
+  'v2.2-artifact-contract-test.js',
 ];
 
 for (const test of tests) {
