@@ -53,7 +53,7 @@ function createNvidiaVideoAdapter({
       if (inputReference) payload.input_reference = inputReference;
 
       try {
-        const response = await fetchImpl(`${baseURL.replace(/\\/$/, '')}/videos/generations`, {
+        const response = await fetchImpl(`${baseURL.replace(/\/$/, '')}/videos/generations`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,
