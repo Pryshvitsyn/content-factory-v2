@@ -12,6 +12,7 @@
     "test:v2.1:routing": "node tests/v2.1-provider-routing-test.js",
     "test:v2.1:model-routing": "node tests/v2.1-nvidia-model-capability-router-test.js",
     "test:v2.1:capability-contract": "node tests/v2.1-capability-contract-test.js",
+    "test:v2.1:nvidia-media-adapter": "node tests/v2.1-nvidia-media-adapter-test.js",
     "test:v2.1:reconciliation": "node tests/v2.1-reconciliation-test.js",
     "test:v2.1:reconciliation:worker": "node tests/v2.1-reconciliation-worker-test.js",
     "test:v2.1:availability": "node tests/v2.1-provider-availability-test.js",

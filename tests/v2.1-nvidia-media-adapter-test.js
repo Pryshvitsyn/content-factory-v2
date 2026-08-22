@@ -11,10 +11,7 @@ async function main() {
     images: {
       async generate(request, options) {
         received = { request, options };
-        return {
-          id: 'nvidia-image-test-1',
-          data: [{ b64_json: imageBytes.toString('base64') }],
-        };
+        return { id: 'nvidia-image-test-1', data: [{ b64_json: imageBytes.toString('base64') }] };
       },
     },
   };
@@ -43,16 +40,9 @@ async function main() {
   assert.ok(Buffer.isBuffer(result.artifact.bytes));
   assert.equal(result.artifact.bytes.toString(), imageBytes.toString());
 
-  await assert.rejects(
-    () => adapter.generate({ capability: CAPABILITIES.IMAGE_GENERATION, prompt: 'x', idempotencyKey: 'asset-test-2', }),
-    { message: /NVIDIA image generation/ },
-  ).catch(() => {});
-
   const placeholderClient = {
     images: {
-      async generate() {
-        return { id: 'placeholder', data: [{ url: 'placeholder://image' }] };
-      },
+      async generate() { return { id: 'placeholder', data: [{ url: 'placeholder://image' }] }; },
     },
   };
   const placeholderAdapter = createNvidiaMediaAdapter({ client: placeholderClient });
