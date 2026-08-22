@@ -261,6 +261,19 @@ npm run test:v2.1
 
 CI also verifies runtime syntax, provider routing, artifact/storage integration, multi-stage execution, PostgreSQL lifecycle, retries and recovery, concurrency ownership, lease fencing, artifact idempotency, crash recovery, reconciliation, validation, publication, structured production planning, and asset orchestration.
 
+## V2.3 Control Dashboard
+
+The local Control Dashboard exposes persisted brand, production, stage, artifact, review and provider state through a thin Node API and five-screen React interface. Exact immutable master versions can be approved or rejected without publishing them.
+
+After applying the V2.3 review migration to a development database:
+
+```bash
+npm install
+npm run dashboard
+```
+
+Open `http://localhost:3000`. The API binds to `127.0.0.1:3001` by default. See [`docs/V2.3-CONTROL-DASHBOARD.md`](docs/V2.3-CONTROL-DASHBOARD.md).
+
 ## Environment
 
 Create a local `.env` from `.env.example`.
@@ -277,6 +290,7 @@ Never commit `.env`, API keys, database passwords, credentials, or generated sec
 ```text
 content-factory-v2/
 ├── .github/workflows/       # CI
+├── apps/dashboard/          # V2.3 browser UI and local Control API
 ├── docs/                    # architecture and contract documents
 ├── migrations/              # versioned PostgreSQL changes
 ├── src/                     # provider, artifact, storage and validation services

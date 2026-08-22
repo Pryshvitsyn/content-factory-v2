@@ -38,6 +38,7 @@ async function main() {
 
   const generated = [];
   const artifactCalls = [];
+  const reviewCalls = [];
   const orchestrator = new MasterProductionOrchestrator({
     providerGateway: {
       async generate(request) {
@@ -67,8 +68,11 @@ async function main() {
     artifactService: {
       async createVersion(args) {
         artifactCalls.push(args);
-        return { artifactId: args.artifactId, version: 1, storageKey: 'masters/production-1/v1.bin' };
+        return { artifactId: args.artifactId, version: 1, storageKey: 'masters/production-1/v1.bin', contentHash: 'certified-content-hash' };
       },
+    },
+    reviewService: {
+      async registerMasterForReview(args) { reviewCalls.push(args); },
     },
   });
 
@@ -88,6 +92,9 @@ async function main() {
   const masterArtifact = artifactCalls.find((call) => call.artifactId === 'production:production-1:master');
   assert.equal(masterArtifact.validationStatus, 'awaiting_human_approval');
   assert.match(masterArtifact.idempotencyKey, /^brand-1:production-1:master:/);
+  assert.equal(reviewCalls.length, 1);
+  assert.equal(reviewCalls[0].master.artifact.contentHash, 'certified-content-hash');
+  assert.equal(reviewCalls[0].quality.publicationAllowed, false);
 
   await assert.rejects(
     () => orchestrator.build({ productionId: 'production-1', brandId: 'brand-2', workerId: 'worker-1', script, shotPlan, assetPlan }),

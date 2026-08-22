@@ -167,13 +167,14 @@ function validateMasterQuality({ script, shotPlan, assetPlan, timeline, probe, p
 }
 
 class MasterProductionOrchestrator {
-  constructor({ providerGateway, artifactService, renderer } = {}) {
+  constructor({ providerGateway, artifactService, renderer, reviewService = null } = {}) {
     requireValue('providerGateway', providerGateway);
     requireValue('artifactService', artifactService);
     requireValue('renderer', renderer);
     this.providerGateway = providerGateway;
     this.artifactService = artifactService;
     this.renderer = renderer;
+    this.reviewService = reviewService;
   }
 
   async build({ productionId, brandId, workerId, script, shotPlan, assetPlan, resolvedMedia = [], qualityPolicy = {} } = {}) {
@@ -299,7 +300,7 @@ class MasterProductionOrchestrator {
       validationStatus: quality.status === 'PASS' ? 'awaiting_human_approval' : 'failed',
     });
 
-    return Object.freeze({
+    const result = Object.freeze({
       productionId,
       brandId,
       fingerprint,
@@ -309,6 +310,17 @@ class MasterProductionOrchestrator {
       quality,
       nextAction: quality.readyForHumanReview ? 'HUMAN_REVIEW' : 'REVISE',
     });
+    if (quality.readyForHumanReview && this.reviewService) {
+      await this.reviewService.registerMasterForReview({
+        productionId,
+        brandId,
+        master: result.master,
+        script,
+        quality,
+        mediaResults,
+      });
+    }
+    return result;
   }
 }
 

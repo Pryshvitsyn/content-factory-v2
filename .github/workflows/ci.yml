@@ -5,10 +5,14 @@ on:
   push:
     branches:
       - main
+      - "feat/v2.3-control-dashboard"
       - "release/**"
       - "develop/**"
     paths:
       - "src/**"
+      - "apps/**"
+      - "scripts/**"
+      - "docs/V2.3-CONTROL-DASHBOARD.md"
       - "worker/**"
       - "tests/**"
       - "migrations/**"
@@ -22,6 +26,9 @@ on:
       - main
     paths:
       - "src/**"
+      - "apps/**"
+      - "scripts/**"
+      - "docs/V2.3-CONTROL-DASHBOARD.md"
       - "worker/**"
       - "tests/**"
       - "migrations/**"
@@ -139,6 +146,13 @@ jobs:
           node --check src/v2.1/reconciliation.js
           node --check src/v2.1/validation-engine.js
           node --check src/v2.1/publish-executor.js
+          node --check src/v2.3/control-review-service.js
+          node --check apps/dashboard/server/control-repository.js
+          node --check apps/dashboard/server/control-service.js
+          node --check apps/dashboard/server/http-server.js
+          node --check apps/dashboard/server/provider-status.js
+          node --check apps/dashboard/server/index.js
+          node --check scripts/dashboard-dev.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -263,6 +277,22 @@ jobs:
         run: npm run test:v2.1:replicate-master
         timeout-minutes: 2
 
+      - name: Build V2.3 dashboard client
+        run: npm run dashboard:build
+        timeout-minutes: 3
+      - name: Run V2.3 Control API and review contracts
+        run: npm run test:v2.3:control
+        timeout-minutes: 3
+      - name: Run V2.3 dashboard client tests
+        run: npm run test:v2.3:client
+        timeout-minutes: 3
+      - name: Run V2.3 PostgreSQL exact-master review certification
+        run: npm run test:v2.3:review:postgres
+        timeout-minutes: 3
+      - name: Verify V2.2 growth contracts
+        run: npm run test:v2.2:growth-foundation
+        timeout-minutes: 2
+
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
         timeout-minutes: 2
@@ -279,6 +309,7 @@ jobs:
           test -s migrations/20260820_v2_1_publication_execution.sql
           test -s migrations/20260821_v2_1_stage_claim_job_lease_fencing.sql
           test -s migrations/20260821_v2_1_asset_registry.sql
+          test -s migrations/20260823_v2_3_control_reviews.sql
         timeout-minutes: 2
       - name: Check required project files
         run: |
