@@ -57,6 +57,7 @@ class VideoRenderer {
     
     const args = [
       '-y',
+      '-nostdin',
       '-loop', '1',
       '-i', imagePath,
       '-i', audioPath,
