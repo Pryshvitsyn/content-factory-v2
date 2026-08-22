@@ -1,5 +1,7 @@
 'use strict';
 
+const { CAPABILITIES, normalizeCapability } = require('./capability-contract');
+
 class ProviderRegistry {
   constructor({ providers = {}, priorities = {}, routing = {} } = {}) {
     this.providers = new Map(Object.entries(providers));
@@ -53,33 +55,35 @@ class ProviderRegistry {
     return this.getStatus();
   }
 
-  candidates({ capability = 'text-generation', model } = {}) {
+  candidates({ capability = CAPABILITIES.TEXT_GENERATION, model } = {}) {
+    const canonicalCapability = normalizeCapability(capability);
     return [...this.providers.entries()]
       .filter(([name]) => this.getAvailability(name) === 'available')
-      .filter(([, adapter]) => typeof adapter.supports !== 'function' || adapter.supports({ capability, model }))
+      .filter(([, adapter]) => typeof adapter.supports !== 'function' || adapter.supports({ capability: canonicalCapability, model }))
       .map(([name, adapter]) => ({ provider: name, model: model || adapter.model || null, priority: this.priorities.get(name) ?? 100 }))
       .sort((a, b) => a.priority - b.priority || a.provider.localeCompare(b.provider));
   }
 
-  select({ capability = 'text-generation', provider, model, routeKey = capability } = {}) {
+  select({ capability = CAPABILITIES.TEXT_GENERATION, provider, model, routeKey = capability } = {}) {
+    const canonicalCapability = normalizeCapability(capability);
     if (provider) {
       const adapter = this.get(provider);
       if (this.getAvailability(provider) !== 'available') throw new Error(`Provider '${provider}' is not available`);
-      if (typeof adapter.supports === 'function' && !adapter.supports({ capability, model })) throw new Error(`Provider '${provider}' does not support capability '${capability}'`);
-      return { provider, model: model || adapter.model || null, selectionReason: 'explicit-provider' };
+      if (typeof adapter.supports === 'function' && !adapter.supports({ capability: canonicalCapability, model })) throw new Error(`Provider '${provider}' does not support capability '${canonicalCapability}'`);
+      return { provider, model: model || adapter.model || null, selectionReason: 'explicit-provider', capability: canonicalCapability };
     }
-    const candidates = this.candidates({ capability, model });
-    if (!candidates.length) throw new Error(`No available provider supports capability '${capability}'`);
-    if (candidates.length === 1) return { provider: candidates[0].provider, model: candidates[0].model, selectionReason: 'single-available-provider' };
-    if (this.routing.strategy === 'priority') return { provider: candidates[0].provider, model: candidates[0].model, selectionReason: 'priority' };
+    const candidates = this.candidates({ capability: canonicalCapability, model });
+    if (!candidates.length) throw new Error(`No available provider supports capability '${canonicalCapability}'`);
+    if (candidates.length === 1) return { provider: candidates[0].provider, model: candidates[0].model, selectionReason: 'single-available-provider', capability: canonicalCapability };
+    if (this.routing.strategy === 'priority') return { provider: candidates[0].provider, model: candidates[0].model, selectionReason: 'priority', capability: canonicalCapability };
     const cursor = this.cursors.get(routeKey) || 0;
     const selected = candidates[cursor % candidates.length];
     this.cursors.set(routeKey, (cursor + 1) % candidates.length);
-    return { provider: selected.provider, model: selected.model, selectionReason: 'round-robin' };
+    return { provider: selected.provider, model: selected.model, selectionReason: 'round-robin', capability: canonicalCapability };
   }
 
-  getFallbacks({ capability = 'text-generation', model, excludeProvider } = {}) {
-    return this.candidates({ capability, model }).filter(({ provider }) => provider !== excludeProvider);
+  getFallbacks({ capability = CAPABILITIES.TEXT_GENERATION, model, excludeProvider } = {}) {
+    return this.candidates({ capability: normalizeCapability(capability), model }).filter(({ provider }) => provider !== excludeProvider);
   }
 }
 
