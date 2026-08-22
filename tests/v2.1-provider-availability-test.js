@@ -7,7 +7,7 @@ function provider(name, healthy = true) {
   return {
     provider: name,
     model: `${name}/test`,
-    supports({ capability }) { return capability === 'text-generation'; },
+    supports({ capability }) { return capability === 'text_generation'; },
     async healthCheck() { return healthy; },
     async generate({ prompt }) { return { provider: name, model: `${name}/test`, output: `${name}:${prompt}` }; },
   };
@@ -16,7 +16,7 @@ function provider(name, healthy = true) {
 async function run() {
   const single = new ProviderGateway({ providers: { nvidia: provider('nvidia') } });
   assert.deepEqual(await single.registry.refreshAvailability(), [{ provider: 'nvidia', status: 'available' }]);
-  assert.deepEqual(single.select({ capability: 'text-generation' }), {
+  assert.deepEqual(single.select({ capability: 'text_generation' }), {
     provider: 'nvidia', model: 'nvidia/test', selectionReason: 'single-available-provider',
   });
 
@@ -25,13 +25,13 @@ async function run() {
     { provider: 'nvidia', status: 'available' },
     { provider: 'openai', status: 'unavailable' },
   ]);
-  assert.equal(mixed.select({ capability: 'text-generation' }).provider, 'nvidia');
+  assert.equal(mixed.select({ capability: 'text_generation' }).provider, 'nvidia');
 
   mixed.registry.setAvailability('nvidia', 'unavailable');
-  assert.throws(() => mixed.select({ capability: 'text-generation' }), /No available provider/);
+  assert.throws(() => mixed.select({ capability: 'text_generation' }), /No available provider/);
 
   mixed.registry.setAvailability('openai', 'available');
-  assert.equal(mixed.select({ capability: 'text-generation' }).provider, 'openai');
+  assert.equal(mixed.select({ capability: 'text_generation' }).provider, 'openai');
 
   const explicit = new ProviderGateway({ providers: { nvidia: provider('nvidia', false), openai: provider('openai') } });
   await explicit.registry.refreshAvailability();
