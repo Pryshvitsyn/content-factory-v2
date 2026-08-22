@@ -17,7 +17,7 @@ async function run() {
   const single = new ProviderGateway({ providers: { nvidia: provider('nvidia') } });
   assert.deepEqual(await single.registry.refreshAvailability(), [{ provider: 'nvidia', status: 'available' }]);
   assert.deepEqual(single.select({ capability: 'text_generation' }), {
-    provider: 'nvidia', model: 'nvidia/test', selectionReason: 'single-available-provider',
+    provider: 'nvidia', model: 'nvidia/test', capability: 'text_generation', selectionReason: 'single-available-provider',
   });
 
   const mixed = new ProviderGateway({ providers: { nvidia: provider('nvidia'), openai: provider('openai', false) } });
