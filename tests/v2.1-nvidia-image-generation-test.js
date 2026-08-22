@@ -31,18 +31,20 @@ async function main() {
     prompt: 'A cinematic sunrise over Rome',
     metadata: { productionId: 'prod-1', assetId: 'asset-1' },
     idempotencyKey: 'prod-1:media:asset-1',
+    seed: 42,
   });
 
   assert.equal(request.url, 'https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b');
   assert.equal(request.options.method, 'POST');
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   assert.equal(request.options.headers['Content-Type'], 'application/json');
+  assert.equal(request.options.headers['Idempotency-Key'], 'prod-1:media:asset-1');
 
   const body = JSON.parse(request.options.body);
   assert.equal(body.prompt, 'A cinematic sunrise over Rome');
   assert.equal(body.mode, 'Image Generation');
   assert.equal(body.samples, 1);
-  assert.ok(body.seed >= 0);
+  assert.equal(body.seed, 42);
 
   assert.ok(Buffer.isBuffer(result.output));
   assert.equal(result.output.toString(), 'real-image-bytes');
@@ -51,8 +53,12 @@ async function main() {
   assert.equal(result.model, 'black-forest-labs/flux.2-klein-4b');
   assert.equal(result.requestId, 'imgreq-1');
 
+  const emptyAdapter = createNvidiaAdapter({
+    apiKey: 'test-key',
+    imageFetch: async () => ({ ok: true, status: 200, async json() { return { artifacts: [] }; } }),
+  });
   await assert.rejects(
-    () => adapter.generate({ capability: 'image-generation', prompt: 'x', imageFetch: async () => ({ ok: true, json: async () => ({ artifacts: [] }) }) }),
+    () => emptyAdapter.generate({ capability: 'image-generation', prompt: 'x' }),
     /NVIDIA image generation returned no image artifact/
   );
 
