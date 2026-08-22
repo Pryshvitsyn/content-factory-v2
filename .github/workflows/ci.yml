@@ -108,6 +108,9 @@ jobs:
 
       - name: Check V2.1 runtime contracts
         run: |
+          node --check src/providers/provider-contract.js
+          node --check src/providers/provider-registry.js
+          node --check src/providers/provider-gateway.js
           node --check worker/v2.1-production-contract.js
           node --check worker/v2.1-production-orchestrator.js
           node --check worker/v2.1-structured-production.js
@@ -117,14 +120,13 @@ jobs:
           node --check worker/v2.1-stage-runner.js
           node --check worker/v2.1-pipeline-executor.js
           node --check worker/v2.1-recovery-executor.js
-          node --check src/providers/provider-registry.js
-          node --check src/providers/provider-gateway.js
           node --check src/artifacts/artifact-service.js
           node --check src/storage/storage-adapter.js
           node --check src/v2.1/asset-repository.js
           node --check src/v2.1/reconciliation.js
           node --check src/v2.1/validation-engine.js
           node --check src/v2.1/publish-executor.js
+          node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
           node --check tests/v2.1-provider-routing-test.js
@@ -148,7 +150,11 @@ jobs:
           node --check tests/v2.1-asset-orchestrator-test.js
           node --check tests/v2.1-asset-repository-test.js
           node --check tests/v2.1-media-generation-test.js
-          node -e "require('./worker/v2.1-production-orchestrator'); require('./worker/v2.1-structured-production'); require('./worker/v2.1-asset-orchestrator'); require('./worker/v2.1-media-generation'); require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./worker/v2.1-recovery-executor'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/artifacts/artifact-service'); require('./src/v2.1/asset-repository'); require('./src/v2.1/reconciliation'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
+          node -e "require('./src/providers/provider-contract'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./worker/v2.1-production-orchestrator'); require('./worker/v2.1-structured-production'); require('./worker/v2.1-asset-orchestrator'); require('./worker/v2.1-media-generation'); require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./worker/v2.1-recovery-executor'); require('./src/artifacts/artifact-service'); require('./src/v2.1/asset-repository'); require('./src/v2.1/reconciliation'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
+        timeout-minutes: 2
+
+      - name: Run provider-neutral generation contract certification
+        run: npm run test:v2.1:provider-contract
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
