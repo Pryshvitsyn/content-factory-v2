@@ -1,5 +1,25 @@
 'use strict';
 
+const CAPABILITY_ALIASES = new Map([
+  ['text-generation', 'text-generation'],
+  ['text_generation', 'text-generation'],
+  ['text generation', 'text-generation'],
+  ['image-generation', 'image-generation'],
+  ['image_generation', 'image-generation'],
+  ['image generation', 'image-generation'],
+  ['video-generation', 'video-generation'],
+  ['video_generation', 'video-generation'],
+  ['video generation', 'video-generation'],
+  ['audio-generation', 'audio-generation'],
+  ['audio_generation', 'audio-generation'],
+  ['audio generation', 'audio-generation'],
+]);
+
+function normalizeCapability(capability = 'text-generation') {
+  const value = String(capability).trim().toLowerCase();
+  return CAPABILITY_ALIASES.get(value) || value.replace(/_/g, '-').replace(/\s+/g, '-');
+}
+
 class ProviderRegistry {
   constructor({ providers = {}, priorities = {}, routing = {} } = {}) {
     this.providers = new Map(Object.entries(providers));
@@ -60,31 +80,34 @@ class ProviderRegistry {
   }
 
   candidates({ capability = 'text-generation', model } = {}) {
+    const normalizedCapability = normalizeCapability(capability);
     return [...this.providers.entries()]
       .filter(([name]) => this.getAvailability(name) === 'available')
-      .filter(([, adapter]) => typeof adapter.supports !== 'function' || adapter.supports({ capability, model }))
+      .filter(([, adapter]) => typeof adapter.supports !== 'function' || adapter.supports({ capability: normalizedCapability, model }))
       .map(([name, adapter]) => ({
         provider: name,
-        model: this.resolveModel(adapter, { capability, model }),
+        model: this.resolveModel(adapter, { capability: normalizedCapability, model }),
         priority: this.priorities.get(name) ?? 100,
       }))
       .sort((a, b) => a.priority - b.priority || a.provider.localeCompare(b.provider));
   }
 
-  select({ capability = 'text-generation', provider, model, routeKey = capability } = {}) {
+  select({ capability = 'text-generation', provider, model, routeKey } = {}) {
+    const normalizedCapability = normalizeCapability(capability);
+    const effectiveRouteKey = routeKey || normalizedCapability;
     if (provider) {
       const adapter = this.get(provider);
       if (this.getAvailability(provider) !== 'available') throw new Error(`Provider '${provider}' is not available`);
-      if (typeof adapter.supports === 'function' && !adapter.supports({ capability, model })) throw new Error(`Provider '${provider}' does not support capability '${capability}'`);
-      return { provider, model: this.resolveModel(adapter, { capability, model }), selectionReason: 'explicit-provider' };
+      if (typeof adapter.supports === 'function' && !adapter.supports({ capability: normalizedCapability, model })) throw new Error(`Provider '${provider}' does not support capability '${normalizedCapability}'`);
+      return { provider, model: this.resolveModel(adapter, { capability: normalizedCapability, model }), selectionReason: 'explicit-provider' };
     }
-    const candidates = this.candidates({ capability, model });
-    if (!candidates.length) throw new Error(`No available provider supports capability '${capability}'`);
+    const candidates = this.candidates({ capability: normalizedCapability, model });
+    if (!candidates.length) throw new Error(`No available provider supports capability '${normalizedCapability}'`);
     if (candidates.length === 1) return { provider: candidates[0].provider, model: candidates[0].model, selectionReason: 'single-available-provider' };
     if (this.routing.strategy === 'priority') return { provider: candidates[0].provider, model: candidates[0].model, selectionReason: 'priority' };
-    const cursor = this.cursors.get(routeKey) || 0;
+    const cursor = this.cursors.get(effectiveRouteKey) || 0;
     const selected = candidates[cursor % candidates.length];
-    this.cursors.set(routeKey, (cursor + 1) % candidates.length);
+    this.cursors.set(effectiveRouteKey, (cursor + 1) % candidates.length);
     return { provider: selected.provider, model: selected.model, selectionReason: 'round-robin' };
   }
 
@@ -93,4 +116,4 @@ class ProviderRegistry {
   }
 }
 
-module.exports = { ProviderRegistry };
+module.exports = { ProviderRegistry, normalizeCapability };
