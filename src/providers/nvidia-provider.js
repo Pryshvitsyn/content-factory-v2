@@ -11,13 +11,15 @@ function createNvidiaProvider(options = {}) {
     provider: 'nvidia',
     model: textAdapter.model,
 
+    modelFor({ capability } = {}) {
+      if (capability === 'video-generation') return videoAdapter.model;
+      if (capability === 'text-generation') return textAdapter.model;
+      return null;
+    },
+
     supports({ capability, model } = {}) {
-      if (capability === 'text-generation') {
-        return !model || model === textAdapter.model;
-      }
-      if (capability === 'video-generation') {
-        return videoAdapter.supports({ capability, model });
-      }
+      if (capability === 'text-generation') return !model || model === textAdapter.model;
+      if (capability === 'video-generation') return videoAdapter.supports({ capability, model });
       return false;
     },
 
