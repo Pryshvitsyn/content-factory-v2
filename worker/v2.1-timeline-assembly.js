@@ -39,8 +39,11 @@ function buildTimeline({ productionId, clips, fps = 30 } = {}) {
   if (!Array.isArray(clips) || clips.length === 0) throw new Error('clips are required');
   if (!Number.isInteger(fps) || fps <= 0) throw new Error('fps must be a positive integer');
 
-  const normalized = clips.map(normalizeClip).sort((a, b) => a.startMs - b.startMs || a.track.localeCompare(b.track) || a.id.localeCompare(b.id));
-  const tracks = [...new Set(normalized.map((clip) => clip.track))];
+  const normalizedInput = clips.map(normalizeClip);
+  // Track order is part of the declared production layout. Keep first-declared order
+  // rather than deriving it from a lexical clip sort, so timeline serialization is stable.
+  const tracks = [...new Set(normalizedInput.map((clip) => clip.track))];
+  const normalized = normalizedInput.slice().sort((a, b) => a.startMs - b.startMs || a.track.localeCompare(b.track) || a.id.localeCompare(b.id));
   for (const track of tracks) assertNoOverlap(normalized, track);
 
   const durationMs = Math.max(...normalized.map((clip) => clip.endMs));
