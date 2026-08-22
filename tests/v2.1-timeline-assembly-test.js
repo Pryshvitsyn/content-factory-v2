@@ -31,7 +31,7 @@ function main() {
 
   assert.equal(timeline.durationMs, 5000);
   assert.deepEqual(timeline.tracks, ['video-main', 'voice-main', 'music-main']);
-  assert.equal(timeline.clips[0].endMs, 3000);
+  assert.equal(timeline.clips.find((clip) => clip.id === 'shot-1-video').endMs, 3000);
 
   const assembled = assembleMedia({
     timeline,
