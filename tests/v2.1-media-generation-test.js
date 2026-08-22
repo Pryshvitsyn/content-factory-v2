@@ -30,12 +30,14 @@ async function main() {
     response: {
       mediaUrl: 'https://example.invalid/video.mp4',
       contentType: 'video/mp4',
+      temporal: { startMs: 1200, endMs: 6200, durationMs: 5000 },
       provenance: { provider: 'test-video', model: 'test-video-model' },
     },
   });
   assert.equal(remote.mediaUrl, 'https://example.invalid/video.mp4');
   assert.equal(remote.contentType, 'video/mp4');
   assert.equal(remote.bytes, null);
+  assert.deepEqual(remote.temporal, { startMs: 1200, endMs: 6200, durationMs: 5000, offsetMs: 0 });
 
   const calls = [];
   const result = await generateMediaAsset({
@@ -46,6 +48,7 @@ async function main() {
       kind: 'voice',
       description: 'Italian voiceover',
       source_preference: 'generate',
+      temporal: { startMs: 1200, endMs: 4200, durationMs: 3000 },
       generation_requirements: { language: 'it' },
       required_for_shots: ['shot-1'],
     },
@@ -65,9 +68,11 @@ async function main() {
   assert.equal(result.kind, 'voice');
   assert.equal(result.contentType, 'audio/mpeg');
   assert.equal(result.provider, 'test-voice');
+  assert.deepEqual(result.temporal, { startMs: 1200, endMs: 4200, durationMs: 3000, offsetMs: 0 });
   assert.equal(calls[0].capability, 'speech-generation');
   assert.equal(calls[0].idempotencyKey, 'prod-1:media:voice-1');
   assert.equal(calls[0].metadata.assetKind, 'voice');
+  assert.match(calls[0].prompt, /"startMs":1200/);
 
   assert.throws(
     () => normalizeMediaResult({ asset: { asset_id: 'bad', kind: 'image' }, response: { output: Buffer.from('x') } }),
@@ -76,6 +81,20 @@ async function main() {
   assert.throws(
     () => normalizeMediaResult({ asset: { asset_id: 'bad', kind: 'image' }, response: { contentType: 'image/png' } }),
     /neither bytes nor URL/,
+  );
+  assert.throws(
+    () => normalizeMediaResult({
+      asset: { asset_id: 'bad-time', kind: 'video' },
+      response: { mediaUrl: 'https://example.invalid/video.mp4', contentType: 'video/mp4', temporal: { startMs: 500, endMs: 100 } },
+    }),
+    /Invalid temporal boundaries/,
+  );
+  assert.throws(
+    () => normalizeMediaResult({
+      asset: { asset_id: 'bad-duration', kind: 'audio' },
+      response: { output: Buffer.from('x'), contentType: 'audio/mpeg', temporal: { startMs: 0, endMs: 1000, durationMs: 900 } },
+    }),
+    /Temporal duration mismatch/,
   );
 
   console.log('v2.1 media generation certification passed');
