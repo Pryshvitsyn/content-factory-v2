@@ -12,6 +12,7 @@
     "test:v2.1:integration": "node tests/v2.1-provider-artifact-integration-test.js",
     "test:v2.1:routing": "node tests/v2.1-provider-routing-test.js",
     "test:v2.1:provider-capability-alias": "node tests/v2.1-provider-capability-alias-test.js",
+    "test:v2.1:provider-capability-matrix": "node tests/v2.1-provider-capability-matrix-test.js",
     "test:v2.1:reconciliation": "node tests/v2.1-reconciliation-test.js",
     "test:v2.1:reconciliation:worker": "node tests/v2.1-reconciliation-worker-test.js",
     "test:v2.1:availability": "node tests/v2.1-provider-availability-test.js",
