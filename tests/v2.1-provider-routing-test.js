@@ -7,7 +7,7 @@ function provider(name, model, { fail = false } = {}) {
   return {
     provider: name,
     model,
-    supports({ capability }) { return capability === 'text-generation'; },
+    supports({ capability }) { return capability === 'text_generation'; },
     async generate({ prompt }) {
       if (fail) throw new Error(`${name} unavailable`);
       return { provider: name, model, output: `${name}:${prompt}` };
@@ -17,11 +17,11 @@ function provider(name, model, { fail = false } = {}) {
 
 async function run() {
   const single = new ProviderGateway({ providers: { nvidia: provider('nvidia', 'nvidia/test') } });
-  const singleSelection = single.select({ capability: 'text-generation' });
+  const singleSelection = single.select({ capability: 'text_generation' });
   assert.equal(singleSelection.provider, 'nvidia');
   assert.equal(singleSelection.selectionReason, 'single-available-provider');
 
-  const singleResult = await single.generate({ prompt: 'one' });
+  const singleResult = await single.generate({ capability: 'text_generation', prompt: 'one' });
   assert.equal(singleResult.provider, 'nvidia');
   assert.deepEqual(singleResult.provenance.attemptedProviders, ['nvidia']);
 
@@ -33,8 +33,8 @@ async function run() {
     priorities: { nvidia: 10, openai: 20 },
   });
 
-  const first = multi.select({ capability: 'text-generation', routeKey: 'creative' });
-  const second = multi.select({ capability: 'text-generation', routeKey: 'creative' });
+  const first = multi.select({ capability: 'text_generation', routeKey: 'creative' });
+  const second = multi.select({ capability: 'text_generation', routeKey: 'creative' });
   assert.notEqual(first.provider, second.provider);
   assert.equal(first.selectionReason, 'round-robin');
   assert.equal(second.selectionReason, 'round-robin');
@@ -47,7 +47,7 @@ async function run() {
     priorities: { nvidia: 10, openai: 20 },
     routing: { strategy: 'priority', fallbackOnError: true },
   });
-  const recovered = await failover.generate({ prompt: 'recover', routeKey: 'recovery' });
+  const recovered = await failover.generate({ capability: 'text_generation', prompt: 'recover', routeKey: 'recovery' });
   assert.equal(recovered.provider, 'openai');
   assert.equal(recovered.provenance.selectionReason, 'fallback');
   assert.deepEqual(recovered.provenance.attemptedProviders, ['nvidia', 'openai']);
