@@ -88,9 +88,9 @@ function toJsonArtifact({ stage, value, stageRun, response }) {
 function buildStructuredPrompt({ stage, production, inputContents }) {
   const previous = inputContents.length ? `\nAuthoritative previous outputs:\n${inputContents.map((value, index) => `--- ${index + 1} ---\n${value}`).join('\n')}` : '';
   const instructions = {
-    SCRIPT: 'Return JSON only. Produce {title, scenes[]}. Each scene must include scene_number, visual, duration_seconds, and dialogue_or_voiceover.',
+    SCRIPT: 'Return JSON only. Produce {title, hook, cta, scenes[]}. hook must earn attention immediately; cta must state the intended next action. Each scene must include scene_number, visual, duration_seconds, and dialogue_or_voiceover.',
     SHOT_PLAN: 'Return JSON only. Produce {shots[], continuity}. Each shot must include shot_id, scene_id, duration_seconds, framing, camera, subject, action, required_assets. continuity must define characters, locations, products, wardrobe, props and visual_style constraints.',
-    ASSET_PLAN: 'Return JSON only. Produce {assets[]}. Each asset must include asset_id, kind, description, source_preference, generation_requirements, and required_for_shots[]. Reuse existing assets when possible.',
+    ASSET_PLAN: 'Return JSON only. Produce {assets[]}. Each asset must include asset_id, kind, description, source_preference, generation_requirements, and required_for_shots[]. Use only image, video, voice, or audio kinds for renderable media. Every shot needs exactly one primary image or video; mark it with generation_requirements.role="primary_visual" when a shot references multiple visuals. Voice assets must put the exact spoken copy in generation_requirements.text. Reuse existing assets when possible.',
   };
   return `${instructions[stage]}\nProduction request:\n${JSON.stringify(production)}${previous}\nDo not contradict authoritative earlier outputs.`;
 }

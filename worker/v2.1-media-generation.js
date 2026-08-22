@@ -72,7 +72,7 @@ function capabilityForAssetKind(kind) {
   return capability;
 }
 
-async function generateMediaAsset({ providerGateway, asset, productionId, workerId } = {}) {
+async function generateMediaAsset({ providerGateway, asset, productionId, brandId = null, workerId } = {}) {
   requireValue('providerGateway', providerGateway);
   requireValue('asset', asset);
   requireValue('productionId', productionId);
@@ -82,7 +82,7 @@ async function generateMediaAsset({ providerGateway, asset, productionId, worker
   const response = await providerGateway.generate({
     capability,
     routeKey: `media:${asset.kind}`,
-    idempotencyKey: `${productionId}:media:${asset.asset_id}`,
+    idempotencyKey: `${brandId ? `${brandId}:` : ''}${productionId}:media:${asset.asset_id}`,
     prompt: JSON.stringify({
       asset_id: asset.asset_id,
       kind: asset.kind,
@@ -92,7 +92,7 @@ async function generateMediaAsset({ providerGateway, asset, productionId, worker
       required_for_shots: asset.required_for_shots,
       temporal: asset.temporal || asset.generation_requirements?.temporal || null,
     }),
-    metadata: { productionId, workerId, assetId: asset.asset_id, assetKind: asset.kind },
+    metadata: { productionId, brandId, workerId, assetId: asset.asset_id, assetKind: asset.kind },
   });
 
   return normalizeMediaResult({ asset, response });

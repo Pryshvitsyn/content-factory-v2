@@ -1,0 +1,60 @@
+name: Content Factory V2.2 Growth CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feat/v2.2-growth-factory"
+    paths:
+      - "docs/V2.2-GROWTH-ARCHITECTURE.md"
+      - "migrations/20260822_v2_2_growth_foundation.sql"
+      - "tests/v2.2-*.js"
+      - "package.json"
+      - ".github/workflows/v2.2-growth-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "docs/V2.2-GROWTH-ARCHITECTURE.md"
+      - "migrations/20260822_v2_2_growth_foundation.sql"
+      - "tests/v2.2-*.js"
+      - "package.json"
+      - ".github/workflows/v2.2-growth-ci.yml"
+
+concurrency:
+  group: content-factory-v2-2-growth-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  certify-growth-foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 3
+
+      - name: Check V2.2 test syntax
+        run: node --check tests/v2.2-growth-foundation-test.js
+
+      - name: Certify V2.2 growth foundation contract
+        run: npm run test:v2.2:growth-foundation
+
+      - name: Verify protected V2.1 production pipeline still passes
+        run: npm run test:v2.1:contract
+
+      - name: Check Git whitespace
+        run: git diff --check

@@ -39,8 +39,8 @@ function buildTimeline({ productionId, clips, fps = 30 } = {}) {
   if (!Array.isArray(clips) || clips.length === 0) throw new Error('clips are required');
   if (!Number.isInteger(fps) || fps <= 0) throw new Error('fps must be a positive integer');
 
-  const normalized = clips.map(normalizeClip).sort((a, b) => a.startMs - b.startMs || a.track.localeCompare(b.track) || a.id.localeCompare(b.id));
-  const tracks = [...new Set(normalized.map((clip) => clip.track))];
+  const normalized = clips.map(normalizeClip);
+  const tracks = [...new Set(clips.map((clip) => clip.track))];
   for (const track of tracks) assertNoOverlap(normalized, track);
 
   const durationMs = Math.max(...normalized.map((clip) => clip.endMs));

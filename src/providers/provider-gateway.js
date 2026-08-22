@@ -1,10 +1,10 @@
 'use strict';
 
-const { ProviderRegistry } = require('./provider-registry');
+const { ProviderRegistry, normalizeCapability } = require('./provider-registry');
 
 class ProviderGateway {
-  constructor({ providers, priorities, routing } = {}) {
-    this.registry = new ProviderRegistry({ providers, priorities, routing });
+  constructor(options = {}) {
+    this.registry = options instanceof ProviderRegistry ? options : new ProviderRegistry(options);
   }
 
   register(name, adapter, options) {
@@ -16,12 +16,14 @@ class ProviderGateway {
   }
 
   select(options) {
+    if (typeof options === 'string') return { ...this.registry.select({ capability: options }), capability: options };
     return this.registry.select(options);
   }
 
   async generate({ capability = 'text-generation', provider, model, routeKey = capability, idempotencyKey, ...request } = {}) {
-    const selection = this.select({ capability, provider, model, routeKey });
-    const attempts = [selection, ...this.registry.getFallbacks({ capability, model, excludeProvider: selection.provider })];
+    const normalizedCapability = normalizeCapability(capability);
+    const selection = this.select({ capability: normalizedCapability, provider, model, routeKey });
+    const attempts = [selection, ...this.registry.getFallbacks({ capability: normalizedCapability, model, routeKey, excludeProvider: selection.provider })];
     let lastError;
 
     for (let index = 0; index < attempts.length; index += 1) {
@@ -30,6 +32,7 @@ class ProviderGateway {
       try {
         const result = await adapter.generate({
           ...request,
+          capability: normalizedCapability,
           model: current.model,
           ...(idempotencyKey ? { idempotencyKey } : {}),
         });

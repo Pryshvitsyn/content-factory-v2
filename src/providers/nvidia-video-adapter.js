@@ -126,11 +126,26 @@ class NvidiaVideoAdapter {
       });
     }
 
+    let output = b64Video ? Buffer.from(b64Video, 'base64') : null;
+    if (!output && mediaUrl) {
+      let mediaResponse;
+      try {
+        mediaResponse = await this.fetch(mediaUrl, { method: 'GET', headers: { Accept: 'video/mp4' } });
+      } catch (cause) {
+        throw new ProviderError('NVIDIA video download failed', { provider: 'nvidia', model, cause });
+      }
+      if (!mediaResponse.ok) {
+        throw new ProviderError(`NVIDIA video download failed with HTTP ${mediaResponse.status}`, { provider: 'nvidia', model });
+      }
+      output = Buffer.from(await mediaResponse.arrayBuffer());
+      if (output.length === 0) throw new ProviderError('NVIDIA video download returned empty media', { provider: 'nvidia', model });
+    }
+
     const result = {
       provider: 'nvidia',
       model,
       capability: 'video-generation',
-      output: b64Video ? Buffer.from(b64Video, 'base64') : null,
+      output,
       mediaUrl,
       contentType: 'video/mp4',
       requestId: payload.id || payload.request_id || null,

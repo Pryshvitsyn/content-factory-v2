@@ -32,6 +32,18 @@ async function run() {
     const stored = await storage.get({ key: results[0].storageKey });
     assert.equal(stored.toString('utf8'), 'stable-output');
 
+    const lookup = await artifacts.getVersionByIdempotency({
+      artifactId: input.artifactId,
+      type: input.type,
+      idempotencyKey: input.idempotencyKey,
+    });
+    assert.equal(lookup.idempotent, true);
+    assert.equal(lookup.storageKey, results[0].storageKey);
+    assert.equal(lookup.content.toString('utf8'), 'stable-output');
+    assert.equal(await artifacts.getVersionByIdempotency({
+      artifactId: 'missing', type: 'binary', idempotencyKey: 'missing',
+    }), null);
+
     await assert.rejects(
       () => artifacts.createVersion({ ...input, content: 'tampered-output' }),
       /Artifact idempotency conflict: existing content differs/
