@@ -14,6 +14,30 @@ class VideoRenderer {
     }
   }
 
+  async getAudioDuration(audioPath) {
+    return new Promise((resolve, reject) => {
+      const args = ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioPath];
+      const ffprobe = spawn('ffprobe', args);
+      
+      let duration = '';
+      ffprobe.stdout.on('data', (data) => {
+        duration += data.toString().trim();
+      });
+      
+      ffprobe.on('close', (code) => {
+        if (code === 0 && duration) {
+          resolve(parseFloat(duration));
+        } else {
+          reject(new Error('Failed to get audio duration'));
+        }
+      });
+      
+      ffprobe.on('error', (err) => {
+        reject(err);
+      });
+    });
+  }
+
   async render(options) {
     const { images, audio, format = 'mp4', resolution = '1080x1920' } = options;
     
@@ -27,7 +51,9 @@ class VideoRenderer {
     fs.writeFileSync(audioPath, audio);
     
     const outputPath = path.join(this.tempDir, `video_${timestamp}.${format}`);
-    const duration = 10;
+    
+    const duration = await this.getAudioDuration(audioPath);
+    console.log('[VideoRenderer] Audio duration:', duration, 'seconds');
     
     const args = [
       '-y',
