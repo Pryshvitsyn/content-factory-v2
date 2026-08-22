@@ -2,7 +2,7 @@
  * Video Renderer
  */
 
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -29,19 +29,48 @@ class VideoRenderer {
     const outputPath = path.join(this.tempDir, `video_${timestamp}.${format}`);
     const duration = 10;
     
-    const ffmpegCommand = `ffmpeg -y -loop 1 -i "${imagePath}" -i "${audioPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -t ${duration} -vf "scale=${resolution.replace('x', ':')}" "${outputPath}"`;
+    const args = [
+      '-y',
+      '-loop', '1',
+      '-i', imagePath,
+      '-i', audioPath,
+      '-c:v', 'libx264',
+      '-tune', 'stillimage',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-pix_fmt', 'yuv420p',
+      '-t', duration.toString(),
+      '-vf', `scale=${resolution.replace('x', ':')}`,
+      outputPath
+    ];
     
     console.log('[VideoRenderer] Running FFmpeg...');
     
     await new Promise((resolve, reject) => {
-      exec(ffmpegCommand, { maxBuffer: 1024 * 1024 * 100 }, (error, stdout, stderr) => {
-        if (error) {
-          console.error('[VideoRenderer] FFmpeg error:', error.message);
-          reject(error);
-          return;
+      const ffmpeg = spawn('ffmpeg', args);
+      
+      ffmpeg.stdout.on('data', (data) => {
+        console.log(`[FFmpeg] ${data}`);
+      });
+      
+      ffmpeg.stderr.on('data', (data) => {
+        const line = data.toString();
+        if (line.includes('Stream #') || line.includes('Output #')) {
+          console.log(`[FFmpeg] ${line.trim()}`);
         }
-        console.log('[VideoRenderer] FFmpeg complete');
-        resolve();
+      });
+      
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          console.log('[VideoRenderer] FFmpeg complete');
+          resolve();
+        } else {
+          reject(new Error(`FFmpeg exited with code ${code}`));
+        }
+      });
+      
+      ffmpeg.on('error', (err) => {
+        reject(err);
       });
     });
     
