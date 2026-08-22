@@ -9,6 +9,7 @@ const { ProviderGateway } = require('../src/providers/provider-gateway');
 const { ArtifactService } = require('../src/artifacts/artifact-service');
 const { FilesystemStorageAdapter } = require('../src/storage/storage-adapter');
 const { assertProviderResult } = require('../src/providers/provider-contract');
+const { CAPABILITIES } = require('../src/providers/capability-contract');
 
 async function run() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'content-factory-v2-'));
@@ -16,7 +17,7 @@ async function run() {
     const fakeNvidia = {
       provider: 'nvidia',
       model: 'nvidia/test-model',
-      supports({ capability }) { return capability === 'text-generation'; },
+      supports({ capability }) { return capability === CAPABILITIES.TEXT_GENERATION; },
       async generate({ prompt, model }) {
         return assertProviderResult({
           provider: 'nvidia',
@@ -40,11 +41,13 @@ async function run() {
       provider: 'nvidia',
       model: 'nvidia/test-model',
       selectionReason: 'single-available-provider',
+      capability: CAPABILITIES.TEXT_GENERATION,
     });
 
     const result = await gateway.generate({ capability: 'text-generation', prompt: 'hello V2' });
     assert.equal(result.provider, 'nvidia');
     assert.equal(result.model, 'nvidia/test-model');
+    assert.equal(result.provenance.capability, CAPABILITIES.TEXT_GENERATION);
     assert.equal(result.provenance.selectionReason, 'single-available-provider');
 
     const artifact = await artifacts.createVersion({
