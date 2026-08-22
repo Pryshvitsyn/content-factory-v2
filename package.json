@@ -34,7 +34,8 @@
     "test:v2.1:asset-orchestrator": "node tests/v2.1-asset-orchestrator-test.js",
     "test:v2.1:asset-repository": "node tests/v2.1-asset-repository-test.js",
     "test:v2.1:media-generation": "node tests/v2.1-media-generation-test.js",
-    "test:v2.1:timeline-assembly": "node tests/v2.1-timeline-assembly-test.js"
+    "test:v2.1:timeline-assembly": "node tests/v2.1-timeline-assembly-test.js",
+    "test:v2.1:nvidia-video": "node tests/v2.1-nvidia-video-adapter-test.js"
   },
   "keywords": ["content-factory", "ai", "pipeline", "production"],
   "author": "",
