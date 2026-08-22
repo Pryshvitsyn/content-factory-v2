@@ -53,11 +53,21 @@ class ProviderRegistry {
     return this.getStatus();
   }
 
+  resolveModel(adapter, { capability, model } = {}) {
+    if (model) return model;
+    if (typeof adapter.modelFor === 'function') return adapter.modelFor({ capability });
+    return adapter.model || null;
+  }
+
   candidates({ capability = 'text-generation', model } = {}) {
     return [...this.providers.entries()]
       .filter(([name]) => this.getAvailability(name) === 'available')
       .filter(([, adapter]) => typeof adapter.supports !== 'function' || adapter.supports({ capability, model }))
-      .map(([name, adapter]) => ({ provider: name, model: model || adapter.model || null, priority: this.priorities.get(name) ?? 100 }))
+      .map(([name, adapter]) => ({
+        provider: name,
+        model: this.resolveModel(adapter, { capability, model }),
+        priority: this.priorities.get(name) ?? 100,
+      }))
       .sort((a, b) => a.priority - b.priority || a.provider.localeCompare(b.provider));
   }
 
@@ -66,7 +76,7 @@ class ProviderRegistry {
       const adapter = this.get(provider);
       if (this.getAvailability(provider) !== 'available') throw new Error(`Provider '${provider}' is not available`);
       if (typeof adapter.supports === 'function' && !adapter.supports({ capability, model })) throw new Error(`Provider '${provider}' does not support capability '${capability}'`);
-      return { provider, model: model || adapter.model || null, selectionReason: 'explicit-provider' };
+      return { provider, model: this.resolveModel(adapter, { capability, model }), selectionReason: 'explicit-provider' };
     }
     const candidates = this.candidates({ capability, model });
     if (!candidates.length) throw new Error(`No available provider supports capability '${capability}'`);
