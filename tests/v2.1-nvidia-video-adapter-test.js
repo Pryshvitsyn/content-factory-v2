@@ -52,6 +52,22 @@ async function run() {
   assert.equal(body.seed, 42);
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
 
+  const downloadCalls = [];
+  const urlAdapter = new NvidiaVideoAdapter({
+    apiKey: 'test-key',
+    baseURL: 'https://nvidia.test',
+    fetchImpl: async (url) => {
+      downloadCalls.push(url);
+      if (url === 'https://nvidia.test/v1/infer') {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ url: 'https://media.nvidia.test/result.mp4' }) };
+      }
+      return { ok: true, status: 200, arrayBuffer: async () => Uint8Array.from(Buffer.from('downloaded-mp4')).buffer };
+    },
+  });
+  const downloaded = await urlAdapter.generate({ prompt: 'download certification' });
+  assert.deepEqual(downloadCalls, ['https://nvidia.test/v1/infer', 'https://media.nvidia.test/result.mp4']);
+  assert.equal(downloaded.output.toString(), 'downloaded-mp4');
+
   console.log('NVIDIA video adapter test: GREEN');
 }
 

@@ -86,6 +86,29 @@ class ArtifactService {
     }
   }
 
+  async getVersionByIdempotency({ artifactId, type, idempotencyKey, provider, model, validationStatus = 'pending' } = {}) {
+    if (!artifactId || !type || !idempotencyKey) throw new Error('artifactId, type and idempotencyKey are required');
+    const extension = type === 'text' ? 'txt' : 'bin';
+    const storageKey = `artifacts/${artifactId}/idempotency/${crypto.createHash('sha256').update(String(idempotencyKey)).digest('hex')}.${extension}`;
+    if (!await this.storage.exists({ key: storageKey })) return null;
+    const content = await this.storage.get({ key: storageKey });
+    const contentHash = crypto.createHash('sha256').update(content).digest('hex');
+    return Object.freeze({
+      artifactId,
+      version: 1,
+      type,
+      content,
+      contentHash,
+      size: content.length,
+      storageKey,
+      stageId: null,
+      attemptId: null,
+      provenance: Object.freeze({ provider: provider || null, model: model || null }),
+      validationStatus,
+      idempotent: true,
+    });
+  }
+
   async nextVersion(artifactId) {
     let version = 1;
     while (await this.storage.exists({ key: `artifacts/${artifactId}/v${version}.txt` }) ||

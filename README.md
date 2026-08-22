@@ -59,6 +59,21 @@ Provider-specific logic stays behind the gateway/adapter boundary. The registry 
 - durable `UNKNOWN` publication state
 - reconciliation of ambiguous external publication outcomes
 
+### Master video production
+
+The repository now includes one executable vertical-short production path from approved structured plans to a real MP4 master:
+
+- provider-routed image, video and speech generation;
+- deterministic media timeline;
+- FFmpeg render with synchronized video and audio;
+- editorial and technical quality checks;
+- immutable master artifact;
+- mandatory human review before publication.
+
+The default composition uses NVIDIA for text/video and can use OpenAI for image/speech when configured. Missing capabilities fail closed; the factory does not substitute placeholder media. See [`docs/V2.1-MASTER-PRODUCTION.md`](docs/V2.1-MASTER-PRODUCTION.md).
+
+Replicate Wan 2.2 T2V Fast is also available as a real video provider. Set `VIDEO_PROVIDER=replicate` with `REPLICATE_API_TOKEN` to prefer it while keeping NVIDIA Cosmos registered as an alternative. See [`docs/V2.1-REPLICATE-WAN-VIDEO.md`](docs/V2.1-REPLICATE-WAN-VIDEO.md).
+
 ## Real Production Pipeline
 
 The canonical V2.1 production graph is:
@@ -147,10 +162,10 @@ The system is not yet the finished end-to-end media factory. The remaining produ
 1. concrete image/video/voice/audio provider adapters;
 2. asset generation at real media scale;
 3. stronger continuity enforcement across generated assets;
-4. deterministic edit manifests and media assembly;
-5. final rendering/export of master media;
-6. platform-specific adaptation;
-7. objective final QA and human approval workflow;
+4. broader edit templates beyond the certified vertical-short path;
+5. production-scale rendering/export operations;
+6. additional platform-specific adaptation profiles;
+7. richer perceptual QA and review tooling;
 8. production analytics and learning feedback.
 
 A capability is not considered complete merely because its schema or interface exists. It becomes part of the certified system only after implementation and automated verification.
