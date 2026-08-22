@@ -119,6 +119,8 @@ jobs:
           node --check worker/v2.1-recovery-executor.js
           node --check src/providers/provider-registry.js
           node --check src/providers/provider-gateway.js
+          node --check src/providers/provider-contract.js
+          node --check src/providers/nvidia-video-adapter.js
           node --check src/artifacts/artifact-service.js
           node --check src/storage/storage-adapter.js
           node --check src/v2.1/asset-repository.js
@@ -148,7 +150,8 @@ jobs:
           node --check tests/v2.1-asset-orchestrator-test.js
           node --check tests/v2.1-asset-repository-test.js
           node --check tests/v2.1-media-generation-test.js
-          node -e "require('./worker/v2.1-production-orchestrator'); require('./worker/v2.1-structured-production'); require('./worker/v2.1-asset-orchestrator'); require('./worker/v2.1-media-generation'); require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./worker/v2.1-recovery-executor'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/artifacts/artifact-service'); require('./src/v2.1/asset-repository'); require('./src/v2.1/reconciliation'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
+          node --check tests/v2.1-nvidia-video-adapter-test.js
+          node -e "require('./worker/v2.1-production-orchestrator'); require('./worker/v2.1-structured-production'); require('./worker/v2.1-asset-orchestrator'); require('./worker/v2.1-media-generation'); require('./worker/v2.1-production-contract'); require('./worker/v2.1-execution-engine'); require('./worker/v2.1-stage-runner'); require('./worker/v2.1-pipeline-executor'); require('./worker/v2.1-recovery-executor'); require('./src/providers/provider-registry'); require('./src/providers/provider-gateway'); require('./src/providers/provider-contract'); require('./src/providers/nvidia-video-adapter'); require('./src/artifacts/artifact-service'); require('./src/v2.1/asset-repository'); require('./src/v2.1/reconciliation'); require('./src/v2.1/validation-engine'); require('./src/v2.1/publish-executor')"
         timeout-minutes: 2
 
       - name: Run V2.1 stage contract
@@ -222,6 +225,9 @@ jobs:
         timeout-minutes: 2
       - name: Run V2.1 media generation certification
         run: npm run test:v2.1:media-generation
+        timeout-minutes: 2
+      - name: Run V2.1 NVIDIA video adapter certification
+        run: npm run test:v2.1:nvidia-video-adapter
         timeout-minutes: 2
 
       - name: Check smoke test syntax
