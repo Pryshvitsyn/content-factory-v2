@@ -29,8 +29,6 @@ function main() {
     ],
   });
 
-  // The program contains two sequential video shots: 0-3s and 3-5s.
-  // Therefore the deterministic program duration is 5s, not 3s.
   assert.equal(timeline.durationMs, 5000);
   assert.deepEqual(timeline.tracks, ['video-main', 'voice-main', 'music-main']);
   assert.equal(timeline.clips[0].endMs, 3000);
@@ -46,6 +44,7 @@ function main() {
   });
 
   assert.equal(assembled.status, 'assembled');
+  assert.equal(assembled.durationMs, 5000);
   assert.equal(assembled.videoTracks.length, 2);
   assert.equal(assembled.audioTracks.length, 2);
   assert.equal(assembled.clips.find((clip) => clip.id === 'voice-1').startMs, 500);
