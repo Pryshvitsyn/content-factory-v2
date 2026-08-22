@@ -1,6 +1,7 @@
 'use strict';
 
 const { ProviderRegistry } = require('./provider-registry');
+const { CAPABILITIES, normalizeCapability } = require('./capability-contract');
 
 class ProviderGateway {
   constructor({ providers, priorities, routing } = {}) {
@@ -19,9 +20,10 @@ class ProviderGateway {
     return this.registry.select(options);
   }
 
-  async generate({ capability = 'text-generation', provider, model, routeKey = capability, idempotencyKey, ...request } = {}) {
-    const selection = this.select({ capability, provider, model, routeKey });
-    const attempts = [selection, ...this.registry.getFallbacks({ capability, model, excludeProvider: selection.provider })];
+  async generate({ capability = CAPABILITIES.TEXT_GENERATION, provider, model, routeKey, idempotencyKey, ...request } = {}) {
+    const canonicalCapability = normalizeCapability(capability);
+    const selection = this.select({ capability: canonicalCapability, provider, model, routeKey: routeKey || canonicalCapability });
+    const attempts = [selection, ...this.registry.getFallbacks({ capability: canonicalCapability, model, excludeProvider: selection.provider })];
     let lastError;
 
     for (let index = 0; index < attempts.length; index += 1) {
@@ -30,6 +32,7 @@ class ProviderGateway {
       try {
         const result = await adapter.generate({
           ...request,
+          capability: canonicalCapability,
           model: current.model,
           ...(idempotencyKey ? { idempotencyKey } : {}),
         });
@@ -39,6 +42,7 @@ class ProviderGateway {
             ...(result.provenance || {}),
             provider: result.provider || current.provider,
             model: result.model || current.model,
+            capability: result.provenance?.capability || canonicalCapability,
             selectionReason: index === 0 ? current.selectionReason : 'fallback',
             attemptedProviders: attempts.slice(0, index + 1).map(({ provider: name }) => name),
             ...(idempotencyKey ? { idempotencyKey } : {}),
@@ -50,7 +54,7 @@ class ProviderGateway {
       }
     }
 
-    throw lastError || new Error(`No provider could generate capability '${capability}'`);
+    throw lastError || new Error(`No provider could generate capability '${canonicalCapability}'`);
   }
 }
 

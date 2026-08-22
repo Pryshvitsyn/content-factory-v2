@@ -23,7 +23,7 @@ async function run() {
     const provider = {
       provider: 'nvidia',
       model: 'nvidia/test-model',
-      supports({ capability }) { return capability === 'text-generation'; },
+      supports({ capability }) { return capability === 'text_generation'; },
       async generate({ prompt, model }) {
         calls.push(prompt);
         return assertProviderResult({
@@ -53,7 +53,7 @@ async function run() {
     const handlers = Object.fromEntries(STAGE_ORDER.map((stage) => [stage, async ({ providerGateway, inputArtifacts }) => {
       const previous = inputArtifacts.length ? inputArtifacts.join(',') : 'ROOT';
       const result = await providerGateway.generate({
-        capability: 'text-generation',
+        capability: 'text_generation',
         prompt: `${stage}|input=${previous}`,
       });
       return {

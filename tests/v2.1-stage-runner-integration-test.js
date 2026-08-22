@@ -18,7 +18,7 @@ async function run() {
     const fakeNvidia = {
       provider: 'nvidia',
       model: 'nvidia/test-model',
-      supports({ capability }) { return capability === 'text-generation'; },
+      supports({ capability }) { return capability === 'text_generation'; },
       async generate({ prompt, model }) {
         calls.push({ type: 'provider', prompt });
         return assertProviderResult({
@@ -45,7 +45,7 @@ async function run() {
       artifactService: artifacts,
       handlers: {
         SCRIPT: async ({ providerGateway }) => {
-          const result = await providerGateway.generate({ capability: 'text-generation', prompt: 'build V2.1 script' });
+          const result = await providerGateway.generate({ capability: 'text_generation', prompt: 'build V2.1 script' });
           return {
             artifacts: [{ artifactId: 'stage-runner-script', type: 'text', content: result.output, provider: result.provider, model: result.model }],
             provenance: result.provenance,

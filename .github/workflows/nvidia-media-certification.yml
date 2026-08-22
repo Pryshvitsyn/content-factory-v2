@@ -1,0 +1,28 @@
+name: NVIDIA Media Adapter Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/providers/**"
+      - "tests/v2.1-nvidia-media-adapter-test.js"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/nvidia-media-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nvidia-media-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:v2.1:nvidia-media-adapter

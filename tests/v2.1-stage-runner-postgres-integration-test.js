@@ -16,11 +16,7 @@ const root = path.resolve(__dirname, '..');
 const migrations = ['migrations/002_v2_1_execution.sql'];
 
 function client() {
-  return new Client({
-    host: process.env.PGHOST || '127.0.0.1', port: Number(process.env.PGPORT || 5432),
-    user: process.env.PGUSER || 'postgres', password: process.env.PGPASSWORD || 'postgres',
-    database: process.env.PGDATABASE || 'content_os',
-  });
+  return new Client({ host: process.env.PGHOST || '127.0.0.1', port: Number(process.env.PGPORT || 5432), user: process.env.PGUSER || 'postgres', password: process.env.PGPASSWORD || 'postgres', database: process.env.PGDATABASE || 'content_os' });
 }
 
 async function run() {
@@ -28,66 +24,32 @@ async function run() {
   const storageRoot = path.join(os.tmpdir(), `cf-v2.1-stage-${process.pid}`);
   const fakeNvidia = {
     provider: 'nvidia', model: 'nvidia/test-model',
-    supports({ capability }) { return capability === 'text-generation'; },
-    async generate({ prompt, model }) {
-      return assertProviderResult({ provider: 'nvidia', model: model || this.model,
-        output: `generated:${prompt}`, requestId: 'postgres-stage-runner-test', usage: { total_tokens: 4 } });
-    },
+    supports({ capability }) { return capability === 'text_generation'; },
+    async generate({ prompt, model }) { return assertProviderResult({ provider: 'nvidia', model: model || this.model, output: `generated:${prompt}`, requestId: 'postgres-stage-runner-test', usage: { total_tokens: 4 } }); },
   };
 
   await db.connect();
   try {
     await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
     await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
-
-    // The V2.1 execution migration intentionally depends on the canonical
-    // V2 workspace/job identities. Create only the minimal fixture needed
-    // for this isolated execution-layer certification.
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL);
-      CREATE TABLE IF NOT EXISTS generation_jobs (id uuid PRIMARY KEY);
-    `);
-
-    for (const migration of migrations) {
-      await db.query(fs.readFileSync(path.join(root, migration), 'utf8'));
-    }
-
-    await db.query(`
-      INSERT INTO workspaces(id, name)
-      VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-cert')
-      ON CONFLICT (id) DO NOTHING;
-    `);
-    await db.query(`
-      INSERT INTO v2_1.productions(workspace_id, name, status, metadata)
-      VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-production', 'DRAFT', '{"test":true}')
-      ON CONFLICT (workspace_id, name) DO NOTHING;
-    `);
-    await db.query(`
-      INSERT INTO v2_1.jobs(production_id, stage, status, max_attempts, idempotency_key)
-      SELECT p.id, 'SIGNAL', 'QUEUED', 3, 'stage-runner-job'
-      FROM v2_1.productions p
-      WHERE p.name='stage-runner-production'
-      ON CONFLICT (production_id, idempotency_key) DO NOTHING;
-    `);
-
-    const job = (await db.query(`SELECT j.id FROM v2_1.jobs j JOIN v2_1.productions p ON p.id=j.production_id
-      WHERE p.name='stage-runner-production' AND j.idempotency_key='stage-runner-job'`)).rows[0];
+    await db.query(`CREATE TABLE IF NOT EXISTS workspaces (id uuid PRIMARY KEY, name text NOT NULL); CREATE TABLE IF NOT EXISTS generation_jobs (id uuid PRIMARY KEY);`);
+    for (const migration of migrations) await db.query(fs.readFileSync(path.join(root, migration), 'utf8'));
+    await db.query(`INSERT INTO workspaces(id, name) VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-cert') ON CONFLICT (id) DO NOTHING;`);
+    await db.query(`INSERT INTO v2_1.productions(workspace_id, name, status, metadata) VALUES ('00000000-0000-0000-0000-000000000021', 'stage-runner-production', 'DRAFT', '{"test":true}') ON CONFLICT (workspace_id, name) DO NOTHING;`);
+    await db.query(`INSERT INTO v2_1.jobs(production_id, stage, status, max_attempts, idempotency_key) SELECT p.id, 'SIGNAL', 'QUEUED', 3, 'stage-runner-job' FROM v2_1.productions p WHERE p.name='stage-runner-production' ON CONFLICT (production_id, idempotency_key) DO NOTHING;`);
+    const job = (await db.query(`SELECT j.id FROM v2_1.jobs j JOIN v2_1.productions p ON p.id=j.production_id WHERE p.name='stage-runner-production' AND j.idempotency_key='stage-runner-job'`)).rows[0];
     assert.ok(job);
     const claimedJob = await execution.claimJob(db, { workerId: 'stage-runner-worker', leaseSeconds: 60 });
     assert.equal(claimedJob.id, job.id);
     const stageRun = await execution.claimNextStage(db, { jobId: job.id, workerId: 'stage-runner-worker', leaseSeconds: 60 });
     assert.equal(stageRun.stage, 'SIGNAL');
-
     const gateway = new ProviderGateway({ providers: { nvidia: fakeNvidia }, priorities: { nvidia: 10 } });
     const storage = new FilesystemStorageAdapter({ root: storageRoot });
     const artifacts = new ArtifactService({ storage });
-    const runner = new StageRunner({ execution, providerGateway: gateway, artifactService: artifacts,
-      handlers: { SIGNAL: async ({ providerGateway }) => {
-        const result = await providerGateway.generate({ capability: 'text-generation', prompt: 'signal from postgres job' });
-        return { artifacts: [{ artifactId: 'postgres-stage-runner-artifact', type: 'text', content: result.output,
-          provider: result.provider, model: result.model }], provenance: result.provenance };
-      } } });
-
+    const runner = new StageRunner({ execution, providerGateway: gateway, artifactService: artifacts, handlers: { SIGNAL: async ({ providerGateway }) => {
+      const result = await providerGateway.generate({ capability: 'text_generation', prompt: 'signal from postgres job' });
+      return { artifacts: [{ artifactId: 'postgres-stage-runner-artifact', type: 'text', content: result.output, provider: result.provider, model: result.model }], provenance: result.provenance };
+    } } });
     const result = await runner.run({ client: db, workerId: 'stage-runner-worker', stageRun });
     assert.equal(result.status, 'COMPLETED');
     const persisted = (await db.query('SELECT status, worker_id, output_artifacts, output_fingerprint FROM v2_1.stage_runs WHERE id=$1', [stageRun.id])).rows[0];
