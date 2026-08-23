@@ -1,6 +1,7 @@
 'use strict';
 
 require('dotenv').config({ quiet: true });
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
@@ -43,18 +44,30 @@ function run(script, env) {
 try {
   const databaseUrl = discover(process.env);
   const storageRoot = process.env.CONTENT_FACTORY_STORAGE_ROOT || path.join(os.homedir(), '.content-factory', 'storage');
+  const inputFile = process.env.LIVE_PRODUCTION_INPUT || '/tmp/live-production.json';
+  if (!fs.existsSync(inputFile)) {
+    const error = new Error(`Live production input not found: ${inputFile}`);
+    error.code = 'LOCAL_LIVE_INPUT_MISSING';
+    throw error;
+  }
+
   const env = {
     ...process.env,
     DATABASE_URL: databaseUrl,
     CONTENT_FACTORY_STORAGE_ROOT: storageRoot,
+    LIVE_PRODUCTION_INPUT: inputFile,
+    LIVE_PAID_GENERATION: process.env.LIVE_PAID_GENERATION || 'false',
+    VIDEO_PROVIDER: process.env.VIDEO_PROVIDER || 'replicate',
   };
 
+  console.log(`Local live mode: ${env.LIVE_PAID_GENERATION === 'true' ? 'PAID LIVE' : 'DRY RUN ($0)'}`);
+  console.log(`Input: ${inputFile}`);
   console.log('Preparing local Content Factory database/storage...');
   run(path.resolve('scripts/prepare-local-live-production.js'), env);
 
   console.log('\nStarting controlled live-production command...');
   run(path.resolve('scripts/live-production.js'), env);
 } catch (error) {
-  console.error(`[LOCAL_LIVE_RUNNER_ERROR] ${error.message}`);
+  console.error(`[${error.code || 'LOCAL_LIVE_RUNNER_ERROR'}] ${error.message}`);
   process.exitCode = 1;
 }
