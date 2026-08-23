@@ -23,6 +23,8 @@ const V22_V23_MIGRATIONS = [
   'migrations/20260823_v2_3_control_reviews.sql',
 ];
 
+const LEGACY_INDICATORS = ['brands', 'app_registry', 'content_items', 'content_outputs', 'approvals'];
+
 function hasPlaceholder(url) {
   return !url || /(?:USER|PASSWORD|HOST)/.test(url);
 }
@@ -69,27 +71,80 @@ async function tableExists(db, schema, table) {
   return Boolean(result.rows[0]?.name);
 }
 
-async function requireLegacyBaseline(db) {
-  const required = ['workspaces', 'generation_jobs'];
-  const missing = [];
-  for (const table of required) {
-    if (!(await tableExists(db, 'public', table))) missing.push(`public.${table}`);
-  }
-  if (missing.length) {
-    const error = new Error(`Database is not a recognized Content Factory baseline. Missing: ${missing.join(', ')}`);
-    error.code = 'CONTENT_FACTORY_BASELINE_REQUIRED';
-    throw error;
-  }
-}
-
 async function applyMigration(db, relative) {
   const sql = await fs.readFile(path.resolve(relative), 'utf8');
   await db.query(sql);
   console.log(`Applied/verified: ${relative}`);
 }
 
+async function ensureCompatibilityFoundation(db) {
+  const hasWorkspaces = await tableExists(db, 'public', 'workspaces');
+  const hasGenerationJobs = await tableExists(db, 'public', 'generation_jobs');
+  if (hasWorkspaces && hasGenerationJobs) return { created: false, workspaceCreated: false, generationJobsCreated: false };
+
+  const indicators = [];
+  for (const table of LEGACY_INDICATORS) {
+    if (await tableExists(db, 'public', table)) indicators.push(table);
+  }
+  if (!indicators.length) {
+    const error = new Error('Database is neither a current Content Factory schema nor a recognized legacy Content OS database. Refusing automatic bootstrap.');
+    error.code = 'CONTENT_FACTORY_BASELINE_REQUIRED';
+    throw error;
+  }
+
+  console.log(`Legacy Content OS baseline detected (${indicators.join(', ')}). Creating minimal V2 compatibility foundation...`);
+  await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+
+  let workspaceCreated = false;
+  let generationJobsCreated = false;
+
+  if (!hasWorkspaces) {
+    await db.query(`
+      CREATE TABLE public.workspaces (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        name text NOT NULL,
+        slug text NOT NULL UNIQUE,
+        metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.query(`
+      INSERT INTO public.workspaces(name, slug, metadata)
+      VALUES('Local Content Factory', 'local-content-factory', '{"compatibility_source":"legacy-content-os"}'::jsonb)
+      ON CONFLICT(slug) DO NOTHING
+    `);
+    workspaceCreated = true;
+  } else {
+    const count = await db.query('SELECT count(*)::int AS count FROM public.workspaces');
+    if (count.rows[0].count === 0) {
+      const columns = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='workspaces'`);
+      const names = new Set(columns.rows.map((row) => row.column_name));
+      if (names.has('name') && names.has('slug')) {
+        await db.query(`INSERT INTO public.workspaces(name, slug) VALUES('Local Content Factory', 'local-content-factory') ON CONFLICT DO NOTHING`);
+      } else {
+        const error = new Error('Existing public.workspaces is empty and cannot be populated safely by the compatibility bootstrap.');
+        error.code = 'WORKSPACE_BOOTSTRAP_AMBIGUOUS';
+        throw error;
+      }
+    }
+  }
+
+  if (!hasGenerationJobs) {
+    await db.query(`
+      CREATE TABLE public.generation_jobs (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    generationJobsCreated = true;
+  }
+
+  return { created: true, workspaceCreated, generationJobsCreated };
+}
+
 async function ensureV21(db) {
-  await requireLegacyBaseline(db);
+  const compatibility = await ensureCompatibilityFoundation(db);
   const existed = await tableExists(db, 'v2_1', 'productions');
   if (!existed) console.log('V2.1 schema not found; bootstrapping canonical V2.1 migrations...');
   else console.log('V2.1 schema found; verifying canonical V2.1 migrations...');
@@ -106,6 +161,7 @@ async function ensureV21(db) {
     error.code = 'V21_BOOTSTRAP_INCOMPLETE';
     throw error;
   }
+  return compatibility;
 }
 
 async function ensureLegacyBrands(db) {
@@ -121,7 +177,7 @@ async function ensureLegacyBrands(db) {
   if (names.has('workspace_id')) {
     workspaceExpression = 'b.workspace_id';
   } else {
-    const workspaces = await db.query('SELECT id FROM workspaces ORDER BY id');
+    const workspaces = await db.query('SELECT id FROM public.workspaces ORDER BY id');
     if (workspaces.rowCount !== 1) {
       const error = new Error('Legacy brands do not have workspace_id and workspace scope is ambiguous. Exactly one workspace is required for automatic compatibility import.');
       error.code = 'LEGACY_BRAND_SCOPE_AMBIGUOUS';
@@ -133,7 +189,7 @@ async function ensureLegacyBrands(db) {
   const result = await db.query(`
     INSERT INTO v2_2.brands(id, workspace_id, name, slug, status, metadata)
     SELECT b.id, ${workspaceExpression}, b.name,
-           trim(both '-' from lower(regexp_replace(trim(b.name), '[^a-zA-Z0-9]+', '-', 'g'))),
+           COALESCE(NULLIF(trim(both '-' from lower(regexp_replace(trim(b.name), '[^a-zA-Z0-9]+', '-', 'g'))), ''), 'brand-' || left(b.id::text, 8)),
            'ACTIVE', jsonb_build_object('compatibility_source','public.brands')
     FROM public.brands b
     WHERE NOT EXISTS (SELECT 1 FROM v2_2.brands v WHERE v.id=b.id)
@@ -151,7 +207,7 @@ async function main() {
   const db = new Pool({ connectionString: discovered.url, max: 2 });
   try {
     await db.query('SELECT 1');
-    await ensureV21(db);
+    const compatibilityFoundation = await ensureV21(db);
 
     for (const relative of V22_V23_MIGRATIONS) await applyMigration(db, relative);
 
@@ -162,9 +218,10 @@ async function main() {
     console.log('\nLOCAL LIVE PRODUCTION ENVIRONMENT READY');
     console.log(`Database source: ${discovered.source}`);
     console.log(`Storage root: ${storageRoot}`);
+    console.log(`Compatibility foundation created: ${compatibilityFoundation.created ? 'YES' : 'NO'}`);
     console.log(`Legacy brands copied: ${compatibility.copied || 0}`);
     if (compatibility.skipped) console.log(`Legacy brand compatibility: ${compatibility.skipped}`);
-    console.log(`V2.1 execution schema: READY`);
+    console.log('V2.1 execution schema: READY');
     console.log(`V2.2 growth schema: ${(await tableExists(db, 'v2_2', 'brands')) ? 'READY' : 'MISSING'}`);
     console.log(`V2.3 review schema: ${reviewReady ? 'READY' : 'MISSING'}`);
     console.log('Active brands:');
@@ -183,6 +240,8 @@ main().catch((error) => {
 module.exports = {
   V21_MIGRATIONS,
   V22_V23_MIGRATIONS,
+  LEGACY_INDICATORS,
   discoverDatabaseUrl,
+  ensureCompatibilityFoundation,
   hasPlaceholder,
 };
