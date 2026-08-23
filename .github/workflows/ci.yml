@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "feat/v2.3-control-dashboard"
+      - "feat/v2.4-controlled-live-production-test"
       - "release/**"
       - "develop/**"
     paths:
@@ -13,6 +14,8 @@ on:
       - "apps/**"
       - "scripts/**"
       - "docs/V2.3-CONTROL-DASHBOARD.md"
+      - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
+      - "config/live-production.example.json"
       - "worker/**"
       - "tests/**"
       - "migrations/**"
@@ -153,6 +156,14 @@ jobs:
           node --check apps/dashboard/server/provider-status.js
           node --check apps/dashboard/server/index.js
           node --check scripts/dashboard-dev.js
+          node --check scripts/dashboard-local.js
+          node --check scripts/local-runtime.js
+          node --check scripts/live-production.js
+          node --check src/v2.4/live-production-service.js
+          node --check src/v2.4/schema-compatibility.js
+          node --check tests/v2.4-live-production-test.js
+          node --check tests/v2.4-legacy-schema-compatibility-postgres-test.js
+          node --check tests/v2.3-local-runtime-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -283,6 +294,9 @@ jobs:
       - name: Run V2.3 Control API and review contracts
         run: npm run test:v2.3:control
         timeout-minutes: 3
+      - name: Run safe local dashboard runtime contract
+        run: npm run test:v2.3:local-runtime
+        timeout-minutes: 2
       - name: Run V2.3 dashboard client tests
         run: npm run test:v2.3:client
         timeout-minutes: 3
@@ -292,6 +306,17 @@ jobs:
       - name: Verify V2.2 growth contracts
         run: npm run test:v2.2:growth-foundation
         timeout-minutes: 2
+      - name: Run V2.4 controlled live production boundary (mocked, no paid APIs)
+        run: npm run test:v2.4:live-production
+        timeout-minutes: 2
+      - name: Run V2.4 legacy schema compatibility (mocked, no paid APIs)
+        env:
+          CONTENT_FACTORY_TEST_DATABASE: "1"
+          PGDATABASE: v24_legacy_test
+        run: |
+          createdb --maintenance-db=postgres v24_legacy_test
+          npm run test:v2.4:legacy-compat:postgres
+        timeout-minutes: 5
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
@@ -310,6 +335,8 @@ jobs:
           test -s migrations/20260821_v2_1_stage_claim_job_lease_fencing.sql
           test -s migrations/20260821_v2_1_asset_registry.sql
           test -s migrations/20260823_v2_3_control_reviews.sql
+          test -s migrations/20260823_v2_4_legacy_schema_compatibility.sql
+          test -s migrations/20260823_v2_4_canonical_production_ownership.sql
         timeout-minutes: 2
       - name: Check required project files
         run: |

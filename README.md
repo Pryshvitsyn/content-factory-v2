@@ -265,14 +265,20 @@ CI also verifies runtime syntax, provider routing, artifact/storage integration,
 
 The local Control Dashboard exposes persisted brand, production, stage, artifact, review and provider state through a thin Node API and five-screen React interface. Exact immutable master versions can be approved or rejected without publishing them.
 
-After applying the V2.3 review migration to a development database:
+After applying the V2.3 review migration to a development database, use the placeholder-safe local runner:
 
 ```bash
 npm install
-npm run dashboard
+npm run dashboard:local
 ```
 
-Open `http://localhost:3000`. The API binds to `127.0.0.1:3001` by default. See [`docs/V2.3-CONTROL-DASHBOARD.md`](docs/V2.3-CONTROL-DASHBOARD.md).
+Open `http://127.0.0.1:3000`. The API binds to `127.0.0.1:3001` by default. The runner discovers `content_os`, uses the production artifact root, validates schema readiness, and rejects placeholder database URLs or occupied ports safely. See [`docs/V2.3-CONTROL-DASHBOARD.md`](docs/V2.3-CONTROL-DASHBOARD.md).
+
+## V2.4 Controlled Live Production
+
+V2.4 adds one CLI-only, operator-invoked path for a minimal Replicate video → immutable media → FFmpeg master → validation → V2.3 Review Queue run. It is never called by dashboard startup, tests, CI, migrations or workers. Live execution requires the explicit `LIVE_PAID_GENERATION=true` gate; `false` performs a non-paid dry-run. See [`docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md`](docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md).
+
+For a legacy local Content OS database, `npm run live:production:local` first applies the deterministic row-preserving compatibility bridge and then runs the full pre-paid schema/write/storage gate. Schema ownership and recovery details are documented in [`docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md`](docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md).
 
 ## Environment
 
