@@ -27,6 +27,7 @@ const V22_MIGRATIONS = [
   'migrations/20260822_v2_2_brand_brain_opportunities.sql',
 ];
 const V23_MIGRATIONS = ['migrations/20260823_v2_3_control_reviews.sql'];
+const V24_OWNERSHIP_MIGRATIONS = ['migrations/20260823_v2_4_canonical_production_ownership.sql'];
 
 function hasPlaceholder(url) { return !url || /(?:USER|PASSWORD|HOST)/.test(url); }
 
@@ -138,12 +139,14 @@ async function prepareDatabase(db) {
   const initialReport = await inspectSchemaCompatibility(db);
   if (initialReport.compatible) {
     const brands = await ensureLegacyBrands(db);
+    for (const relative of V24_OWNERSHIP_MIGRATIONS) await applyMigration(db, relative);
     return { report: await inspectSchemaCompatibility(db), brands, alreadyCompatible: true };
   }
   await ensureV21(db);
   for (const relative of V22_MIGRATIONS) await applyMigration(db, relative);
   const brands = await ensureLegacyBrands(db);
   await applyMigration(db, COMPATIBILITY_MIGRATION);
+  for (const relative of V24_OWNERSHIP_MIGRATIONS) await applyMigration(db, relative);
   for (const relative of V23_MIGRATIONS) await applyMigration(db, relative);
   const report = await inspectSchemaCompatibility(db);
   assertSchemaCompatible(report);
@@ -182,6 +185,7 @@ module.exports = {
   V21_MIGRATIONS,
   V22_MIGRATIONS,
   V23_MIGRATIONS,
+  V24_OWNERSHIP_MIGRATIONS,
   applyMigration,
   assertCompatibilityFoundation,
   discoverDatabaseUrl,

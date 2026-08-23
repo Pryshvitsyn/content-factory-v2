@@ -6,6 +6,7 @@ const {
   buildStructuredLiveInput,
   resolveLiveConfiguration,
 } = require('../src/v2.4/live-production-service');
+const { verifyTransactionalLiveWrites } = require('../src/v2.4/schema-compatibility');
 
 const BRAND_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_BRAND_ID = '99999999-9999-4999-8999-999999999999';
@@ -57,7 +58,8 @@ class FakeDb {
         jobId: this.job?.id || null, jobStatus: this.job?.status || null, payload: this.job?.payload || {}, result: this.job?.result || {} }] };
     }
     if (sql.includes('v2.4:create-production')) {
-      if (!this.production) this.production = { id: PRODUCTION_ID, workspace_id: values[0], brand_id: values[1], name: values[2], status: 'DRAFT', objective: values[3], metadata: JSON.parse(values[4]) };
+      if (!this.production) this.production = { id: PRODUCTION_ID, workspace_id: values[0], brand_id: values[1],
+        name: values[2], status: 'DRAFT', objective: values[3], metadata: JSON.parse(values[4]) };
       return { rows: [] };
     }
     if (sql.includes('v2.4:get-production-for-run')) return { rows: this.production ? [this.production] : [] };
@@ -118,6 +120,33 @@ async function main() {
   assert.throws(() => buildStructuredLiveInput(rawInput({ video: { prompt: '' } })), (error) => error.code === 'LIVE_INPUT_INVALID');
   assert.throws(() => buildStructuredLiveInput(rawInput({ video: { ...rawInput().video, go_fast: 'false' } })), (error) => error.code === 'LIVE_INPUT_INVALID');
 
+  const ownershipProbeQueries = [];
+  const ownershipProbeClient = {
+    async query(sql) {
+      ownershipProbeQueries.push(sql);
+      if (sql.includes('v2.4:probe-production')) return { rows: [{ id: PRODUCTION_ID }] };
+      if (sql.includes('v2.4:probe-job')) return { rows: [{ id: JOB_ID }] };
+      if (sql.includes('v2.4:probe-start-production')) {
+        const error = new Error(`Production ${PRODUCTION_ID} cannot run without tenant, business, brand and project ownership`);
+        error.code = 'P0001';
+        throw error;
+      }
+      return { rows: [] };
+    },
+    release() {},
+  };
+  await assert.rejects(
+    () => verifyTransactionalLiveWrites({ connect: async () => ownershipProbeClient }, {
+      workspaceId: WORKSPACE_ID, brandId: BRAND_ID, objective: 'ORGANIC_REACH',
+    }),
+    (error) => error.code === 'LIVE_TRANSACTION_PROBE_FAILED' && error.cause?.code === 'P0001',
+  );
+  assert.ok(ownershipProbeQueries.some((sql) => sql.includes('v2.4:probe-claim-job')),
+    'pre-paid probe must exercise job RUNNING transition');
+  assert.ok(ownershipProbeQueries.some((sql) => sql.includes('v2.4:probe-start-production')),
+    'pre-paid probe must exercise the production ownership guard');
+  assert.equal(ownershipProbeQueries.at(-1), 'ROLLBACK', 'failed ownership probe must roll back all writes');
+
   const dryDb = new FakeDb(); const dryCalls = []; const logs = [];
   const dryArtifactCalls = [];
   const dryService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: dryDb, masterOrchestrator: masterMock(dryDb, dryCalls), artifactService: artifactMock(dryArtifactCalls), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info: (...args) => logs.push(args) } });
@@ -153,7 +182,8 @@ async function main() {
   assert.equal(liveCalls.length, 1);
 
   const runningDb = new FakeDb();
-  runningDb.production = { id: PRODUCTION_ID, workspace_id: WORKSPACE_ID, brand_id: BRAND_ID, name: `v2.4-live:${input.liveTestKey}`, status: 'RUNNING', metadata: { live_input_fingerprint: input.fingerprint } };
+  runningDb.production = { id: PRODUCTION_ID, workspace_id: WORKSPACE_ID, brand_id: BRAND_ID,
+    name: `v2.4-live:${input.liveTestKey}`, status: 'RUNNING', metadata: { live_input_fingerprint: input.fingerprint } };
   runningDb.job = { id: JOB_ID, production_id: PRODUCTION_ID, status: 'RUNNING', result: {} };
   const runningCalls = [];
   const runningService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: runningDb, masterOrchestrator: masterMock(runningDb, runningCalls), artifactService: artifactMock(), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info() {} } });

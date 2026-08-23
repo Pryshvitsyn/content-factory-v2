@@ -15,19 +15,47 @@ const { inspectSchemaCompatibility, verifyTransactionalLiveWrites } = require('.
 const { prepareDatabase } = require('../scripts/prepare-local-live-production');
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001';
+const OTHER_WORKSPACE_ID = '10000000-0000-4000-8000-000000000099';
 const BRAND_ID = '20000000-0000-4000-8000-000000000002';
 const LEGACY_BRAND_ID = '30000000-0000-4000-8000-000000000003';
 const LEGACY_VARIANT_ID = '40000000-0000-4000-8000-000000000004';
 const LEGACY_PRODUCTION_ID = '50000000-0000-4000-8000-000000000005';
+const databaseUrl = process.env.DATABASE_URL && !/(?:USER|PASSWORD|HOST)/.test(process.env.DATABASE_URL)
+  ? process.env.DATABASE_URL : undefined;
 
 const db = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  host: process.env.DATABASE_URL ? undefined : process.env.PGHOST || '127.0.0.1',
-  port: process.env.DATABASE_URL ? undefined : Number(process.env.PGPORT || 5432),
-  user: process.env.DATABASE_URL ? undefined : process.env.PGUSER || 'postgres',
-  password: process.env.DATABASE_URL ? undefined : process.env.PGPASSWORD || 'postgres',
-  database: process.env.DATABASE_URL ? undefined : process.env.PGDATABASE || 'content_os',
+  connectionString: databaseUrl,
+  host: databaseUrl ? undefined : process.env.PGHOST || '127.0.0.1',
+  port: databaseUrl ? undefined : Number(process.env.PGPORT || 5432),
+  user: databaseUrl ? undefined : process.env.PGUSER || 'postgres',
+  password: databaseUrl ? undefined : process.env.PGPASSWORD || 'postgres',
+  database: databaseUrl ? undefined : process.env.PGDATABASE || 'content_os',
 });
+
+function configuredDatabaseName() {
+  if (databaseUrl) return new URL(databaseUrl).pathname.replace(/^\//, '');
+  return process.env.PGDATABASE || 'content_os';
+}
+
+function testDatabaseUrl() {
+  if (databaseUrl) return databaseUrl;
+  const user = encodeURIComponent(process.env.PGUSER || 'postgres');
+  const password = process.env.PGPASSWORD ? `:${encodeURIComponent(process.env.PGPASSWORD)}` : '';
+  const host = process.env.PGHOST || '127.0.0.1';
+  const port = Number(process.env.PGPORT || 5432);
+  return `postgresql://${user}${password}@${host}:${port}/${encodeURIComponent(configuredDatabaseName())}`;
+}
+
+function assertDisposableDatabase() {
+  const database = configuredDatabaseName();
+  if (process.env.CONTENT_FACTORY_TEST_DATABASE !== '1' || database === 'content_os') {
+    const error = new Error(
+      'This destructive fixture test requires CONTENT_FACTORY_TEST_DATABASE=1 and a dedicated database other than content_os.',
+    );
+    error.code = 'TEST_DATABASE_NOT_EXPLICIT';
+    throw error;
+  }
+}
 
 async function createLegacyFixture() {
   await db.query('DROP SCHEMA IF EXISTS v2_3 CASCADE');
@@ -40,21 +68,52 @@ async function createLegacyFixture() {
   await db.query(`CREATE TABLE public.workspaces(id uuid PRIMARY KEY,name text NOT NULL,created_at timestamptz NOT NULL DEFAULT now())`);
   await db.query(`CREATE TABLE public.generation_jobs(id uuid PRIMARY KEY)`);
   await db.query(`CREATE TABLE public.brands(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES public.workspaces(id),name text NOT NULL,created_at timestamptz NOT NULL DEFAULT now())`);
-  await db.query(`INSERT INTO public.workspaces(id,name) VALUES($1,'Legacy workspace')`, [WORKSPACE_ID]);
+  await db.query(`INSERT INTO public.workspaces(id,name) VALUES($1,'Legacy workspace'),($2,'Other workspace')`, [WORKSPACE_ID, OTHER_WORKSPACE_ID]);
   await db.query(`INSERT INTO public.brands(id,workspace_id,name) VALUES($1,$2,'Attune fixture')`, [BRAND_ID, WORKSPACE_ID]);
 
   await db.query('CREATE SCHEMA v2_1');
+  await db.query(`CREATE TABLE v2_1.tenants(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL UNIQUE,
+    status text NOT NULL DEFAULT 'ACTIVE',metadata jsonb NOT NULL DEFAULT '{}',created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now())`);
+  await db.query(`CREATE TABLE v2_1.businesses(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL REFERENCES v2_1.tenants(id),
+    name text NOT NULL,industry text,status text NOT NULL DEFAULT 'ACTIVE',rules jsonb NOT NULL DEFAULT '{}',created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),UNIQUE(tenant_id,name))`);
   await db.query(`CREATE TABLE v2_1.brands(id uuid PRIMARY KEY,business_id uuid NOT NULL,name text NOT NULL,
     voice jsonb NOT NULL DEFAULT '{}',visual_identity jsonb NOT NULL DEFAULT '{}',rules jsonb NOT NULL DEFAULT '{}',
-    compliance_rules jsonb NOT NULL DEFAULT '{}',status text NOT NULL DEFAULT 'ACTIVE',created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now())`);
-  await db.query(`INSERT INTO v2_1.brands(id,business_id,name) VALUES($1,gen_random_uuid(),'Legacy-only brand')`, [LEGACY_BRAND_ID]);
+    compliance_rules jsonb NOT NULL DEFAULT '{}',status text NOT NULL DEFAULT 'ACTIVE',created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(business_id,name),FOREIGN KEY(business_id) REFERENCES v2_1.businesses(id))`);
+  const legacyTenant = await db.query(`INSERT INTO v2_1.tenants(name) VALUES('Legacy tenant') RETURNING id`);
+  const legacyBusiness = await db.query(`INSERT INTO v2_1.businesses(tenant_id,name) VALUES($1,'Legacy business') RETURNING id`, [legacyTenant.rows[0].id]);
+  await db.query(`INSERT INTO v2_1.brands(id,business_id,name) VALUES($1,$2,'Legacy-only brand')`, [LEGACY_BRAND_ID, legacyBusiness.rows[0].id]);
+  await db.query(`CREATE TABLE v2_1.projects(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL,status text NOT NULL DEFAULT 'ACTIVE',
+    config jsonb NOT NULL DEFAULT '{}',created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),
+    tenant_id uuid REFERENCES v2_1.tenants(id),business_id uuid REFERENCES v2_1.businesses(id),brand_id uuid REFERENCES v2_1.brands(id),series_id uuid)`);
   await db.query(`CREATE TABLE v2_1.content_variants(id uuid PRIMARY KEY)`);
   await db.query(`INSERT INTO v2_1.content_variants(id) VALUES($1)`, [LEGACY_VARIANT_ID]);
   await db.query(`CREATE TABLE v2_1.productions(
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),content_variant_id uuid NOT NULL REFERENCES v2_1.content_variants(id),
-    production_version integer NOT NULL DEFAULT 1,brand_id uuid, status text NOT NULL DEFAULT 'DRAFT',metadata jsonb NOT NULL DEFAULT '{}',
+    production_version integer NOT NULL DEFAULT 1,tenant_id uuid REFERENCES v2_1.tenants(id),business_id uuid REFERENCES v2_1.businesses(id),
+    brand_id uuid,project_id uuid REFERENCES v2_1.projects(id),status text NOT NULL DEFAULT 'DRAFT',metadata jsonb NOT NULL DEFAULT '{}',
     CONSTRAINT productions_brand_fk FOREIGN KEY(brand_id) REFERENCES v2_1.brands(id),
     CONSTRAINT productions_status_check CHECK(status IN('DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED')))`);
+  await db.query(`CREATE FUNCTION v2_1.enforce_production_boundary() RETURNS trigger LANGUAGE plpgsql AS $$
+    DECLARE project_row record; brand_business uuid; business_tenant uuid;
+    BEGIN
+      IF NEW.tenant_id IS NULL OR NEW.business_id IS NULL OR NEW.brand_id IS NULL OR NEW.project_id IS NULL THEN
+        IF NEW.status IN ('RUNNING','COMPLETED') THEN RAISE EXCEPTION 'Production % cannot run without tenant, business, brand and project ownership',NEW.id; END IF;
+        RETURN NEW;
+      END IF;
+      SELECT id,tenant_id,business_id INTO project_row FROM v2_1.projects WHERE id=NEW.project_id;
+      IF NOT FOUND OR project_row.tenant_id IS DISTINCT FROM NEW.tenant_id OR project_row.business_id IS DISTINCT FROM NEW.business_id THEN
+        RAISE EXCEPTION 'Production ownership does not match project ownership';
+      END IF;
+      SELECT tenant_id INTO business_tenant FROM v2_1.businesses WHERE id=NEW.business_id;
+      IF business_tenant IS DISTINCT FROM NEW.tenant_id THEN RAISE EXCEPTION 'Production business does not belong to production tenant'; END IF;
+      SELECT business_id INTO brand_business FROM v2_1.brands WHERE id=NEW.brand_id;
+      IF brand_business IS DISTINCT FROM NEW.business_id THEN RAISE EXCEPTION 'Production brand does not belong to production business'; END IF;
+      RETURN NEW;
+    END $$`);
+  await db.query(`CREATE TRIGGER trg_productions_boundary BEFORE INSERT OR UPDATE ON v2_1.productions
+    FOR EACH ROW EXECUTE FUNCTION v2_1.enforce_production_boundary()`);
   await db.query(`INSERT INTO v2_1.productions(id,content_variant_id,brand_id) VALUES($1,$2,$3)`, [LEGACY_PRODUCTION_ID, LEGACY_VARIANT_ID, LEGACY_BRAND_ID]);
 
   await db.query(`CREATE TABLE v2_1.jobs(
@@ -81,6 +140,20 @@ async function createLegacyFixture() {
   await db.query(`CREATE FUNCTION v2_1.claim_job(text,integer) RETURNS TABLE(id uuid) LANGUAGE sql AS $$ SELECT NULL::uuid WHERE false $$`);
 }
 
+async function createCleanFixture() {
+  await db.query('DROP SCHEMA IF EXISTS v2_3 CASCADE');
+  await db.query('DROP SCHEMA IF EXISTS v2_2 CASCADE');
+  await db.query('DROP SCHEMA IF EXISTS v2_1 CASCADE');
+  await db.query('DROP TABLE IF EXISTS public.brands CASCADE');
+  await db.query('DROP TABLE IF EXISTS public.generation_jobs CASCADE');
+  await db.query('DROP TABLE IF EXISTS public.workspaces CASCADE');
+  await db.query(`CREATE TABLE public.workspaces(id uuid PRIMARY KEY,name text NOT NULL,created_at timestamptz NOT NULL DEFAULT now())`);
+  await db.query(`CREATE TABLE public.generation_jobs(id uuid PRIMARY KEY)`);
+  await db.query(`CREATE TABLE public.brands(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES public.workspaces(id),name text NOT NULL,created_at timestamptz NOT NULL DEFAULT now())`);
+  await db.query(`INSERT INTO public.workspaces(id,name) VALUES($1,'Clean workspace')`, [WORKSPACE_ID]);
+  await db.query(`INSERT INTO public.brands(id,workspace_id,name) VALUES($1,$2,'Attune clean fixture')`, [BRAND_ID, WORKSPACE_ID]);
+}
+
 function rawInput() {
   return {
     brand_id: BRAND_ID, live_test_key: 'legacy-upgrade-e2e', title: 'Legacy upgrade proof', objective: 'ORGANIC_REACH',
@@ -94,6 +167,7 @@ function rawInput() {
 function input() { return buildStructuredLiveInput(rawInput()); }
 
 async function main() {
+  assertDisposableDatabase();
   const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-v24-legacy-'));
   try {
     await createLegacyFixture();
@@ -119,16 +193,24 @@ async function main() {
     assert.match(brandFk.rows[0].definition, /REFERENCES v2_2\.brands\(id\)/);
     assert.equal(brandFk.rows[0].convalidated, false);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_2.brands WHERE id=$1 AND workspace_id=$2`, [BRAND_ID, WORKSPACE_ID])).rows[0].count, 1);
+    assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_1.brands WHERE id=$1`, [BRAND_ID])).rows[0].count, 0,
+      'compatibility must not duplicate the canonical V2.2 brand into the legacy ownership model');
+    const ownershipGuard = await db.query(`SELECT pg_get_functiondef(tg.tgfoid) AS definition FROM pg_trigger tg
+      WHERE tg.tgrelid='v2_1.productions'::regclass AND tg.tgname='trg_productions_boundary'`);
+    assert.match(ownershipGuard.rows[0].definition, /v2_2\.brands/, 'production guard must enforce canonical V2.2 ownership');
     assert.equal((await db.query(`SELECT pg_get_function_result('v2_1.claim_job(text,integer)'::regprocedure) AS result`)).rows[0].result, 'SETOF v2_1.jobs');
 
     await verifyTransactionalLiveWrites(db, { workspaceId: WORKSPACE_ID, brandId: BRAND_ID, objective: 'ORGANIC_REACH' });
+    await assert.rejects(() => db.query(`INSERT INTO v2_1.productions(workspace_id,brand_id,name,status,metadata)
+      VALUES($1,$2,'cross-brand-probe','DRAFT','{}')`, [OTHER_WORKSPACE_ID, BRAND_ID]),
+    /workspace does not own canonical brand/);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_1.productions WHERE name LIKE 'v2.4-preflight:%'`)).rows[0].count, 0,
       'transactional pre-paid probe must roll back all writes');
     const inputFile = path.join(storageRoot, 'operator-input.json');
     await fs.writeFile(inputFile, JSON.stringify(rawInput()), 'utf8');
     const dryRun = spawnSync(process.execPath, ['scripts/live-production.js'], {
       cwd: path.resolve(__dirname, '..'), encoding: 'utf8',
-      env: { ...process.env, LIVE_PAID_GENERATION: 'false', VIDEO_PROVIDER: 'replicate', REPLICATE_API_TOKEN: 'synthetic-test-token',
+      env: { ...process.env, DATABASE_URL: testDatabaseUrl(), LIVE_PAID_GENERATION: 'false', VIDEO_PROVIDER: 'replicate', REPLICATE_API_TOKEN: 'synthetic-test-token',
         CONTENT_FACTORY_STORAGE_ROOT: storageRoot, LIVE_PRODUCTION_INPUT: inputFile },
     });
     assert.equal(dryRun.status, 0, `${dryRun.stdout}\n${dryRun.stderr}`);
@@ -165,6 +247,12 @@ async function main() {
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_3.master_review_decisions`)).rows[0].count, 0);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_1.publications WHERE publication_key IS NOT NULL`)).rows[0].count, 0);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_1.productions WHERE name LIKE 'v2.4-preflight:%'`)).rows[0].count, 0);
+
+    await createCleanFixture();
+    await prepareDatabase(db);
+    const cleanReport = await inspectSchemaCompatibility(db);
+    assert.equal(cleanReport.compatible, true, JSON.stringify(cleanReport.issues, null, 2));
+    await verifyTransactionalLiveWrites(db, { workspaceId: WORKSPACE_ID, brandId: BRAND_ID, objective: 'ORGANIC_REACH' });
     console.log('V2.4 legacy schema compatibility + no-paid durable production integration passed.');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_3 CASCADE').catch(() => {});

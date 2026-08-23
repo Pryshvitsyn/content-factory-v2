@@ -104,7 +104,7 @@ function issue(severity, code, subject, message) { return { severity, code, subj
 
 async function inspectSchemaCompatibility(db) {
   const tableNames = Object.keys(TABLE_CONTRACTS);
-  const [columnsResult, constraintsResult, indexesResult, functionsResult] = await Promise.all([
+  const [columnsResult, constraintsResult, indexesResult, functionsResult, triggersResult] = await Promise.all([
     db.query(`/* v2.4:schema-columns */
       SELECT table_schema, table_name, column_name, data_type, is_nullable, column_default
       FROM information_schema.columns
@@ -132,6 +132,12 @@ async function inspectSchemaCompatibility(db) {
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='v2_1' AND p.proname = ANY($1::text[])
       ORDER BY p.proname, arguments`, [[...new Set(Object.keys(FUNCTION_CONTRACTS).map((key) => key.split('(')[0]))]]),
+    db.query(`/* v2.4:schema-production-triggers */
+      SELECT tg.tgname,p.proname,pg_get_triggerdef(tg.oid) AS definition,
+             pg_get_functiondef(p.oid) AS function_definition
+      FROM pg_trigger tg JOIN pg_proc p ON p.oid=tg.tgfoid
+      WHERE tg.tgrelid=to_regclass('v2_1.productions') AND NOT tg.tgisinternal
+      ORDER BY tg.tgname`),
   ]);
 
   const issues = [];
@@ -213,6 +219,17 @@ async function inspectSchemaCompatibility(db) {
     if (!found) issues.push(issue('ERROR', 'FOREIGN_KEY_MISSING', `${table}.${column}`, `must reference ${target}(id)`));
   }
 
+  const ownershipGuard = triggersResult.rows.find((row) => row.tgname === 'trg_productions_boundary');
+  const ownershipDefinition = compact(ownershipGuard?.definition);
+  const ownershipFunction = compact(ownershipGuard?.function_definition);
+  if (!ownershipGuard) {
+    issues.push(issue('ERROR', 'PRODUCTION_OWNERSHIP_GUARD_MISSING', 'v2_1.productions', 'canonical workspace/brand trigger is missing'));
+  } else if (!ownershipDefinition.includes('beforeinsertorupdate') || !ownershipFunction.includes('v2_2.brands')
+      || !ownershipFunction.includes('new.workspace_id') || !ownershipFunction.includes('new.brand_id')) {
+    issues.push(issue('ERROR', 'PRODUCTION_OWNERSHIP_GUARD_MISMATCH', ownershipGuard.tgname,
+      'guard must enforce canonical v2_2 brand ownership within the production workspace'));
+  }
+
   const functions = new Map(functionsResult.rows.map((row) => {
     const args = row.arguments.split(',').map((part) => part.trim().split(/\s+/).at(-1)).join(',');
     return [`${row.proname}(${args})`, row.result];
@@ -261,6 +278,13 @@ async function verifyTransactionalLiveWrites(db, { workspaceId, brandId, objecti
       INSERT INTO v2_1.jobs(production_id,stage,status,idempotency_key,payload)
       VALUES($1,'EDIT','QUEUED',$2,$3::jsonb) RETURNING id`,
     [productionId, `v2.4-preflight:${nonce}`, JSON.stringify({ source: 'v2.4-prepaid-rollback-probe' })]);
+    await client.query(`/* v2.4:probe-claim-job */
+      UPDATE v2_1.jobs SET status='RUNNING',worker_id='v2.4-preflight',started_at=coalesce(started_at,now()),
+        lease_expires_at=now()+interval '5 minutes',heartbeat_at=now(),updated_at=now()
+      WHERE id=$1 AND status='QUEUED'`, [job.rows[0].id]);
+    await client.query(`/* v2.4:probe-start-production */
+      UPDATE v2_1.productions SET status='RUNNING',started_at=coalesce(started_at,now()),updated_at=now()
+      WHERE id=$1 AND status='DRAFT'`, [productionId]);
     await client.query(`/* v2.4:probe-stage */
       INSERT INTO v2_1.stage_runs(job_id,stage,attempt,status,max_attempts)
       VALUES($1,'EDIT',1,'PENDING',3)`, [job.rows[0].id]);
