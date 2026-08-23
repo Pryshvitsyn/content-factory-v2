@@ -6,6 +6,8 @@
   "directories": { "test": "tests" },
   "scripts": {
     "live:production": "node scripts/live-production.js",
+    "live:production:prepare": "node scripts/prepare-local-live-production.js",
+    "live:production:local": "node scripts/live-production-local.js",
     "test:v2.4:live-production": "node tests/v2.4-live-production-test.js",
     "dashboard": "node scripts/dashboard-dev.js",
     "dashboard:api": "node apps/dashboard/server/index.js",
