@@ -18,21 +18,46 @@ function inspectEnv(container) {
   }));
 }
 
+function databaseExists(container, user, database) {
+  if (!/^[A-Za-z0-9_.-]+$/.test(database)) return false;
+  try {
+    const escaped = database.replace(/'/g, "''");
+    const raw = execFileSync('docker', [
+      'exec', container, 'psql', '-U', user, '-d', 'postgres', '-tAc',
+      `SELECT 1 FROM pg_database WHERE datname='${escaped}'`,
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return raw === '1';
+  } catch {
+    return false;
+  }
+}
+
 function discover(env) {
-  if (!placeholder(env.DATABASE_URL)) return env.DATABASE_URL;
+  if (!placeholder(env.DATABASE_URL)) {
+    return { url: env.DATABASE_URL, database: new URL(env.DATABASE_URL).pathname.replace(/^\//, ''), source: 'DATABASE_URL' };
+  }
+
   const container = env.CONTENT_FACTORY_POSTGRES_CONTAINER || 'n8n-postgres-1';
   const values = inspectEnv(container);
   const user = values.POSTGRES_USER || 'postgres';
   const password = values.POSTGRES_PASSWORD || '';
-  const database = values.POSTGRES_DB || 'postgres';
+  const explicitDatabase = env.CONTENT_FACTORY_DATABASE;
+  const database = explicitDatabase
+    || (databaseExists(container, user, 'content_os') ? 'content_os' : (values.POSTGRES_DB || 'postgres'));
+
   let port = 5432;
   try {
     const raw = execFileSync('docker', ['port', container, '5432/tcp'], { encoding: 'utf8' }).trim();
     const match = raw.match(/:(\d+)$/m);
     if (match) port = Number(match[1]);
   } catch {}
+
   const auth = password ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}` : encodeURIComponent(user);
-  return `postgresql://${auth}@127.0.0.1:${port}/${encodeURIComponent(database)}`;
+  return {
+    url: `postgresql://${auth}@127.0.0.1:${port}/${encodeURIComponent(database)}`,
+    database,
+    source: `docker:${container}`,
+  };
 }
 
 function run(script, env) {
@@ -42,7 +67,7 @@ function run(script, env) {
 }
 
 try {
-  const databaseUrl = discover(process.env);
+  const discovered = discover(process.env);
   const storageRoot = process.env.CONTENT_FACTORY_STORAGE_ROOT || path.join(os.homedir(), '.content-factory', 'storage');
   const inputFile = process.env.LIVE_PRODUCTION_INPUT || '/tmp/live-production.json';
   if (!fs.existsSync(inputFile)) {
@@ -53,7 +78,7 @@ try {
 
   const env = {
     ...process.env,
-    DATABASE_URL: databaseUrl,
+    DATABASE_URL: discovered.url,
     CONTENT_FACTORY_STORAGE_ROOT: storageRoot,
     LIVE_PRODUCTION_INPUT: inputFile,
     LIVE_PAID_GENERATION: process.env.LIVE_PAID_GENERATION || 'false',
@@ -61,6 +86,7 @@ try {
   };
 
   console.log(`Local live mode: ${env.LIVE_PAID_GENERATION === 'true' ? 'PAID LIVE' : 'DRY RUN ($0)'}`);
+  console.log(`Database: ${discovered.database} (${discovered.source})`);
   console.log(`Input: ${inputFile}`);
   console.log('Preparing local Content Factory database/storage...');
   run(path.resolve('scripts/prepare-local-live-production.js'), env);
