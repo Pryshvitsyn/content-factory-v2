@@ -60,7 +60,7 @@ function discoverDatabaseUrl(env = process.env) {
   }
   const user = values.POSTGRES_USER || 'postgres';
   const password = values.POSTGRES_PASSWORD || '';
-  const database = values.POSTGRES_DB || 'postgres';
+  const database = env.CONTENT_FACTORY_DATABASE || 'content_os';
   const port = dockerPort(container);
   const auth = password ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}` : encodeURIComponent(user);
   return { url: `postgresql://${auth}@127.0.0.1:${port}/${encodeURIComponent(database)}`, source: `docker:${container}` };
@@ -72,8 +72,14 @@ async function tableExists(db, schema, table) {
 }
 
 async function applyMigration(db, relative) {
+  console.log(`Applying/verifying: ${relative}`);
   const sql = await fs.readFile(path.resolve(relative), 'utf8');
-  await db.query(sql);
+  try {
+    await db.query(sql);
+  } catch (error) {
+    error.message = `${relative}: ${error.message}`;
+    throw error;
+  }
   console.log(`Applied/verified: ${relative}`);
 }
 
@@ -143,12 +149,98 @@ async function ensureCompatibilityFoundation(db) {
   return { created: true, workspaceCreated, generationJobsCreated };
 }
 
+async function normalizeLegacyV21(db) {
+  const exists = await tableExists(db, 'v2_1', 'productions');
+  if (!exists) return;
+
+  console.log('Normalizing legacy V2.1 table shape (additive only)...');
+
+  await db.query(`
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS workspace_id uuid REFERENCES public.workspaces(id) ON DELETE CASCADE;
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS name text;
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS status text DEFAULT 'DRAFT';
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS started_at timestamptz;
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+    ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb;
+  `);
+
+  if (await tableExists(db, 'v2_1', 'jobs')) {
+    await db.query(`
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS production_id uuid REFERENCES v2_1.productions(id) ON DELETE CASCADE;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS generation_job_id uuid REFERENCES public.generation_jobs(id) ON DELETE SET NULL;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS stage text;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS status text DEFAULT 'QUEUED';
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS attempt integer DEFAULT 1;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS max_attempts integer DEFAULT 3;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS worker_id text;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS heartbeat_at timestamptz;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS idempotency_key text;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS payload jsonb DEFAULT '{}'::jsonb;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS result jsonb DEFAULT '{}'::jsonb;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS error jsonb DEFAULT '{}'::jsonb;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS started_at timestamptz;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+      ALTER TABLE v2_1.jobs ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+    `);
+  }
+
+  if (await tableExists(db, 'v2_1', 'stage_runs')) {
+    await db.query(`
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS job_id uuid REFERENCES v2_1.jobs(id) ON DELETE CASCADE;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS stage text;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS attempt integer DEFAULT 1;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS status text DEFAULT 'PENDING';
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS worker_id text;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS heartbeat_at timestamptz;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS input_artifacts jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS output_artifacts jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS input_fingerprint text;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS output_fingerprint text;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS max_attempts integer DEFAULT 3;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS error jsonb DEFAULT '{}'::jsonb;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS started_at timestamptz;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+      ALTER TABLE v2_1.stage_runs ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+    `);
+  }
+
+  if (await tableExists(db, 'v2_1', 'stage_definitions')) {
+    await db.query(`
+      ALTER TABLE v2_1.stage_definitions ADD COLUMN IF NOT EXISTS sequence_no integer;
+      ALTER TABLE v2_1.stage_definitions ADD COLUMN IF NOT EXISTS terminal boolean DEFAULT false;
+      ALTER TABLE v2_1.stage_definitions ADD COLUMN IF NOT EXISTS retryable boolean DEFAULT true;
+    `);
+  }
+
+  if (await tableExists(db, 'v2_1', 'concurrency_certifications')) {
+    await db.query(`ALTER TABLE v2_1.concurrency_certifications ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now()`);
+  }
+
+  if (await tableExists(db, 'v2_1', 'asset_registry')) {
+    await db.query(`
+      ALTER TABLE v2_1.asset_registry ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+      ALTER TABLE v2_1.asset_registry ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+      ALTER TABLE v2_1.asset_registry ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb;
+    `);
+  }
+}
+
 async function ensureV21(db) {
   const compatibility = await ensureCompatibilityFoundation(db);
   const existed = await tableExists(db, 'v2_1', 'productions');
   if (!existed) console.log('V2.1 schema not found; bootstrapping canonical V2.1 migrations...');
   else console.log('V2.1 schema found; verifying canonical V2.1 migrations...');
 
+  await normalizeLegacyV21(db);
   for (const relative of V21_MIGRATIONS) await applyMigration(db, relative);
 
   const requiredTables = ['productions', 'jobs', 'stage_runs', 'stage_definitions', 'asset_registry'];
@@ -243,5 +335,6 @@ module.exports = {
   LEGACY_INDICATORS,
   discoverDatabaseUrl,
   ensureCompatibilityFoundation,
+  normalizeLegacyV21,
   hasPlaceholder,
 };
