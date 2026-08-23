@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "feat/v2.3-control-dashboard"
+      - "feat/v2.4-controlled-live-production-test"
       - "release/**"
       - "develop/**"
     paths:
@@ -13,6 +14,8 @@ on:
       - "apps/**"
       - "scripts/**"
       - "docs/V2.3-CONTROL-DASHBOARD.md"
+      - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
+      - "config/live-production.example.json"
       - "worker/**"
       - "tests/**"
       - "migrations/**"
@@ -153,6 +156,9 @@ jobs:
           node --check apps/dashboard/server/provider-status.js
           node --check apps/dashboard/server/index.js
           node --check scripts/dashboard-dev.js
+          node --check scripts/live-production.js
+          node --check src/v2.4/live-production-service.js
+          node --check tests/v2.4-live-production-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -291,6 +297,9 @@ jobs:
         timeout-minutes: 3
       - name: Verify V2.2 growth contracts
         run: npm run test:v2.2:growth-foundation
+        timeout-minutes: 2
+      - name: Run V2.4 controlled live production boundary (mocked, no paid APIs)
+        run: npm run test:v2.4:live-production
         timeout-minutes: 2
 
       - name: Check smoke test syntax

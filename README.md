@@ -274,6 +274,10 @@ npm run dashboard
 
 Open `http://localhost:3000`. The API binds to `127.0.0.1:3001` by default. See [`docs/V2.3-CONTROL-DASHBOARD.md`](docs/V2.3-CONTROL-DASHBOARD.md).
 
+## V2.4 Controlled Live Production
+
+V2.4 adds one CLI-only, operator-invoked path for a minimal Replicate video → immutable media → FFmpeg master → validation → V2.3 Review Queue run. It is never called by dashboard startup, tests, CI, migrations or workers. Live execution requires the explicit `LIVE_PAID_GENERATION=true` gate; `false` performs a non-paid dry-run. See [`docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md`](docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md).
+
 ## Environment
 
 Create a local `.env` from `.env.example`.

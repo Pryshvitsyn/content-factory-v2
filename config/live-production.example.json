@@ -1,0 +1,36 @@
+{
+  "brand_id": "00000000-0000-4000-8000-000000000000",
+  "live_test_key": "v2.4-first-real-e2e",
+  "title": "Mediterranean Villa Live Test",
+  "objective": "ORGANIC_REACH",
+  "hook": "Imagine waking up here.",
+  "cta": "Explore the villa.",
+  "scene": {
+    "visual": "A premium Mediterranean villa reveal at golden hour.",
+    "dialogue_or_voiceover": "Imagine waking up here. Explore the villa."
+  },
+  "shot": {
+    "shot_id": "villa-shot-1",
+    "framing": "vertical wide establishing shot",
+    "camera": "slow cinematic push-in",
+    "subject": "Mediterranean villa and infinity pool",
+    "action": "camera approaches the pool and villa"
+  },
+  "continuity": {
+    "characters": [],
+    "locations": ["Mediterranean villa"],
+    "products": ["luxury property"],
+    "wardrobe": [],
+    "props": ["infinity pool"],
+    "visual_style": "realistic premium architecture, warm natural light, luxury vertical social advertisement"
+  },
+  "video": {
+    "asset_id": "villa-video-1",
+    "prompt": "Luxury Mediterranean villa at golden hour, slow cinematic push-in toward an infinity pool, realistic premium architecture, warm natural light, vertical luxury social advertisement.",
+    "resolution": "480p",
+    "aspect_ratio": "9:16",
+    "num_frames": 81,
+    "frames_per_second": 16,
+    "go_fast": true
+  }
+}
