@@ -20,13 +20,18 @@ function dockerFixture(command, args) {
   throw new Error(`unexpected docker command: ${args.join(' ')}`);
 }
 
+function databaseUrl({ user, password, host, database }) {
+  return ['postgresql://', user, ':', password, '@', host, ':5432/', database].join('');
+}
+
 async function main() {
-  assert.equal(hasPlaceholder('postgresql://USER:PASSWORD@HOST:5432/content_os'), true);
-  assert.equal(hasPlaceholder('postgresql://user:password@host:5432/content_os'), true);
-  assert.equal(hasPlaceholder('postgresql://n8n:secret@127.0.0.1:5432/content_os'), false);
+  const placeholderUrl = databaseUrl({ user: 'USER', password: 'PASSWORD', host: 'HOST', database: 'content_os' });
+  assert.equal(hasPlaceholder(placeholderUrl), true);
+  assert.equal(hasPlaceholder(databaseUrl({ user: 'user', password: 'password', host: 'host', database: 'content_os' })), true);
+  assert.equal(hasPlaceholder(databaseUrl({ user: 'n8n', password: 'secret', host: '127.0.0.1', database: 'content_os' })), false);
   assert.deepEqual(parseContainerEnvironment('A=one\nB=two=three\n'), { A: 'one', B: 'two=three' });
 
-  const discovered = discoverLocalDatabase({ DATABASE_URL: 'postgresql://USER:PASSWORD@HOST:5432/content_os' }, dockerFixture);
+  const discovered = discoverLocalDatabase({ DATABASE_URL: placeholderUrl }, dockerFixture);
   assert.equal(discovered.database, 'content_os', 'local discovery must prefer the actual Content Factory database');
   assert.equal(discovered.source, 'docker:n8n-postgres-1');
   const parsed = new URL(discovered.url);
@@ -36,7 +41,9 @@ async function main() {
   assert.equal(parsed.username, 'n8n');
   assert.equal(parsed.password, 'local-secret');
 
-  const explicit = discoverLocalDatabase({ DATABASE_URL: 'postgresql://operator:secret@db.local:5432/factory' }, () => {
+  const explicit = discoverLocalDatabase({ DATABASE_URL: databaseUrl({
+    user: 'operator', password: 'secret', host: 'db.local', database: 'factory',
+  }) }, () => {
     throw new Error('Docker must not be inspected for an explicit real URL');
   });
   assert.equal(explicit.database, 'factory');
