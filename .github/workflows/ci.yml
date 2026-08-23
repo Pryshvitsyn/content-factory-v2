@@ -156,11 +156,14 @@ jobs:
           node --check apps/dashboard/server/provider-status.js
           node --check apps/dashboard/server/index.js
           node --check scripts/dashboard-dev.js
+          node --check scripts/dashboard-local.js
+          node --check scripts/local-runtime.js
           node --check scripts/live-production.js
           node --check src/v2.4/live-production-service.js
           node --check src/v2.4/schema-compatibility.js
           node --check tests/v2.4-live-production-test.js
           node --check tests/v2.4-legacy-schema-compatibility-postgres-test.js
+          node --check tests/v2.3-local-runtime-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -291,6 +294,9 @@ jobs:
       - name: Run V2.3 Control API and review contracts
         run: npm run test:v2.3:control
         timeout-minutes: 3
+      - name: Run safe local dashboard runtime contract
+        run: npm run test:v2.3:local-runtime
+        timeout-minutes: 2
       - name: Run V2.3 dashboard client tests
         run: npm run test:v2.3:client
         timeout-minutes: 3

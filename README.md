@@ -265,14 +265,14 @@ CI also verifies runtime syntax, provider routing, artifact/storage integration,
 
 The local Control Dashboard exposes persisted brand, production, stage, artifact, review and provider state through a thin Node API and five-screen React interface. Exact immutable master versions can be approved or rejected without publishing them.
 
-After applying the V2.3 review migration to a development database:
+After applying the V2.3 review migration to a development database, use the placeholder-safe local runner:
 
 ```bash
 npm install
-npm run dashboard
+npm run dashboard:local
 ```
 
-Open `http://localhost:3000`. The API binds to `127.0.0.1:3001` by default. See [`docs/V2.3-CONTROL-DASHBOARD.md`](docs/V2.3-CONTROL-DASHBOARD.md).
+Open `http://127.0.0.1:3000`. The API binds to `127.0.0.1:3001` by default. The runner discovers `content_os`, uses the production artifact root, validates schema readiness, and rejects placeholder database URLs or occupied ports safely. See [`docs/V2.3-CONTROL-DASHBOARD.md`](docs/V2.3-CONTROL-DASHBOARD.md).
 
 ## V2.4 Controlled Live Production
 

@@ -2,63 +2,9 @@
 
 require('dotenv').config({ quiet: true });
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { execFileSync, spawnSync } = require('node:child_process');
-
-function placeholder(url) {
-  return !url || /(?:USER|PASSWORD|HOST)/.test(url);
-}
-
-function inspectEnv(container) {
-  const raw = execFileSync('docker', ['inspect', '-f', '{{range .Config.Env}}{{println .}}{{end}}', container], { encoding: 'utf8' });
-  return Object.fromEntries(raw.split(/\r?\n/).filter(Boolean).map((line) => {
-    const index = line.indexOf('=');
-    return index === -1 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
-  }));
-}
-
-function databaseExists(container, user, database) {
-  if (!/^[A-Za-z0-9_.-]+$/.test(database)) return false;
-  try {
-    const escaped = database.replace(/'/g, "''");
-    const raw = execFileSync('docker', [
-      'exec', container, 'psql', '-U', user, '-d', 'postgres', '-tAc',
-      `SELECT 1 FROM pg_database WHERE datname='${escaped}'`,
-    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return raw === '1';
-  } catch {
-    return false;
-  }
-}
-
-function discover(env) {
-  if (!placeholder(env.DATABASE_URL)) {
-    return { url: env.DATABASE_URL, database: new URL(env.DATABASE_URL).pathname.replace(/^\//, ''), source: 'DATABASE_URL' };
-  }
-
-  const container = env.CONTENT_FACTORY_POSTGRES_CONTAINER || 'n8n-postgres-1';
-  const values = inspectEnv(container);
-  const user = values.POSTGRES_USER || 'postgres';
-  const password = values.POSTGRES_PASSWORD || '';
-  const explicitDatabase = env.CONTENT_FACTORY_DATABASE;
-  const database = explicitDatabase
-    || (databaseExists(container, user, 'content_os') ? 'content_os' : (values.POSTGRES_DB || 'postgres'));
-
-  let port = 5432;
-  try {
-    const raw = execFileSync('docker', ['port', container, '5432/tcp'], { encoding: 'utf8' }).trim();
-    const match = raw.match(/:(\d+)$/m);
-    if (match) port = Number(match[1]);
-  } catch {}
-
-  const auth = password ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}` : encodeURIComponent(user);
-  return {
-    url: `postgresql://${auth}@127.0.0.1:${port}/${encodeURIComponent(database)}`,
-    database,
-    source: `docker:${container}`,
-  };
-}
+const { spawnSync } = require('node:child_process');
+const { discoverLocalDatabase, localStorageRoot } = require('./local-runtime');
 
 function run(script, env) {
   const result = spawnSync(process.execPath, [script], { stdio: 'inherit', env });
@@ -67,8 +13,8 @@ function run(script, env) {
 }
 
 try {
-  const discovered = discover(process.env);
-  const storageRoot = process.env.CONTENT_FACTORY_STORAGE_ROOT || path.join(os.homedir(), '.content-factory', 'storage');
+  const discovered = discoverLocalDatabase(process.env);
+  const storageRoot = localStorageRoot(process.env);
   const inputFile = process.env.LIVE_PRODUCTION_INPUT || '/tmp/live-production.json';
   if (!fs.existsSync(inputFile)) {
     const error = new Error(`Live production input not found: ${inputFile}`);

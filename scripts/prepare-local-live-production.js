@@ -2,10 +2,9 @@
 
 require('dotenv').config({ quiet: true });
 const fs = require('node:fs/promises');
-const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 const { Pool } = require('pg');
+const { discoverLocalDatabase, hasPlaceholder, localStorageRoot } = require('./local-runtime');
 const {
   assertSchemaCompatible,
   formatCompatibilityReport,
@@ -29,37 +28,9 @@ const V22_MIGRATIONS = [
 const V23_MIGRATIONS = ['migrations/20260823_v2_3_control_reviews.sql'];
 const V24_OWNERSHIP_MIGRATIONS = ['migrations/20260823_v2_4_canonical_production_ownership.sql'];
 
-function hasPlaceholder(url) { return !url || /(?:USER|PASSWORD|HOST)/.test(url); }
-
-function dockerEnv(container) {
-  const raw = execFileSync('docker', ['inspect', '-f', '{{range .Config.Env}}{{println .}}{{end}}', container], { encoding: 'utf8' });
-  return Object.fromEntries(raw.split(/\r?\n/).filter(Boolean).map((line) => {
-    const index = line.indexOf('=');
-    return index === -1 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
-  }));
-}
-
-function dockerPort(container) {
-  try {
-    const raw = execFileSync('docker', ['port', container, '5432/tcp'], { encoding: 'utf8' }).trim();
-    return Number(raw.match(/:(\d+)$/m)?.[1] || 5432);
-  } catch { return 5432; }
-}
-
 function discoverDatabaseUrl(env = process.env) {
-  if (!hasPlaceholder(env.DATABASE_URL)) return { url: env.DATABASE_URL, source: 'DATABASE_URL' };
-  const container = env.CONTENT_FACTORY_POSTGRES_CONTAINER || 'n8n-postgres-1';
-  let values;
-  try { values = dockerEnv(container); } catch (cause) {
-    const error = new Error(`Unable to discover local PostgreSQL from Docker container '${container}'. Provide a real DATABASE_URL. ${cause.message}`);
-    error.code = 'LOCAL_DB_DISCOVERY_FAILED';
-    throw error;
-  }
-  const user = values.POSTGRES_USER || 'postgres';
-  const password = values.POSTGRES_PASSWORD || '';
-  const database = env.CONTENT_FACTORY_DATABASE || 'content_os';
-  const auth = password ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}` : encodeURIComponent(user);
-  return { url: `postgresql://${auth}@127.0.0.1:${dockerPort(container)}/${encodeURIComponent(database)}`, source: `docker:${container}` };
+  const discovered = discoverLocalDatabase(env);
+  return { url: discovered.url, source: discovered.source };
 }
 
 async function tableExists(db, schema, table) {
@@ -155,7 +126,7 @@ async function prepareDatabase(db) {
 
 async function main() {
   const discovered = discoverDatabaseUrl(process.env);
-  const storageRoot = process.env.CONTENT_FACTORY_STORAGE_ROOT || path.join(os.homedir(), '.content-factory', 'storage');
+  const storageRoot = localStorageRoot(process.env);
   await fs.mkdir(storageRoot, { recursive: true });
   const db = new Pool({ connectionString: discovered.url, max: 2 });
   try {
