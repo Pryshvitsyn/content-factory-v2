@@ -12,6 +12,11 @@ const OTHER_BRAND_ID = '99999999-9999-4999-8999-999999999999';
 const WORKSPACE_ID = '22222222-2222-4222-8222-222222222222';
 const PRODUCTION_ID = '33333333-3333-4333-8333-333333333333';
 const JOB_ID = '44444444-4444-4444-8444-444444444444';
+const SAFE_PREFLIGHT = Object.freeze({
+  schemaInspector: async () => ({ compatible: true, counts: { error: 0, warn: 0 }, issues: [] }),
+  transactionProbe: async () => ({ passed: true, persisted: false }),
+  storageProbe: async () => ({ passed: true, persisted: false }),
+});
 
 function rawInput(overrides = {}) {
   return {
@@ -49,7 +54,7 @@ class FakeDb {
     if (sql.includes('v2.4:inspect-existing')) {
       if (!this.production) return { rows: [] };
       return { rows: [{ productionId: this.production.id, productionStatus: this.production.status, metadata: this.production.metadata,
-        jobId: this.job?.id || null, jobStatus: this.job?.status || null, result: this.job?.result || {} }] };
+        jobId: this.job?.id || null, jobStatus: this.job?.status || null, payload: this.job?.payload || {}, result: this.job?.result || {} }] };
     }
     if (sql.includes('v2.4:create-production')) {
       if (!this.production) this.production = { id: PRODUCTION_ID, workspace_id: values[0], brand_id: values[1], name: values[2], status: 'DRAFT', objective: values[3], metadata: JSON.parse(values[4]) };
@@ -62,9 +67,10 @@ class FakeDb {
     }
     if (sql.includes('v2.4:get-live-job')) return { rows: this.job ? [this.job] : [] };
     if (sql.includes('v2.4:claim-live-job')) { this.job.status = 'RUNNING'; this.job.worker_id = values[1]; return { rows: [this.job] }; }
+    if (sql.includes('v2.4:mark-provider-boundary')) { this.job.payload = { ...this.job.payload, ...JSON.parse(values[3]) }; return { rows: [this.job] }; }
     if (sql.includes('v2.4:get-pending-review')) return { rows: this.review ? [this.review] : [] };
     if (sql.includes('v2.4:complete-live-job')) { this.job.status = 'COMPLETED'; this.job.result = JSON.parse(values[3]); return { rows: [this.job] }; }
-    if (sql.includes('v2.4:fail-live-job')) { this.job.status = 'FAILED'; return { rows: [this.job] }; }
+    if (sql.includes('v2.4:fail-live-job')) { this.job.status = values[4]; return { rows: [this.job] }; }
     if (sql.startsWith('UPDATE v2_1.productions')) { this.production.status = sql.includes("status='FAILED'") ? 'FAILED' : sql.includes("status='COMPLETED'") ? 'COMPLETED' : 'RUNNING'; return { rows: [] }; }
     throw new Error(`Unexpected SQL: ${sql}`);
   }
@@ -114,7 +120,7 @@ async function main() {
 
   const dryDb = new FakeDb(); const dryCalls = []; const logs = [];
   const dryArtifactCalls = [];
-  const dryService = new LiveProductionService({ db: dryDb, masterOrchestrator: masterMock(dryDb, dryCalls), artifactService: artifactMock(dryArtifactCalls), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info: (...args) => logs.push(args) } });
+  const dryService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: dryDb, masterOrchestrator: masterMock(dryDb, dryCalls), artifactService: artifactMock(dryArtifactCalls), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info: (...args) => logs.push(args) } });
   const dry = await dryService.run({ input, config: resolveLiveConfiguration(environment()) });
   assert.equal(dry.dryRun, true); assert.equal(dry.plan.expectedVideoGenerations, 1); assert.equal(dryCalls.length, 0, 'dry-run must not call paid provider path');
   assert.doesNotMatch(JSON.stringify(logs), /never-print-this-token/, 'operator summary must not expose token');
@@ -122,12 +128,12 @@ async function main() {
   assert.equal(dryArtifactCalls.length, 0, 'dry-run must not create artifacts');
 
   const missingBrandDb = new FakeDb(); missingBrandDb.brand.id = OTHER_BRAND_ID;
-  const missingBrandService = new LiveProductionService({ db: missingBrandDb, masterOrchestrator: masterMock(missingBrandDb, []), artifactService: artifactMock(), storageRoot: '/tmp/artifacts', storageValidator: async () => {} });
+  const missingBrandService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: missingBrandDb, masterOrchestrator: masterMock(missingBrandDb, []), artifactService: artifactMock(), storageRoot: '/tmp/artifacts', storageValidator: async () => {} });
   await assert.rejects(() => missingBrandService.run({ input, config: resolveLiveConfiguration(environment()) }), (error) => error.code === 'LIVE_BRAND_NOT_FOUND');
 
   const liveDb = new FakeDb(); const liveCalls = [];
   const inputArtifacts = [];
-  const liveService = new LiveProductionService({ db: liveDb, masterOrchestrator: masterMock(liveDb, liveCalls), artifactService: artifactMock(inputArtifacts), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info() {} } });
+  const liveService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: liveDb, masterOrchestrator: masterMock(liveDb, liveCalls), artifactService: artifactMock(inputArtifacts), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info() {} } });
   const liveConfig = resolveLiveConfiguration(environment({ LIVE_PAID_GENERATION: 'true' }));
   const first = await liveService.run({ input, config: liveConfig });
   assert.equal(first.productionId, PRODUCTION_ID);
@@ -150,13 +156,38 @@ async function main() {
   runningDb.production = { id: PRODUCTION_ID, workspace_id: WORKSPACE_ID, brand_id: BRAND_ID, name: `v2.4-live:${input.liveTestKey}`, status: 'RUNNING', metadata: { live_input_fingerprint: input.fingerprint } };
   runningDb.job = { id: JOB_ID, production_id: PRODUCTION_ID, status: 'RUNNING', result: {} };
   const runningCalls = [];
-  const runningService = new LiveProductionService({ db: runningDb, masterOrchestrator: masterMock(runningDb, runningCalls), artifactService: artifactMock(), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info() {} } });
+  const runningService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: runningDb, masterOrchestrator: masterMock(runningDb, runningCalls), artifactService: artifactMock(), storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info() {} } });
   await assert.rejects(() => runningService.run({ input, config: liveConfig }), (error) => error.code === 'LIVE_RUN_NOT_RETRYABLE');
   assert.equal(runningCalls.length, 0, 'in-progress durable run must not create a second prediction');
 
   runningDb.job.status = 'RETRYING';
   await assert.rejects(() => runningService.run({ input, config: liveConfig }), (error) => error.code === 'LIVE_EXISTING_PREDICTION_UNRESOLVED');
   assert.equal(runningCalls.length, 0, 'recovered run without immutable media must fail closed');
+
+  const blockedDb = new FakeDb();
+  const blockedCalls = [];
+  const blockedService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: blockedDb, masterOrchestrator: masterMock(blockedDb, blockedCalls),
+    artifactService: artifactMock(), storageRoot: '/tmp/artifacts', storageValidator: async () => {},
+    schemaInspector: async () => ({ compatible: false, counts: { error: 1, warn: 0 }, issues: [{ code: 'LEGACY_BRAND_FK_ACTIVE' }] }) });
+  await assert.rejects(() => blockedService.run({ input, config: liveConfig }), (error) => error.code === 'LIVE_SCHEMA_INCOMPATIBLE');
+  assert.equal(blockedCalls.length, 0, 'schema incompatibility must block before provider boundary');
+
+  const preProviderDb = new FakeDb(); const preProviderCalls = []; let inputAttempts = 0;
+  const preProviderArtifacts = artifactMock();
+  preProviderArtifacts.createVersion = async (request) => {
+    inputAttempts += 1;
+    if (inputAttempts === 1) throw Object.assign(new Error('local storage unavailable'), { code: 'LOCAL_STORAGE_ERROR' });
+    return { artifactId: request.artifactId, version: 1, storageKey: 'artifacts/live-input.txt', contentHash: 'input-hash' };
+  };
+  const preProviderService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: preProviderDb,
+    masterOrchestrator: masterMock(preProviderDb, preProviderCalls), artifactService: preProviderArtifacts,
+    storageRoot: '/tmp/artifacts', storageValidator: async () => {}, logger: { info() {} } });
+  await assert.rejects(() => preProviderService.run({ input, config: liveConfig }), /local storage unavailable/);
+  assert.equal(preProviderDb.job.status, 'RETRYING');
+  assert.equal(preProviderDb.job.payload.providerRequestState, 'NOT_STARTED');
+  const recovered = await preProviderService.run({ input, config: liveConfig });
+  assert.equal(recovered.validationStatus, 'PASS');
+  assert.equal(preProviderCalls.length, 1, 'failure before durable provider boundary may safely retry once');
   console.log('V2.4 controlled live production boundary passed (zero paid API calls).');
 }
 

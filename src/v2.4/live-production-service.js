@@ -6,6 +6,12 @@ const { constants: fsConstants } = require('node:fs');
 const { buildWanInput, DEFAULT_MODEL } = require('../../src/providers/replicate-wan-video-adapter');
 const { validateStructuredConsistency } = require('../../worker/v2.1-production-orchestrator');
 const { canonicalFingerprint } = require('../../worker/v2.1-master-production');
+const {
+  assertSchemaCompatible,
+  inspectSchemaCompatibility,
+  verifyArtifactStorage,
+  verifyTransactionalLiveWrites,
+} = require('./schema-compatibility');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LIVE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
@@ -155,7 +161,9 @@ async function validateStorageRoot(root) {
 }
 
 class LiveProductionService {
-  constructor({ db, masterOrchestrator, artifactService, storageRoot, storageValidator = validateStorageRoot, logger = console } = {}) {
+  constructor({ db, masterOrchestrator, artifactService, storageRoot, storageValidator = validateStorageRoot,
+    schemaInspector = inspectSchemaCompatibility, transactionProbe = verifyTransactionalLiveWrites,
+    storageProbe = verifyArtifactStorage, logger = console } = {}) {
     if (!db || typeof db.query !== 'function') throw new Error('db is required');
     if (!masterOrchestrator || typeof masterOrchestrator.build !== 'function') throw new Error('masterOrchestrator is required');
     if (!artifactService || typeof artifactService.createVersion !== 'function') throw new Error('artifactService is required');
@@ -164,6 +172,9 @@ class LiveProductionService {
     this.artifactService = artifactService;
     this.storageRoot = storageRoot;
     this.storageValidator = storageValidator;
+    this.schemaInspector = schemaInspector;
+    this.transactionProbe = transactionProbe;
+    this.storageProbe = storageProbe;
     this.logger = logger;
   }
 
@@ -178,7 +189,7 @@ class LiveProductionService {
   async inspectExisting(input) {
     const result = await this.db.query(`/* v2.4:inspect-existing */
       SELECT p.id AS "productionId", p.status AS "productionStatus", p.metadata,
-             j.id AS "jobId", j.status AS "jobStatus", j.result
+             j.id AS "jobId", j.status AS "jobStatus", j.payload, j.result
       FROM v2_1.productions p
       LEFT JOIN v2_1.jobs j ON j.production_id=p.id AND j.idempotency_key=$3
       WHERE p.workspace_id=$1 AND p.name=$2`,
@@ -199,19 +210,27 @@ class LiveProductionService {
       expectedVideoGenerations: existing?.jobStatus === 'COMPLETED' ? 0 : 1,
       paidLiveRun: config.live,
       existingState: existing?.jobStatus || null,
+      schemaCompatibility: 'READY',
     });
   }
 
   async prepare({ input, config }) {
     await this.db.query('/* v2.4:database-health */ SELECT 1');
     await this.storageValidator(this.storageRoot);
+    const schemaReport = await this.schemaInspector(this.db);
+    assertSchemaCompatible(schemaReport);
     const brand = await this.inspectBrand(input.brandId);
     const scopedInput = { ...input, workspaceId: brand.workspaceId };
     const existing = await this.inspectExisting(scopedInput);
     if (existing?.metadata?.live_input_fingerprint && existing.metadata.live_input_fingerprint !== input.fingerprint) {
       throw new LiveProductionError('LIVE_INPUT_CONFLICT', 'live_test_key already belongs to different structured input');
     }
-    return { brand, input: scopedInput, existing, plan: this.summary({ brand, input: scopedInput, config, existing }) };
+    const databaseProbe = await this.transactionProbe(this.db, {
+      workspaceId: brand.workspaceId, brandId: brand.id, objective: scopedInput.objective,
+    });
+    const storageProbe = await this.storageProbe(this.artifactService.storage);
+    return { brand, input: scopedInput, existing, schemaReport, databaseProbe, storageProbe,
+      plan: this.summary({ brand, input: scopedInput, config, existing }) };
   }
 
   async findCachedVideo({ input, productionId }) {
@@ -250,7 +269,7 @@ class LiveProductionService {
         ON CONFLICT(production_id,idempotency_key) DO NOTHING`,
       [production.id, `v2.4-live:${input.liveTestKey}`, JSON.stringify({
         source: 'v2.4-controlled-live-cli', liveTestKey: input.liveTestKey, inputFingerprint: input.fingerprint,
-        provider: config.provider, model: config.model,
+        provider: config.provider, model: config.model, providerRequestState: 'NOT_STARTED',
       })]);
       const jobResult = await client.query(`/* v2.4:get-live-job */
         SELECT * FROM v2_1.jobs WHERE production_id=$1 AND idempotency_key=$2 FOR UPDATE`,
@@ -265,7 +284,7 @@ class LiveProductionService {
       }
       const claimed = await client.query(`/* v2.4:claim-live-job */
         UPDATE v2_1.jobs SET status='RUNNING', worker_id=$2, started_at=coalesce(started_at,now()),
-          lease_expires_at=now()+interval '30 minutes', heartbeat_at=now(), updated_at=now()
+          lease_expires_at=now()+interval '30 minutes', heartbeat_at=now(), completed_at=NULL, updated_at=now()
         WHERE id=$1 AND status IN ('QUEUED','RETRYING')
           AND (next_attempt_at IS NULL OR next_attempt_at <= now()) RETURNING *`, [job.id, config.workerId]);
       if (!claimed.rows[0]) throw new LiveProductionError('LIVE_RUN_NOT_CLAIMED', 'Live production job was claimed by another operator');
@@ -290,13 +309,25 @@ class LiveProductionService {
     await this.db.query(`UPDATE v2_1.productions SET status='COMPLETED', completed_at=now(), updated_at=now() WHERE id=$1 AND status='RUNNING'`, [productionId]);
   }
 
-  async fail({ productionId, jobId, workerId, error }) {
+  async markProviderBoundary({ productionId, jobId, workerId }) {
+    const marked = await this.db.query(`/* v2.4:mark-provider-boundary */
+      UPDATE v2_1.jobs SET payload=coalesce(payload,'{}'::jsonb) || $4::jsonb, heartbeat_at=now(), updated_at=now()
+      WHERE id=$1 AND production_id=$2 AND worker_id=$3 AND status='RUNNING' RETURNING *`,
+    [jobId, productionId, workerId, JSON.stringify({ providerRequestState: 'MAY_HAVE_STARTED', providerBoundaryAt: new Date().toISOString() })]);
+    if (!marked.rows[0]) throw new LiveProductionError('LIVE_JOB_FENCED', 'Live job ownership was lost before provider boundary');
+  }
+
+  async fail({ productionId, jobId, workerId, error, providerBoundaryCrossed }) {
+    const retryableBeforeProvider = providerBoundaryCrossed !== true;
     await this.db.query(`/* v2.4:fail-live-job */
-      UPDATE v2_1.jobs SET status='FAILED', error=$4::jsonb, worker_id=NULL, lease_expires_at=NULL,
-        heartbeat_at=now(), completed_at=now(), updated_at=now()
+      UPDATE v2_1.jobs SET status=$5, error=$4::jsonb, worker_id=NULL, lease_expires_at=NULL,
+        heartbeat_at=now(), completed_at=CASE WHEN $5='FAILED' THEN now() ELSE NULL END, updated_at=now()
       WHERE id=$1 AND production_id=$2 AND worker_id=$3 AND status='RUNNING'`,
-    [jobId, productionId, workerId, JSON.stringify({ code: error.code || 'LIVE_PRODUCTION_FAILED', message: error.message, details: error.details || null })]);
-    await this.db.query(`UPDATE v2_1.productions SET status='FAILED', completed_at=now(), updated_at=now() WHERE id=$1 AND status='RUNNING'`, [productionId]);
+    [jobId, productionId, workerId, JSON.stringify({ code: error.code || 'LIVE_PRODUCTION_FAILED', message: error.message,
+      details: error.details || null, providerBoundaryCrossed: !retryableBeforeProvider }), retryableBeforeProvider ? 'RETRYING' : 'FAILED']);
+    if (!retryableBeforeProvider) {
+      await this.db.query(`UPDATE v2_1.productions SET status='FAILED', completed_at=now(), updated_at=now() WHERE id=$1 AND status='RUNNING'`, [productionId]);
+    }
   }
 
   async run({ input, config }) {
@@ -306,15 +337,20 @@ class LiveProductionService {
 
     let allowRecoveredRetry = false;
     if (prepared.existing?.jobStatus === 'RETRYING') {
-      const cachedVideo = await this.findCachedVideo({ input: prepared.input, productionId: prepared.existing.productionId });
-      if (!cachedVideo) {
-        throw new LiveProductionError('LIVE_EXISTING_PREDICTION_UNRESOLVED',
-          'Recovered run has no completed immutable video artifact; refusing a second paid prediction', prepared.existing);
+      if (prepared.existing.payload?.providerRequestState === 'NOT_STARTED') {
+        allowRecoveredRetry = true;
+      } else {
+        const cachedVideo = await this.findCachedVideo({ input: prepared.input, productionId: prepared.existing.productionId });
+        if (!cachedVideo) {
+          throw new LiveProductionError('LIVE_EXISTING_PREDICTION_UNRESOLVED',
+            'Recovered run may have crossed the provider boundary and has no completed immutable video artifact; refusing a second paid prediction', prepared.existing);
+        }
+        allowRecoveredRetry = true;
       }
-      allowRecoveredRetry = true;
     }
     const claimed = await this.createAndClaim({ input: prepared.input, config, allowRecoveredRetry });
     if (claimed.reused) return { ...claimed.job.result, reused: true, paidGenerationPerformed: false };
+    let providerBoundaryCrossed = false;
     try {
       const inputArtifact = await this.artifactService.createVersion({
         artifactId: `production:${claimed.production.id}:live-input`,
@@ -326,6 +362,8 @@ class LiveProductionService {
         idempotencyKey: `${input.brandId}:${claimed.production.id}:live-input:${input.fingerprint}`,
         provider: 'operator', model: 'v2.4-structured-live-input', validationStatus: 'validated',
       });
+      await this.markProviderBoundary({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId });
+      providerBoundaryCrossed = true;
       const masterResult = await this.masterOrchestrator.build({
         productionId: claimed.production.id,
         brandId: input.brandId,
@@ -370,7 +408,7 @@ class LiveProductionService {
       await this.complete({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId, result });
       return result;
     } catch (error) {
-      await this.fail({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId, error });
+      await this.fail({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId, error, providerBoundaryCrossed });
       throw error;
     }
   }

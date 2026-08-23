@@ -158,7 +158,9 @@ jobs:
           node --check scripts/dashboard-dev.js
           node --check scripts/live-production.js
           node --check src/v2.4/live-production-service.js
+          node --check src/v2.4/schema-compatibility.js
           node --check tests/v2.4-live-production-test.js
+          node --check tests/v2.4-legacy-schema-compatibility-postgres-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -301,6 +303,9 @@ jobs:
       - name: Run V2.4 controlled live production boundary (mocked, no paid APIs)
         run: npm run test:v2.4:live-production
         timeout-minutes: 2
+      - name: Run V2.4 legacy schema compatibility (mocked, no paid APIs)
+        run: npm run test:v2.4:legacy-compat:postgres
+        timeout-minutes: 5
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
@@ -319,6 +324,7 @@ jobs:
           test -s migrations/20260821_v2_1_stage_claim_job_lease_fencing.sql
           test -s migrations/20260821_v2_1_asset_registry.sql
           test -s migrations/20260823_v2_3_control_reviews.sql
+          test -s migrations/20260823_v2_4_legacy_schema_compatibility.sql
         timeout-minutes: 2
       - name: Check required project files
         run: |

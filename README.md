@@ -278,6 +278,8 @@ Open `http://localhost:3000`. The API binds to `127.0.0.1:3001` by default. See 
 
 V2.4 adds one CLI-only, operator-invoked path for a minimal Replicate video → immutable media → FFmpeg master → validation → V2.3 Review Queue run. It is never called by dashboard startup, tests, CI, migrations or workers. Live execution requires the explicit `LIVE_PAID_GENERATION=true` gate; `false` performs a non-paid dry-run. See [`docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md`](docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md).
 
+For a legacy local Content OS database, `npm run live:production:local` first applies the deterministic row-preserving compatibility bridge and then runs the full pre-paid schema/write/storage gate. Schema ownership and recovery details are documented in [`docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md`](docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md).
+
 ## Environment
 
 Create a local `.env` from `.env.example`.
