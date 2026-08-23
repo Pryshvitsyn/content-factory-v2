@@ -198,26 +198,7 @@ class ReplicateWanVideoAdapter {
     throw lastError;
   }
 
-  async runPrediction({ input, idempotencyKey }) {
-    if (!this.apiToken) throw providerError('REPLICATE_API_TOKEN is required for video generation', 'REPLICATE_TOKEN_REQUIRED', { model: this.model });
-    const [owner, name] = this.model.split('/');
-    if (!owner || !name) throw providerError('Replicate model must use owner/name format', 'REPLICATE_MODEL_INVALID', { model: this.model });
-    const headers = {
-      Authorization: `Bearer ${this.apiToken}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'Cancel-After': `${Math.max(5, Math.ceil(this.timeoutMs / 1000))}s`,
-    };
-    const predictionUrl = `${this.baseURL}/models/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/predictions`;
-    let prediction = await this.requestJson(predictionUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ input }),
-    });
-    if (!prediction.id || typeof prediction.status !== 'string') {
-      throw providerError('Replicate prediction response is missing id or status', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model });
-    }
-
+  async finishPrediction({ prediction, headers, input = null, idempotencyKey = null }) {
     const predictionId = prediction.id;
     const startedAt = this.now();
     while (PENDING_STATUSES.has(prediction.status)) {
@@ -262,11 +243,50 @@ class ReplicateWanVideoAdapter {
         model: this.model,
         predictionId,
         origin: 'replicate-api',
-        input,
+        ...(input ? { input } : {}),
         outputUrl: mediaUrl,
         idempotencyKey: idempotencyKey || null,
       },
     });
+  }
+
+  async runPrediction({ input, idempotencyKey, onProviderRequest = null }) {
+    if (!this.apiToken) throw providerError('REPLICATE_API_TOKEN is required for video generation', 'REPLICATE_TOKEN_REQUIRED', { model: this.model });
+    const [owner, name] = this.model.split('/');
+    if (!owner || !name) throw providerError('Replicate model must use owner/name format', 'REPLICATE_MODEL_INVALID', { model: this.model });
+    const headers = {
+      Authorization: `Bearer ${this.apiToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'Cancel-After': `${Math.max(5, Math.ceil(this.timeoutMs / 1000))}s`,
+    };
+    const predictionUrl = `${this.baseURL}/models/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/predictions`;
+    let prediction = await this.requestJson(predictionUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ input }),
+    });
+    if (!prediction.id || typeof prediction.status !== 'string') {
+      throw providerError('Replicate prediction response is missing id or status', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model });
+    }
+    if (onProviderRequest) await onProviderRequest({ requestId: prediction.id, status: prediction.status, provider: 'replicate', model: this.model });
+    return this.finishPrediction({ prediction, headers, input, idempotencyKey });
+  }
+
+  async recover({ capability, model, requestId } = {}) {
+    if (!this.supports({ capability, model })) {
+      throw providerError(`Replicate Wan does not support capability '${capability}'`, 'REPLICATE_CAPABILITY_UNSUPPORTED', { model: model || this.model });
+    }
+    if (!this.apiToken) throw providerError('REPLICATE_API_TOKEN is required for video recovery', 'REPLICATE_TOKEN_REQUIRED', { model: this.model });
+    if (!requestId || typeof requestId !== 'string') throw providerError('Replicate requestId is required for recovery', 'REPLICATE_REQUEST_ID_REQUIRED', { model: this.model });
+    const headers = { Authorization: `Bearer ${this.apiToken}`, Accept: 'application/json' };
+    const prediction = await this.requestJson(`${this.baseURL}/predictions/${encodeURIComponent(requestId)}`, {
+      method: 'GET', headers,
+    }, { retryable: true });
+    if (!prediction.id || prediction.id !== requestId || typeof prediction.status !== 'string') {
+      throw providerError('Replicate recovery returned a malformed prediction', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model, predictionId: requestId });
+    }
+    return this.finishPrediction({ prediction, headers });
   }
 
   async generate({ capability, prompt, model, idempotencyKey, ...options } = {}) {
@@ -288,7 +308,7 @@ class ReplicateWanVideoAdapter {
       interpolateOutput: options.interpolateOutput ?? requirements.interpolate_output,
     });
 
-    if (!idempotencyKey) return this.runPrediction({ input, idempotencyKey: null });
+    if (!idempotencyKey) return this.runPrediction({ input, idempotencyKey: null, onProviderRequest: options.onProviderRequest });
     const operationIdentity = JSON.stringify(input);
     if (this.inflight.has(idempotencyKey)) {
       const existing = this.inflight.get(idempotencyKey);
@@ -297,7 +317,7 @@ class ReplicateWanVideoAdapter {
       }
       return existing.promise;
     }
-    const operation = this.runPrediction({ input, idempotencyKey });
+    const operation = this.runPrediction({ input, idempotencyKey, onProviderRequest: options.onProviderRequest });
     this.inflight.set(idempotencyKey, { operationIdentity, promise: operation });
     try {
       return await operation;

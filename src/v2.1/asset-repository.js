@@ -16,7 +16,7 @@ class PostgresAssetRepository {
     return result.rows[0] || null;
   }
 
-  async registerResolved({ client, productionId, asset, artifact, workerId, key }) {
+  async registerResolved({ client, productionId, asset, artifact, workerId, key, metadata = {} }) {
     const result = await client.query(
       `INSERT INTO v2_1.asset_registry
         (production_id, asset_id, kind, semantic_key, artifact_storage_key, artifact_version, status, metadata, created_by)
@@ -31,7 +31,8 @@ class PostgresAssetRepository {
          created_by=EXCLUDED.created_by,
          updated_at=now()
        RETURNING id, asset_id, kind, artifact_storage_key AS "storageKey", artifact_version AS version`,
-      [productionId, asset.asset_id, asset.kind, key, artifact.storageKey, artifact.version, JSON.stringify({ workerId, source: 'provider', description: asset.description }), workerId],
+      [productionId, asset.asset_id, asset.kind, key, artifact.storageKey, artifact.version,
+        JSON.stringify({ workerId, source: 'provider', description: asset.description, ...metadata }), workerId],
     );
     return result.rows[0];
   }
