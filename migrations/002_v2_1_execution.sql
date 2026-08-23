@@ -85,6 +85,15 @@ INSERT INTO v2_1.stage_definitions(stage, sequence_no, terminal) VALUES
 ('VALIDATION',12,false),('PUBLISH',13,false),('ANALYZE',14,false),('LEARN',15,true)
 ON CONFLICT(stage) DO UPDATE SET sequence_no=EXCLUDED.sequence_no, terminal=EXCLUDED.terminal;
 
+-- Legacy local V2.1 snapshots can contain these helpers with pre-canonical
+-- return signatures. PostgreSQL cannot change a function return type via
+-- CREATE OR REPLACE, so drop only the helpers recreated immediately below.
+DROP FUNCTION IF EXISTS v2_1.claim_job(text, integer);
+DROP FUNCTION IF EXISTS v2_1.claim_job_for_production(uuid, uuid, text, integer);
+DROP FUNCTION IF EXISTS v2_1.heartbeat_job(uuid, text, integer);
+DROP FUNCTION IF EXISTS v2_1.claim_stage(uuid, text, integer);
+DROP FUNCTION IF EXISTS v2_1.heartbeat_stage(uuid, text, integer);
+
 CREATE OR REPLACE FUNCTION v2_1.claim_job(p_worker_id text, p_lease_seconds integer)
 RETURNS SETOF v2_1.jobs LANGUAGE plpgsql AS $$
 DECLARE r v2_1.jobs;
