@@ -6,8 +6,10 @@ CREATE SCHEMA IF NOT EXISTS v2_1;
 CREATE TABLE IF NOT EXISTS v2_1.productions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  brand_id uuid,
   name text NOT NULL,
   status text NOT NULL DEFAULT 'DRAFT',
+  objective text,
   created_at timestamptz NOT NULL DEFAULT now(),
   started_at timestamptz,
   completed_at timestamptz,
@@ -16,6 +18,31 @@ CREATE TABLE IF NOT EXISTS v2_1.productions (
   UNIQUE(workspace_id, name),
   CHECK (status IN ('DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED'))
 );
+
+-- Evolve pre-canonical local V2.1 tables additively. Older snapshots may
+-- contain extra mandatory columns (for example content_variant_id) that are no
+-- longer part of the canonical production contract. Preserve those columns and
+-- existing values, but relax only legacy NOT NULL/no-default fields so current
+-- canonical rows can coexist with historical rows.
+ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS brand_id uuid;
+ALTER TABLE v2_1.productions ADD COLUMN IF NOT EXISTS objective text;
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT a.attname AS column_name
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid=a.attrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+    WHERE n.nspname='v2_1' AND c.relname='productions'
+      AND a.attnum > 0 AND NOT a.attisdropped AND a.attnotnull
+      AND d.oid IS NULL
+      AND a.attname NOT IN ('id','workspace_id','name','status','created_at','updated_at')
+  LOOP
+    EXECUTE format('ALTER TABLE v2_1.productions ALTER COLUMN %I DROP NOT NULL', r.column_name);
+  END LOOP;
+END $$;
 
 CREATE TABLE IF NOT EXISTS v2_1.jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -41,6 +68,24 @@ CREATE TABLE IF NOT EXISTS v2_1.jobs (
   CHECK (status IN ('QUEUED','RUNNING','COMPLETED','FAILED','CANCELLED','RETRYING','DEAD_LETTER')),
   CHECK (attempt > 0 AND max_attempts > 0)
 );
+
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT a.attname AS column_name
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid=a.attrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+    WHERE n.nspname='v2_1' AND c.relname='jobs'
+      AND a.attnum > 0 AND NOT a.attisdropped AND a.attnotnull
+      AND d.oid IS NULL
+      AND a.attname NOT IN ('id','production_id','stage','status','idempotency_key')
+  LOOP
+    EXECUTE format('ALTER TABLE v2_1.jobs ALTER COLUMN %I DROP NOT NULL', r.column_name);
+  END LOOP;
+END $$;
 
 CREATE TABLE IF NOT EXISTS v2_1.stage_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
