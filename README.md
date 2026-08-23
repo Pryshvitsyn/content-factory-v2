@@ -280,6 +280,21 @@ V2.4 adds one CLI-only, operator-invoked path for a minimal Replicate video → 
 
 For a legacy local Content OS database, `npm run live:production:local` first applies the deterministic row-preserving compatibility bridge and then runs the full pre-paid schema/write/storage gate. Schema ownership and recovery details are documented in [`docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md`](docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md).
 
+## V2.5 Reusable Real Content Production
+
+V2.5 accepts an external creative brief with variable-count shots and voiceover, tracks every paid media asset behind its own durable idempotency/reconciliation fence, assembles a real FFmpeg video+audio master, validates media streams, and sends the exact immutable master to human review.
+
+Safe local pre-paid plan (provider calls remain zero):
+
+```bash
+LIVE_PAID_GENERATION=false \
+REAL_PRODUCTION_INPUT=config/productions/attune-dont-guess-tune-in.json \
+VIDEO_PROVIDER=replicate AUDIO_PROVIDER=openai-media \
+npm run real:production:local
+```
+
+See [`docs/V2.5-REAL-CONTENT-PRODUCTION.md`](docs/V2.5-REAL-CONTENT-PRODUCTION.md) for the operator contract, recovery states, paid boundary, and certification commands.
+
 ## Environment
 
 Create a local `.env` from `.env.example`.
