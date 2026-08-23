@@ -68,6 +68,15 @@ CREATE TABLE IF NOT EXISTS v2_1.stage_runs (
   CHECK (attempt > 0 AND max_attempts > 0)
 );
 
+-- CREATE TABLE IF NOT EXISTS does not add constraints to legacy tables.
+-- Restore the unique indexes required by ON CONFLICT and stage idempotency.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_productions_workspace_name
+  ON v2_1.productions(workspace_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_jobs_production_idempotency
+  ON v2_1.jobs(production_id, idempotency_key);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_v21_stage_runs_job_stage_attempt
+  ON v2_1.stage_runs(job_id, stage, attempt);
+
 CREATE INDEX IF NOT EXISTS idx_v21_jobs_claim ON v2_1.jobs(status, next_attempt_at, lease_expires_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_v21_stage_claim ON v2_1.stage_runs(job_id, status, next_attempt_at, created_at);
 
