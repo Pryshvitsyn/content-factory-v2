@@ -314,7 +314,7 @@ jobs:
           CONTENT_FACTORY_TEST_DATABASE: "1"
           PGDATABASE: v24_legacy_test
         run: |
-          createdb -d postgres v24_legacy_test
+          createdb --maintenance-db=postgres v24_legacy_test
           npm run test:v2.4:legacy-compat:postgres
         timeout-minutes: 5
 
