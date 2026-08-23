@@ -4,6 +4,51 @@ BEGIN;
 
 CREATE SCHEMA IF NOT EXISTS v2_3;
 
+-- Compatibility bridge for legacy V2.1 production schemas. Older snapshots can
+-- carry a brand_id FK to a pre-V2.2 brand table. V2.2 is now the canonical brand
+-- source of truth, so remove only brand_id foreign keys from v2_1.productions and
+-- replace them with the canonical v2_2.brands reference. NOT VALID preserves
+-- historical rows while enforcing the FK for every new production immediately.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE c.contype = 'f'
+      AND n.nspname = 'v2_1'
+      AND t.relname = 'productions'
+      AND EXISTS (
+        SELECT 1
+        FROM unnest(c.conkey) AS k(attnum)
+        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+        WHERE a.attname = 'brand_id'
+      )
+  LOOP
+    EXECUTE format('ALTER TABLE v2_1.productions DROP CONSTRAINT %I', r.conname);
+  END LOOP;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE c.contype = 'f'
+      AND n.nspname = 'v2_1'
+      AND t.relname = 'productions'
+      AND c.conname = 'v21_productions_brand_fk'
+  ) THEN
+    ALTER TABLE v2_1.productions
+      ADD CONSTRAINT v21_productions_brand_fk
+      FOREIGN KEY (brand_id)
+      REFERENCES v2_2.brands(id)
+      ON DELETE RESTRICT
+      NOT VALID;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS v2_3.master_review_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
