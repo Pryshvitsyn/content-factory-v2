@@ -7,6 +7,7 @@ on:
       - main
       - "feat/v2.3-control-dashboard"
       - "feat/v2.4-controlled-live-production-test"
+      - "feat/v2.5-real-content-production"
       - "release/**"
       - "develop/**"
     paths:
@@ -15,7 +16,9 @@ on:
       - "scripts/**"
       - "docs/V2.3-CONTROL-DASHBOARD.md"
       - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
+      - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
       - "config/live-production.example.json"
+      - "config/productions/**"
       - "worker/**"
       - "tests/**"
       - "migrations/**"
@@ -24,6 +27,7 @@ on:
       - "build-v2.sh"
       - ".github/workflows/**"
       - "README.md"
+      - ".env.example"
   pull_request:
     branches:
       - main
@@ -32,6 +36,10 @@ on:
       - "apps/**"
       - "scripts/**"
       - "docs/V2.3-CONTROL-DASHBOARD.md"
+      - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
+      - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
+      - "config/live-production.example.json"
+      - "config/productions/**"
       - "worker/**"
       - "tests/**"
       - "migrations/**"
@@ -40,6 +48,7 @@ on:
       - "build-v2.sh"
       - ".github/workflows/**"
       - "README.md"
+      - ".env.example"
 
 concurrency:
   group: content-factory-v2-ci-${{ github.workflow }}-${{ github.ref }}
@@ -164,6 +173,16 @@ jobs:
           node --check tests/v2.4-live-production-test.js
           node --check tests/v2.4-legacy-schema-compatibility-postgres-test.js
           node --check tests/v2.3-local-runtime-test.js
+          node --check scripts/real-content-production.js
+          node --check scripts/real-content-production-local.js
+          node --check src/v2.5/configuration.js
+          node --check src/v2.5/production-input.js
+          node --check src/v2.5/durable-media-executor.js
+          node --check src/v2.5/media-validator.js
+          node --check tests/v2.5-production-input-test.js
+          node --check tests/v2.5-durable-media-test.js
+          node --check tests/v2.5-real-master-test.js
+          node --check tests/v2.5-postgres-integration-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -317,6 +336,17 @@ jobs:
           createdb --maintenance-db=postgres v24_legacy_test
           npm run test:v2.4:legacy-compat:postgres
         timeout-minutes: 5
+      - name: Run V2.5 reusable content, durable media, and real FFmpeg master (mocked/local, no paid APIs)
+        run: npm run test:v2.5
+        timeout-minutes: 5
+      - name: Run V2.5 PostgreSQL media ownership and concurrency integration
+        env:
+          CONTENT_FACTORY_TEST_DATABASE: "1"
+          PGDATABASE: v25_media_test
+        run: |
+          createdb --maintenance-db=postgres v25_media_test
+          npm run test:v2.5:postgres
+        timeout-minutes: 5
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
@@ -337,6 +367,7 @@ jobs:
           test -s migrations/20260823_v2_3_control_reviews.sql
           test -s migrations/20260823_v2_4_legacy_schema_compatibility.sql
           test -s migrations/20260823_v2_4_canonical_production_ownership.sql
+          test -s migrations/20260823_v2_5_durable_media_executions.sql
         timeout-minutes: 2
       - name: Check required project files
         run: |
