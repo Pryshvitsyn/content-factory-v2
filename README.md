@@ -271,11 +271,13 @@ Install dependencies:
 npm ci
 ```
 
-Run the basic smoke test:
+`npm test` is an operator-invoked live smoke test, not a CI-safe unit test. It requires a prepared local `content_os`, a real `NVIDIA_API_KEY`, and an enabled NVIDIA model; its worker may make a billable provider request. Review the configured database and provider boundary before running it:
 
 ```bash
 npm test
 ```
+
+GitHub CI does not execute this live smoke command and never receives provider credentials. It checks the smoke-test source syntax and runs the mocked/local certification suites below instead.
 
 Run the V2.1 contract suite:
 
