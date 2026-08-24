@@ -5,6 +5,7 @@ const path = require('node:path');
 const { Pool } = require('pg');
 const { FilesystemStorageAdapter } = require('../../../src/storage/storage-adapter');
 const { ControlReviewService } = require('../../../src/v2.3/control-review-service');
+const { ProductionCommandService } = require('../../../src/v2.7/production-command-service');
 const { ControlRepository } = require('./control-repository');
 const { ControlService } = require('./control-service');
 const { createControlServer } = require('./http-server');
@@ -18,8 +19,11 @@ function createDashboardRuntime(env = process.env) {
   });
   const repository = new ControlRepository({ db });
   const reviewService = new ControlReviewService({ db });
+  const providers = describeProviders(env);
+  const actor = env.DASHBOARD_ACTOR || 'local-operator';
+  const commandService = new ProductionCommandService({ repository, storage, providers, env, actor });
   const service = new ControlService({
-    repository, reviewService, storage, providers: describeProviders(env), actor: env.DASHBOARD_ACTOR || 'local-operator',
+    repository, reviewService, commandService, storage, providers, actor,
   });
   return { db, server: createControlServer({ service }) };
 }

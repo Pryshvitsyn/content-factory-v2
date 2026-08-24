@@ -258,41 +258,106 @@ class LiveProductionService {
     });
   }
 
+  sourceName(input, command = null) {
+    if (command?.source) return command.source;
+    return input.schemaVersion >= 3 ? 'v2.6-real-content-cli'
+      : input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli';
+  }
+
+  async ensureDraftRows(client, { input, config, command = null }) {
+    const source = this.sourceName(input, command);
+    const productionMetadata = {
+      source,
+      live_test_key: this.productionKey(input),
+      production_key: this.productionKey(input),
+      live_input_fingerprint: input.fingerprint,
+      render_mode: input.renderMode || 'QUALITY',
+      renderer: input.renderer || 'v2.5-quality',
+      publication_policy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
+      ...(command ? {
+        operator_request_id: command.requestId,
+        operator_actor: command.actor,
+        canonical_request: command.canonicalRequest,
+        ...(command.regenerationOf ? { regeneration_of: command.regenerationOf } : {}),
+      } : {}),
+    };
+    const insertedProduction = await client.query(`/* v2.4:create-production */
+      INSERT INTO v2_1.productions(workspace_id,brand_id,name,status,objective,metadata)
+      VALUES($1,$2,$3,'DRAFT',$4,$5::jsonb)
+      ON CONFLICT(workspace_id,name) DO NOTHING RETURNING id`,
+    [input.workspaceId, input.brandId, this.productionName(input), input.objective, JSON.stringify(productionMetadata)]);
+    const productionResult = await client.query(`/* v2.4:get-production-for-run */
+      SELECT * FROM v2_1.productions WHERE workspace_id=$1 AND name=$2 FOR UPDATE`,
+    [input.workspaceId, this.productionName(input)]);
+    const production = productionResult.rows[0];
+    if (!production || production.brand_id !== input.brandId || production.metadata?.live_input_fingerprint !== input.fingerprint) {
+      throw new LiveProductionError('LIVE_INPUT_CONFLICT', 'Existing production does not match brand or structured input');
+    }
+    if (command && (production.metadata?.operator_request_id !== command.requestId
+      || production.metadata?.operator_actor !== command.actor)) {
+      throw new LiveProductionError('LIVE_OPERATOR_COMMAND_CONFLICT', 'Operator request already belongs to a different command');
+    }
+    const jobPayload = {
+      source,
+      liveTestKey: this.productionKey(input),
+      productionKey: this.productionKey(input),
+      inputFingerprint: input.fingerprint,
+      renderMode: input.renderMode || 'QUALITY',
+      renderer: input.renderer || 'v2.5-quality',
+      provider: config.provider,
+      model: config.model,
+      providerRequestState: 'NOT_STARTED',
+      rendererRequestState: 'NOT_STARTED',
+      ...(command ? {
+        operatorRequestId: command.requestId,
+        actor: command.actor,
+        canonicalRawInput: command.canonicalRawInput,
+        canonicalRequest: command.canonicalRequest,
+        ...(command.regenerationOf ? { regenerationOf: command.regenerationOf } : {}),
+      } : {}),
+    };
+    const insertedJob = await client.query(`/* v2.4:create-live-job */
+      INSERT INTO v2_1.jobs(production_id,stage,status,idempotency_key,payload)
+      VALUES($1,'EDIT','QUEUED',$2,$3::jsonb)
+      ON CONFLICT(production_id,idempotency_key) DO NOTHING RETURNING id`,
+    [production.id, this.jobKey(input), JSON.stringify(jobPayload)]);
+    const jobResult = await client.query(`/* v2.4:get-live-job */
+      SELECT * FROM v2_1.jobs WHERE production_id=$1 AND idempotency_key=$2 FOR UPDATE`,
+    [production.id, this.jobKey(input)]);
+    const job = jobResult.rows[0];
+    if (!job || (command && (job.payload?.inputFingerprint !== input.fingerprint
+      || job.payload?.operatorRequestId !== command.requestId))) {
+      throw new LiveProductionError('LIVE_INPUT_CONFLICT', 'Existing production job does not match the canonical operator command');
+    }
+    return { production, job, created: Boolean(insertedProduction.rows[0] || insertedJob.rows[0]) };
+  }
+
+  async createDraft({ input, config, command }) {
+    if (!command?.requestId || !command?.actor || !command?.canonicalRawInput || !command?.canonicalRequest) {
+      throw new LiveProductionError('LIVE_OPERATOR_COMMAND_INVALID', 'Canonical operator command metadata is required');
+    }
+    const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
+    try {
+      await client.query('BEGIN');
+      const rows = await this.ensureDraftRows(client, { input, config, command });
+      if (!['DRAFT','RUNNING','COMPLETED','FAILED'].includes(rows.production.status)) {
+        throw new LiveProductionError('LIVE_RUN_NOT_RETRYABLE', `Existing production is ${rows.production.status}`);
+      }
+      await client.query('COMMIT');
+      return { ...rows, reused: rows.created !== true };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      if (client !== this.db) client.release();
+    }
+  }
+
   async createAndClaim({ input, config, allowRecoveredRetry = false }) {
     const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
     try {
       await client.query('BEGIN');
-      await client.query(`/* v2.4:create-production */
-        INSERT INTO v2_1.productions(workspace_id,brand_id,name,status,objective,metadata)
-        VALUES($1,$2,$3,'DRAFT',$4,$5::jsonb)
-        ON CONFLICT(workspace_id,name) DO NOTHING`,
-      [input.workspaceId, input.brandId, this.productionName(input), input.objective, JSON.stringify({
-        source: input.schemaVersion >= 3 ? 'v2.6-real-content-cli' : input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
-        live_test_key: this.productionKey(input), production_key: this.productionKey(input), live_input_fingerprint: input.fingerprint,
-        render_mode: input.renderMode || 'QUALITY', renderer: input.renderer || 'v2.5-quality',
-        publication_policy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
-      })]);
-      const productionResult = await client.query(`/* v2.4:get-production-for-run */
-        SELECT * FROM v2_1.productions WHERE workspace_id=$1 AND name=$2 FOR UPDATE`,
-      [input.workspaceId, this.productionName(input)]);
-      const production = productionResult.rows[0];
-      if (!production || production.brand_id !== input.brandId || production.metadata?.live_input_fingerprint !== input.fingerprint) {
-        throw new LiveProductionError('LIVE_INPUT_CONFLICT', 'Existing production does not match brand or structured input');
-      }
-      await client.query(`/* v2.4:create-live-job */
-        INSERT INTO v2_1.jobs(production_id,stage,status,idempotency_key,payload)
-        VALUES($1,'EDIT','QUEUED',$2,$3::jsonb)
-        ON CONFLICT(production_id,idempotency_key) DO NOTHING`,
-      [production.id, this.jobKey(input), JSON.stringify({
-        source: input.schemaVersion >= 3 ? 'v2.6-real-content-cli' : input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
-        liveTestKey: this.productionKey(input), productionKey: this.productionKey(input), inputFingerprint: input.fingerprint,
-        renderMode: input.renderMode || 'QUALITY', renderer: input.renderer || 'v2.5-quality',
-        provider: config.provider, model: config.model, providerRequestState: 'NOT_STARTED', rendererRequestState: 'NOT_STARTED',
-      })]);
-      const jobResult = await client.query(`/* v2.4:get-live-job */
-        SELECT * FROM v2_1.jobs WHERE production_id=$1 AND idempotency_key=$2 FOR UPDATE`,
-      [production.id, this.jobKey(input)]);
-      const job = jobResult.rows[0];
+      const { production, job } = await this.ensureDraftRows(client, { input, config });
       if (job.status === 'COMPLETED') {
         await client.query('COMMIT');
         return { production, job, reused: true };
@@ -382,6 +447,10 @@ class LiveProductionService {
           targetPlatform: prepared.input.targetPlatform || null, targetDurationSeconds: prepared.input.targetDurationSeconds || null,
           renderMode: prepared.input.renderMode || 'QUALITY', renderer: prepared.input.renderer || 'v2.5-quality',
           publicationPolicy: prepared.input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
+          title: prepared.input.title, hook: prepared.input.hook, coreMessage: prepared.input.coreMessage,
+          creativeConcept: prepared.input.creativeConcept, cta: prepared.input.cta,
+          aspectRatio: prepared.input.aspectRatio, voiceover: prepared.input.voiceover,
+          captions: prepared.input.captions, visualStyle: prepared.input.visualStyle,
           script: prepared.input.script, shotPlan: prepared.input.shotPlan, assetPlan: prepared.input.assetPlan,
         }),
         idempotencyKey: `${prepared.input.brandId}:${claimed.production.id}:live-input:${prepared.input.fingerprint}`,

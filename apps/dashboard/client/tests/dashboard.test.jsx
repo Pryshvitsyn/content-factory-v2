@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import App, { ReviewQueue } from '../src/App';
+import App, { NewProduction, ProductionDetail, ReviewQueue } from '../src/App';
 
 const brandId = '11111111-1111-4111-8111-111111111111';
 const review = {
@@ -61,5 +61,128 @@ describe('V2.3 dashboard', () => {
     render(<ReviewQueue />);
     fireEvent.click(await screen.findByRole('button', { name: 'REJECT' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/reviews/${review.id}/reject`, expect.objectContaining({ body: expect.stringContaining('CTA mismatch') })));
+  });
+
+  it('regenerates a V2.7 review item as a separate command without publishing', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValue('Try a quieter ending');
+    fetch.mockImplementation((url, options = {}) => {
+      if (options.method === 'POST') {
+        expect(url).toBe(`/api/productions/${review.productionId}/regenerate`);
+        expect(url).not.toContain('publish');
+        return response({ productionId: '44444444-4444-4444-8444-444444444444', requiresExplicitStart: true });
+      }
+      return response([{ ...review, commandAvailable: true }]);
+    });
+    render(<ReviewQueue />);
+    fireEvent.click(await screen.findByRole('button', { name: 'REGENERATE' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/productions/${review.productionId}/regenerate`,
+      expect.objectContaining({ method: 'POST', body: expect.stringContaining('Try a quieter ending') })));
+  });
+});
+
+describe('V2.7 operator console', () => {
+  beforeEach(() => { window.location.hash = ''; vi.stubGlobal('fetch', vi.fn()); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const brands = [{ id: brandId, name: 'Attune', status: 'ACTIVE' }];
+  const providers = [
+    { capability: 'FAST RENDERER', provider: 'MoneyPrinterTurbo', configured: true },
+    { capability: 'VIDEO', provider: 'Replicate', configured: true },
+    { capability: 'SPEECH', provider: 'OpenAI', configured: true },
+  ];
+
+  it('renders New Production, loads brands, selects FAST/QUALITY, and disables unavailable renderers', async () => {
+    fetch.mockImplementation((url) => response(url === '/api/brands' ? brands : [
+      { capability: 'FAST RENDERER', provider: 'MoneyPrinterTurbo', configured: false }, ...providers.slice(1),
+    ]));
+    render(<NewProduction />);
+    expect(await screen.findByRole('heading', { name: 'New Production' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Attune' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /FAST/ }).disabled).toBe(true);
+    const quality = screen.getByRole('button', { name: /QUALITY/ });
+    expect(quality.disabled).toBe(false); fireEvent.click(quality);
+    expect(quality.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByLabelText('Production title').required).toBe(true);
+    expect(screen.getByLabelText('Creative brief').required).toBe(true);
+  });
+
+  it('renders preflight without starting and exposes a separate explicit Start button', async () => {
+    const paths = [];
+    const onCreated = vi.fn();
+    fetch.mockImplementation((url, options = {}) => {
+      paths.push([url, options.method || 'GET']);
+      if (url === '/api/brands') return response(brands);
+      if (url === '/api/providers') return response(providers);
+      if (url === `/api/brands/${brandId}`) return response({ ...brands[0], products: [], audiences: [], offers: [], campaigns: [], knowledge: [] });
+      if (url === '/api/productions/preflight') return response({ preflightId: 'fp', brand: 'Attune', production: 'Human moment', renderMode: 'FAST', renderer: 'moneyprinterturbo', targetPlatform: 'Reels', targetDurationSeconds: 10, aspectRatio: '9:16', expectedVideoGenerations: 0, expectedAudioGenerations: 0, expectedExternalExecutions: 1, estimatedCost: null, rendererStatus: 'READY', schemaStatus: 'READY', humanApprovalRequired: true });
+      if (url === '/api/productions') return response({ productionId: '22222222-2222-4222-8222-222222222222', brandId, jobStatus: 'QUEUED' });
+      if (url.includes('/start')) return response({ accepted: true });
+      throw new Error(`Unexpected ${url}`);
+    });
+    render(<NewProduction onCreated={onCreated} />);
+    fireEvent.change(await screen.findByLabelText('Brand'), { target: { value: brandId } });
+    for (const [label, value] of [['Production title','Human moment'],['Hook','Notice first'],['Core message','Attention creates understanding'],['Creative brief','A believable couple pauses'],['CTA','Tune in']]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
+    fireEvent.change(screen.getByLabelText('Target duration'), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'PREPARE / PREFLIGHT' }));
+    expect(await screen.findByText('Ready to start')).toBeTruthy();
+    expect(screen.getByText('PREFLIGHT READY · PROVIDER EXECUTIONS 0')).toBeTruthy();
+    expect(paths.filter(([path, method]) => method === 'POST' && path !== '/api/productions/preflight')).toHaveLength(0);
+    const start = screen.getByRole('button', { name: 'START PRODUCTION' });
+    expect(start).toBeTruthy(); fireEvent.click(start);
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(paths.some(([path]) => path === '/api/productions')).toBe(true);
+    expect(paths.some(([path]) => path.endsWith('/start'))).toBe(true);
+  });
+
+  it('renders durable progress and keeps Retry distinct from Regenerate', async () => {
+    const calls = [];
+    vi.spyOn(window, 'prompt').mockReturnValue('Stronger opening');
+    fetch.mockImplementation((url, options = {}) => {
+      calls.push([url, options.method || 'GET']);
+      if (url.includes('/stages')) return response([]);
+      if (url.includes('/artifacts')) return response([]);
+      if (url.endsWith('/retry')) return response({ accepted: true });
+      if (url.endsWith('/regenerate')) return response({ productionId: '44444444-4444-4444-8444-444444444444' });
+      return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Failed creative', renderMode: 'QUALITY', renderer: 'v2.5-quality', status: 'RUNNING', jobStatus: 'RETRYING', operationalStatus: 'FAILED_RETRYABLE', canonicalRequest: { title: 'Failed creative' }, progress: [{ key: 'rendering', label: 'Rendering', status: 'FAILED' }], actualProviderCalls: 0, ambiguousExecutions: 0, jobError: { code: 'STORAGE_FAILURE', message: 'Storage failure' } });
+    });
+    render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    expect(await screen.findByText('FAILED RETRYABLE')).toBeTruthy();
+    expect(screen.getByText('Rendering')).toBeTruthy(); expect(screen.getByText('Storage failure')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'RETRY SAME EXECUTION' }));
+    await waitFor(() => expect(calls.some(([url]) => url.endsWith('/retry'))).toBe(true));
+    expect(calls.some(([url]) => url.endsWith('/regenerate'))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'REGENERATE NEW REVISION' }));
+    await waitFor(() => expect(calls.some(([url]) => url.endsWith('/regenerate'))).toBe(true));
+  });
+
+  it('can explicitly start a prepared immutable regeneration from production detail', async () => {
+    const calls = [];
+    fetch.mockImplementation((url, options = {}) => {
+      calls.push([url, options.method || 'GET', options.body]);
+      if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
+      if (url.endsWith('/start')) return response({ accepted: true });
+      return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Prepared revision',
+        renderMode: 'FAST', renderer: 'moneyprinterturbo', status: 'DRAFT', jobStatus: 'QUEUED',
+        operationalStatus: 'PREFLIGHT_READY', canonicalRequest: {}, progress: [], actualProviderCalls: 0,
+        ambiguousExecutions: 0, jobError: {} });
+    });
+    render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'START PRODUCTION' }));
+    await waitFor(() => expect(calls.some(([url, method, body]) => url.endsWith('/start')
+      && method === 'POST' && JSON.parse(body).confirmation === true)).toBe(true));
+  });
+
+  it('reloads production truth after a browser remount instead of keeping stale React status', async () => {
+    let status = 'RUNNING';
+    fetch.mockImplementation((url) => {
+      if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
+      return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Refresh proof', renderMode: 'FAST', renderer: 'moneyprinterturbo', status, jobStatus: status, operationalStatus: status, canonicalRequest: {}, progress: [], actualProviderCalls: 0, ambiguousExecutions: 0, jobError: {} });
+    });
+    const first = render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    expect(await screen.findByText('RUNNING')).toBeTruthy(); first.unmount(); status = 'COMPLETED';
+    render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    expect(await screen.findByText('COMPLETED')).toBeTruthy();
   });
 });

@@ -2,6 +2,7 @@
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRODUCTION_STATUSES = new Set(['DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED']);
+const RENDER_MODES = new Set(['FAST','QUALITY']);
 
 class ControlError extends Error {
   constructor(status, code, message) {
@@ -24,13 +25,40 @@ function requiredUuid(name, value) {
   return parsed;
 }
 
+function operationalStatus(item) {
+  if (item.reviewState === 'APPROVED') return 'APPROVED';
+  if (item.reviewState === 'REJECTED') return 'REJECTED';
+  if (item.reviewState === 'AWAITING_HUMAN_APPROVAL') return 'AWAITING_REVIEW';
+  if (item.jobStatus === 'RETRYING') return 'FAILED_RETRYABLE';
+  if (item.jobStatus === 'DEAD_LETTER') return 'FAILED';
+  if (item.jobStatus === 'RUNNING') return 'RUNNING';
+  if (item.status === 'DRAFT' && item.jobStatus === 'QUEUED') return 'PREFLIGHT_READY';
+  return item.status;
+}
+
+function progressFor(item) {
+  const state = operationalStatus(item);
+  const terminalFailure = ['FAILED','FAILED_RETRYABLE','CANCELLED'].includes(state);
+  return [
+    { key: 'input', label: 'Input', status: item.canonicalRequest ? 'COMPLETED' : 'PENDING' },
+    { key: 'planning', label: 'Planning', status: item.jobId ? 'COMPLETED' : 'PENDING' },
+    { key: 'rendering', label: 'Rendering', status: item.jobStatus === 'RUNNING' ? 'RUNNING'
+      : item.jobStatus === 'COMPLETED' ? 'COMPLETED' : terminalFailure ? 'FAILED' : 'PENDING' },
+    { key: 'validation', label: 'Validation', status: item.validationStatus === 'PASS' ? 'COMPLETED'
+      : item.validationStatus ? 'FAILED' : 'PENDING' },
+    { key: 'review', label: 'Review', status: ['APPROVED','REJECTED'].includes(item.reviewState) ? 'COMPLETED'
+      : item.reviewState === 'AWAITING_HUMAN_APPROVAL' ? 'RUNNING' : 'PENDING' },
+  ];
+}
+
 class ControlService {
-  constructor({ repository, reviewService, storage, providers, actor = 'local-operator' } = {}) {
+  constructor({ repository, reviewService, commandService = null, storage, providers, actor = 'local-operator' } = {}) {
     if (!repository) throw new Error('repository is required');
     if (!reviewService) throw new Error('reviewService is required');
     if (!storage) throw new Error('storage is required');
     this.repository = repository;
     this.reviewService = reviewService;
+    this.commandService = commandService;
     this.storage = storage;
     this.providers = providers || [];
     this.actor = actor;
@@ -46,16 +74,24 @@ class ControlService {
     return item;
   }
 
-  async listProductions({ brandId, status } = {}) {
+  async listProductions({ brandId, status, renderMode, needsReview = false, failed = false } = {}) {
     const scope = optionalUuid('brandId', brandId);
     if (status && !PRODUCTION_STATUSES.has(status)) throw new ControlError(400, 'INVALID_STATUS', 'Invalid production status');
-    return this.repository.listProductions({ brandId: scope, status: status || null });
+    const mode = renderMode ? String(renderMode).toUpperCase() : null;
+    if (mode && !RENDER_MODES.has(mode)) throw new ControlError(400, 'INVALID_RENDER_MODE', 'Invalid render mode');
+    const items = await this.repository.listProductions({ brandId: scope, status: status || null,
+      renderMode: mode, needsReview: needsReview === true, failed: failed === true });
+    return items.map((item) => ({ ...item, operationalStatus: operationalStatus(item) }));
   }
 
   async production(productionId, brandId) {
     const item = await this.repository.getProduction(requiredUuid('productionId', productionId), optionalUuid('brandId', brandId));
     if (!item) throw new ControlError(404, 'PRODUCTION_NOT_FOUND', 'Production not found in brand scope');
-    return item;
+    const execution = typeof this.repository.executionSafety === 'function'
+      ? await this.repository.executionSafety(item.id) : { ambiguousExecutions: 0, actualProviderCalls: 0 };
+    return { ...item, operationalStatus: operationalStatus(item), progress: progressFor(item),
+      actualProviderCalls: execution.actualProviderCalls, ambiguousExecutions: execution.ambiguousExecutions,
+      autoPublish: false };
   }
 
   async stages(productionId, brandId) {
@@ -88,6 +124,32 @@ class ControlService {
     }
   }
 
+  requireCommands() {
+    if (!this.commandService) throw new ControlError(503, 'PRODUCTION_COMMANDS_UNAVAILABLE', 'Production commands are not configured');
+    return this.commandService;
+  }
+
+  async preflightProduction(body) { return this.requireCommands().preflight(body); }
+
+  async createProduction(body) {
+    return this.requireCommands().create(body.request, { preflightId: body.preflightId });
+  }
+
+  async startProduction({ productionId, brandId, confirmation }) {
+    return this.requireCommands().start({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId), confirmation });
+  }
+
+  async retryProduction({ productionId, brandId }) {
+    return this.requireCommands().retry({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId) });
+  }
+
+  async regenerateProduction({ productionId, brandId, requestId, reason }) {
+    return this.requireCommands().regenerate({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId), requestId: requiredUuid('requestId', requestId), reason });
+  }
+
   async artifactContent({ sourceId, artifactId, version, brandId }) {
     const parsedVersion = Number(version);
     if (!Number.isInteger(parsedVersion) || parsedVersion < 1) throw new ControlError(400, 'INVALID_VERSION', 'version must be a positive integer');
@@ -104,4 +166,4 @@ class ControlService {
   }
 }
 
-module.exports = { ControlService, ControlError, UUID_PATTERN };
+module.exports = { ControlService, ControlError, UUID_PATTERN, operationalStatus, progressFor };
