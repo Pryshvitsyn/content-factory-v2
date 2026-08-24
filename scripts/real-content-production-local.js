@@ -25,7 +25,7 @@ try {
     VIDEO_PROVIDER: process.env.VIDEO_PROVIDER || 'replicate',
     AUDIO_PROVIDER: process.env.AUDIO_PROVIDER || 'openai-media',
   };
-  console.log(`V2.5 local mode: ${env.LIVE_PAID_GENERATION === 'true' ? 'PAID LIVE' : 'DRY RUN ($0)'}`);
+  console.log(`V2.5/V2.6 local mode: ${env.LIVE_PAID_GENERATION === 'true' ? 'OPERATOR-ENABLED LIVE' : 'DRY RUN (zero renderer jobs)'}`);
   console.log(`Database: ${discovered.database} (${discovered.source})`);
   console.log(`Input: ${env.REAL_PRODUCTION_INPUT}`);
   run(path.resolve('scripts/prepare-local-live-production.js'), env);

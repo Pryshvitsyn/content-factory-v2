@@ -295,6 +295,21 @@ npm run real:production:local
 
 See [`docs/V2.5-REAL-CONTENT-PRODUCTION.md`](docs/V2.5-REAL-CONTENT-PRODUCTION.md) for the operator contract, recovery states, paid boundary, and certification commands.
 
+## V2.6 FAST Rendering
+
+V2.6 adds an explicit renderer router. Existing inputs remain on the unchanged `QUALITY` lane; new `FAST` inputs can use a pinned external MoneyPrinterTurbo service. FAST output is copied into the same immutable artifact store, validated with ffprobe, and registered in the same human Review Queue. No FAST job is started by dry-run or CI.
+
+```bash
+LIVE_PAID_GENERATION=false \
+REAL_PRODUCTION_INPUT=config/productions/attune-fast-example.json \
+RENDER_MODE=FAST FAST_RENDERER=moneyprinterturbo \
+MPT_ENABLED=true MPT_BASE_URL=http://127.0.0.1:8080 \
+MPT_AUTO_PUBLISH_DISABLED=true \
+npm run real:production:local
+```
+
+See [`docs/V2.6-FAST-RENDERING.md`](docs/V2.6-FAST-RENDERING.md) for the pinned upstream API/image, localhost companion, recovery rules, safe dry-run, and operator-controlled real command.
+
 ## Environment
 
 Create a local `.env` from `.env.example`.

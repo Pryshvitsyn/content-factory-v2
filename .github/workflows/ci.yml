@@ -8,6 +8,7 @@ on:
       - "feat/v2.3-control-dashboard"
       - "feat/v2.4-controlled-live-production-test"
       - "feat/v2.5-real-content-production"
+      - "feat/v2.6-fast-renderer-moneyprinterturbo"
       - "release/**"
       - "develop/**"
     paths:
@@ -17,6 +18,8 @@ on:
       - "docs/V2.3-CONTROL-DASHBOARD.md"
       - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
       - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
+      - "docs/V2.6-FAST-RENDERING.md"
+      - "deploy/moneyprinterturbo/**"
       - "config/live-production.example.json"
       - "config/productions/**"
       - "worker/**"
@@ -38,6 +41,8 @@ on:
       - "docs/V2.3-CONTROL-DASHBOARD.md"
       - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
       - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
+      - "docs/V2.6-FAST-RENDERING.md"
+      - "deploy/moneyprinterturbo/**"
       - "config/live-production.example.json"
       - "config/productions/**"
       - "worker/**"
@@ -183,6 +188,14 @@ jobs:
           node --check tests/v2.5-durable-media-test.js
           node --check tests/v2.5-real-master-test.js
           node --check tests/v2.5-postgres-integration-test.js
+          node --check src/v2.6/renderer-router.js
+          node --check src/v2.6/moneyprinterturbo-adapter.js
+          node --check src/v2.6/durable-fast-renderer.js
+          node --check tests/v2.6-production-input-test.js
+          node --check tests/v2.6-renderer-router-test.js
+          node --check tests/v2.6-moneyprinterturbo-adapter-test.js
+          node --check tests/v2.6-fast-renderer-test.js
+          node --check tests/v2.6-postgres-integration-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -347,6 +360,17 @@ jobs:
           createdb --maintenance-db=postgres v25_media_test
           npm run test:v2.5:postgres
         timeout-minutes: 5
+      - name: Run V2.6 FAST renderer contracts (mock/local only, no live services)
+        run: npm run test:v2.6
+        timeout-minutes: 5
+      - name: Run V2.6 PostgreSQL FAST ownership and concurrency integration
+        env:
+          CONTENT_FACTORY_TEST_DATABASE: "1"
+          PGDATABASE: v26_fast_test
+        run: |
+          createdb --maintenance-db=postgres v26_fast_test
+          npm run test:v2.6:postgres
+        timeout-minutes: 5
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
@@ -368,6 +392,8 @@ jobs:
           test -s migrations/20260823_v2_4_legacy_schema_compatibility.sql
           test -s migrations/20260823_v2_4_canonical_production_ownership.sql
           test -s migrations/20260823_v2_5_durable_media_executions.sql
+          test -s migrations/20260824_v2_6_fast_render_executions.sql
+          test -s deploy/moneyprinterturbo/docker-compose.yml
         timeout-minutes: 2
       - name: Check required project files
         run: |

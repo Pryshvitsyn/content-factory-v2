@@ -89,6 +89,8 @@ class ControlRepository {
     const result = await this.db.query(`/* dashboard:list-productions */
       SELECT p.id, p.workspace_id AS "workspaceId", p.brand_id AS "brandId", b.name AS "brandName",
         p.name, p.objective, p.status, p.created_at AS "createdAt", p.updated_at AS "updatedAt",
+        COALESCE(p.metadata->>'render_mode','QUALITY') AS "renderMode",
+        COALESCE(p.metadata->>'renderer','v2.5-quality') AS renderer,
         current_stage.stage AS "currentStage", current_stage.status AS "currentStageStatus",
         COALESCE(decision.decision,
           CASE WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE NULL END) AS "reviewState"
@@ -110,7 +112,9 @@ class ControlRepository {
   async getProduction(productionId, brandId = null) {
     const result = await this.db.query(`/* dashboard:get-production */
       SELECT p.*, p.workspace_id AS "workspaceId", p.brand_id AS "brandId", p.product_id AS "productId",
-        p.campaign_id AS "campaignId", p.content_item_id AS "contentItemId", b.name AS "brandName"
+        p.campaign_id AS "campaignId", p.content_item_id AS "contentItemId", b.name AS "brandName",
+        COALESCE(p.metadata->>'render_mode','QUALITY') AS "renderMode",
+        COALESCE(p.metadata->>'renderer','v2.5-quality') AS renderer
       FROM v2_1.productions p
       LEFT JOIN v2_2.brands b ON b.id=p.brand_id AND b.workspace_id=p.workspace_id
       WHERE p.id=$1 AND ($2::uuid IS NULL OR p.brand_id=$2)`, [productionId, brandId]);
@@ -164,6 +168,9 @@ class ControlRepository {
         ri.validation_status AS "validationStatus", ri.review_payload AS "reviewPayload",
         ri.validation_evidence AS "validationEvidence", ri.provenance, ri.generated_assets AS "generatedAssets",
         ri.created_at AS "createdAt", p.status AS "productionStatus",
+        COALESCE(ri.review_payload->>'renderMode',p.metadata->>'render_mode','QUALITY') AS "renderMode",
+        COALESCE(ri.review_payload->>'renderer',ri.provenance->>'renderer',p.metadata->>'renderer','v2.5-quality') AS renderer,
+        COALESCE(ri.review_payload->>'rendererStatus',ri.provenance->>'rendererStatus','SUCCEEDED') AS "rendererStatus",
         CASE WHEN rd.id IS NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE rd.decision END AS "reviewStatus",
         CASE WHEN coalesce((p.metadata->'publication_policy'->>'autoPublish')::boolean,false)=false
           THEN 'DISABLED_PENDING_APPROVAL' ELSE 'NOT_TRIGGERED' END AS "publicationStatus",

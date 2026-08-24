@@ -1,0 +1,116 @@
+{
+  "schema_version": "2.6",
+  "render_mode": "FAST",
+  "brand_id": "a03def76-bd3d-4c8e-b00a-ec77616c5191",
+  "production_key": "attune-fast-example-v1",
+  "title": "Attune — Notice Before You Assume",
+  "objective": "ENGAGEMENT",
+  "target_platform": "Instagram Reels and TikTok",
+  "target_duration_seconds": 10,
+  "aspect_ratio": "9:16",
+  "hook": "A quiet moment can mean more than one thing.",
+  "core_message": "Attention creates room for understanding.",
+  "creative_concept": "Believable stock-style human moments move from uncertainty to attentive connection without showing an app interface.",
+  "cta": "Don't guess. Tune in.",
+  "scenes": [
+    {
+      "scene_id": "assumption",
+      "duration_seconds": 5,
+      "location": "A warm lived-in apartment in the evening",
+      "visual": "One partner is quiet while the other notices the ambiguity of the moment.",
+      "emotional_intent": "Subtle uncertainty without conflict or melodrama.",
+      "dialogue_or_voiceover": "A quiet moment can mean more than one thing.",
+      "shots": [
+        {
+          "shot_id": "shot-assumption",
+          "asset_id": "fast-visual-assumption",
+          "duration_seconds": 5,
+          "framing": "vertical medium two-shot",
+          "camera": "restrained observational movement",
+          "subject": "a realistic couple at home",
+          "action": "one partner notices the other's silence",
+          "continuity": "Natural apartment, warm evening light, understated clothing.",
+          "video": {
+            "prompt": "Realistic couple at home, subtle uncertainty, warm evening practical light, natural behavior, no phone or app UI.",
+            "aspect_ratio": "9:16"
+          }
+        }
+      ]
+    },
+    {
+      "scene_id": "attention",
+      "duration_seconds": 5,
+      "location": "The same kind of warm home environment",
+      "visual": "A pause and a small attentive gesture create a sense of understanding.",
+      "emotional_intent": "Quiet connection, human and unsentimental.",
+      "dialogue_or_voiceover": "Notice what is here before you decide what it means. Don't guess. Tune in.",
+      "shots": [
+        {
+          "shot_id": "shot-attention",
+          "asset_id": "fast-visual-attention",
+          "duration_seconds": 5,
+          "framing": "vertical intimate medium shot",
+          "camera": "gentle settled movement",
+          "subject": "a realistic couple reconnecting",
+          "action": "one partner pauses, moves closer, and offers a small gesture of care",
+          "continuity": "Warm domestic naturalism and understated performance.",
+          "video": {
+            "prompt": "Realistic attentive human connection at home, restrained emotion, small caring gesture, no glossy advertising, no app UI.",
+            "aspect_ratio": "9:16"
+          }
+        }
+      ]
+    }
+  ],
+  "voiceover": {
+    "enabled": true,
+    "asset_id": "voiceover-main",
+    "voice": "en-US-AvaNeural-Female",
+    "language": "en",
+    "instructions": "Warm, quiet, intimate, clear English delivery.",
+    "text": "A quiet moment can mean more than one thing. Notice what is here before you decide what it means. Don't guess. Tune in."
+  },
+  "continuity": {
+    "characters": ["real adults in a close relationship"],
+    "locations": ["warm lived-in home interiors"],
+    "products": ["Attune end title only"],
+    "wardrobe": ["understated everyday clothing"],
+    "props": ["sofa", "warm practical lamp"],
+    "visual_style": "believable human behavior, warm cinematic naturalism, no app UI and no glossy stock-ad performance"
+  },
+  "visual_style": {
+    "realism": "naturalistic stock footage",
+    "lighting": "warm evening practical light",
+    "camera": "restrained",
+    "avoid": ["melodrama", "phone close-ups", "app UI", "aggressive advertising"]
+  },
+  "audio": {
+    "ambience_intent": "Quiet warm room tone.",
+    "music_intent": "Low restrained bed below speech.",
+    "speech_priority": true
+  },
+  "captions": {
+    "enabled": true,
+    "intent": "Readable high-contrast burned-in subtitles.",
+    "end_title": "Attune — Don't guess. Tune in."
+  },
+  "fast_render": {
+    "renderer": "moneyprinterturbo",
+    "media_source": "pexels",
+    "captions": true,
+    "music": true,
+    "provider_options": {
+      "voice_name": "en-US-AvaNeural-Female",
+      "bgm_volume": 0.12,
+      "clip_duration_seconds": 4,
+      "concat_mode": "sequential",
+      "match_materials_to_script": true,
+      "subtitle_position": "bottom"
+    }
+  },
+  "publication_policy": {
+    "requires_human_approval": true,
+    "auto_publish": false,
+    "destination": "disabled"
+  }
+}

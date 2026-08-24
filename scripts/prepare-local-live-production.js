@@ -28,6 +28,7 @@ const V22_MIGRATIONS = [
 const V23_MIGRATIONS = ['migrations/20260823_v2_3_control_reviews.sql'];
 const V24_OWNERSHIP_MIGRATIONS = ['migrations/20260823_v2_4_canonical_production_ownership.sql'];
 const V25_MIGRATIONS = ['migrations/20260823_v2_5_durable_media_executions.sql'];
+const V26_MIGRATIONS = ['migrations/20260824_v2_6_fast_render_executions.sql'];
 
 function discoverDatabaseUrl(env = process.env) {
   const discovered = discoverLocalDatabase(env);
@@ -113,6 +114,7 @@ async function prepareDatabase(db) {
     const brands = await ensureLegacyBrands(db);
     for (const relative of V24_OWNERSHIP_MIGRATIONS) await applyMigration(db, relative);
     for (const relative of V25_MIGRATIONS) await applyMigration(db, relative);
+    for (const relative of V26_MIGRATIONS) await applyMigration(db, relative);
     return { report: await inspectSchemaCompatibility(db), brands, alreadyCompatible: true };
   }
   await ensureV21(db);
@@ -122,6 +124,7 @@ async function prepareDatabase(db) {
   for (const relative of V24_OWNERSHIP_MIGRATIONS) await applyMigration(db, relative);
   for (const relative of V23_MIGRATIONS) await applyMigration(db, relative);
   for (const relative of V25_MIGRATIONS) await applyMigration(db, relative);
+  for (const relative of V26_MIGRATIONS) await applyMigration(db, relative);
   const report = await inspectSchemaCompatibility(db);
   assertSchemaCompatible(report);
   return { report, brands, alreadyCompatible: false };
@@ -160,6 +163,8 @@ module.exports = {
   V22_MIGRATIONS,
   V23_MIGRATIONS,
   V24_OWNERSHIP_MIGRATIONS,
+  V25_MIGRATIONS,
+  V26_MIGRATIONS,
   applyMigration,
   assertCompatibilityFoundation,
   discoverDatabaseUrl,

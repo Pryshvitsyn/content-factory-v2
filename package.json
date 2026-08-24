@@ -7,8 +7,10 @@
   "scripts": {
     "real:production": "node scripts/real-content-production.js",
     "real:production:local": "node scripts/real-content-production-local.js",
-    "test:v2.5": "node tests/v2.5-production-input-test.js && node tests/v2.5-durable-media-test.js && node tests/v2.5-real-master-test.js",
+    "test:v2.5": "node tests/v2.5-production-input-test.js && node tests/v2.5-live-workspace-propagation-test.js && node tests/v2.5-durable-media-test.js && node tests/v2.5-real-master-test.js",
     "test:v2.5:postgres": "node tests/v2.5-postgres-integration-test.js",
+    "test:v2.6": "node tests/v2.6-production-input-test.js && node tests/v2.6-renderer-router-test.js && node tests/v2.6-moneyprinterturbo-adapter-test.js && node tests/v2.6-fast-renderer-test.js",
+    "test:v2.6:postgres": "node tests/v2.6-postgres-integration-test.js",
     "live:production": "node scripts/live-production.js",
     "live:production:prepare": "node scripts/prepare-local-live-production.js",
     "live:production:local": "node scripts/live-production-local.js",

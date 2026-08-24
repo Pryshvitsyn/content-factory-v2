@@ -9,6 +9,7 @@ const review = {
   productionId: '22222222-2222-4222-8222-222222222222', productionName: 'Launch master',
   artifactId: 'production:master', artifactVersion: 1, contentType: 'video/mp4', validationStatus: 'PASS',
   productionStatus: 'COMPLETED', reviewStatus: 'AWAITING_HUMAN_APPROVAL', publicationStatus: 'DISABLED_PENDING_APPROVAL',
+  renderMode: 'FAST', renderer: 'moneyprinterturbo', rendererStatus: 'SUCCEEDED',
   reviewPayload: { hook: 'Stop scrolling', cta: 'Start now', durationMs: 5000, width: 1080, height: 1920,
     videoCodec: 'h264', audioCodec: 'aac', hasAudio: true, script: { scenes: [] }, technicalValidation: [] },
   validationEvidence: { status: 'PASS', score: 1 }, provenance: { provider: 'ffmpeg' },
@@ -46,6 +47,8 @@ describe('V2.3 dashboard', () => {
     expect(await screen.findByText('Launch master')).toBeTruthy();
     expect(screen.getByText('Stop scrolling')).toBeTruthy();
     expect(screen.getByText('DISABLED_PENDING_APPROVAL')).toBeTruthy();
+    expect(screen.getByText('FAST')).toBeTruthy();
+    expect(screen.getByText('moneyprinterturbo · SUCCEEDED')).toBeTruthy();
     expect(screen.getByText(/video · video-1 · replicate \/ wan-test/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'APPROVE' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/reviews/${review.id}/approve`, expect.objectContaining({ method: 'POST' })));

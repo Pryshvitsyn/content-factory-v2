@@ -1,0 +1,27 @@
+services:
+  moneyprinterturbo-api:
+    image: ghcr.io/harry0703/moneyprinterturbo:v1.3.3@sha256:436e0aefc81cda8a5952a2bc3a1139385498721114df59e5818d1ba851763001
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        python3 -c "import tomllib; c=tomllib.load(open('/MoneyPrinterTurbo/config.toml','rb')); a=c.get('app',{}); assert a.get('upload_post_enabled',False) is False and a.get('upload_post_auto_upload',False) is False, 'MPT automatic publication must be disabled'"
+        exec python3 main.py
+    ports:
+      - "127.0.0.1:${MPT_HOST_PORT:-8080}:8080"
+    volumes:
+      - "${MPT_CONFIG_FILE:?Set MPT_CONFIG_FILE to an absolute local config.toml path}:/MoneyPrinterTurbo/config.toml:ro"
+      - "mpt-storage:/MoneyPrinterTurbo/storage"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/openapi.json', timeout=5)"]
+      interval: 15s
+      timeout: 7s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mpt-storage:
+    name: content-factory-v26-mpt-storage
