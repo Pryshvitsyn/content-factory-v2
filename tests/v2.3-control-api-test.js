@@ -78,7 +78,7 @@ async function main() {
 
   const providerPayload = JSON.stringify(describeProviders({ NVIDIA_API_KEY: 'private-nv', REPLICATE_API_TOKEN: 'private-replicate',
     OPENAI_API_KEY: 'private-openai', MPT_ENABLED: 'true', MPT_BASE_URL: 'http://127.0.0.1:8080',
-    MPT_API_KEY: 'private-mpt', FAST_RENDERER: 'moneyprinterturbo' }));
+    MPT_API_KEY: 'private-mpt', FAST_RENDERER: 'moneyprinterturbo', MPT_AUTO_PUBLISH_DISABLED: 'true' }));
   assert.doesNotMatch(providerPayload, /private-(nv|replicate|openai|mpt)/, 'provider response must not expose secrets');
   const fast = JSON.parse(providerPayload).find((item) => item.capability === 'FAST RENDERER');
   assert.equal(fast.provider, 'MoneyPrinterTurbo'); assert.equal(fast.configured, true);

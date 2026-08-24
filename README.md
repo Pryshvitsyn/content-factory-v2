@@ -2,6 +2,30 @@
 
 A controlled production system for AI-assisted content generation.
 
+## Start Content Factory
+
+For normal local operation, use the Dashboard:
+
+```bash
+LIVE_PAID_GENERATION=false npm run dashboard:local
+```
+
+Open `http://127.0.0.1:3000`, then:
+
+```text
+New Production
+  → Choose Brand
+  → Choose FAST or QUALITY
+  → Enter creative brief
+  → Preflight (zero generation calls)
+  → Start Production (separate explicit action)
+  → Watch durable progress
+  → Preview immutable master
+  → Approve / Reject / Regenerate
+```
+
+Approval does not publish. Every Dashboard production requires human approval and has auto publication disabled. A real external production requires restarting the local Dashboard with `LIVE_PAID_GENERATION=true` and the existing provider/renderer configuration; opening the Dashboard alone never starts generation. See [`docs/V2.7-OPERATOR-CONSOLE.md`](docs/V2.7-OPERATOR-CONSOLE.md).
+
 ## Current Status
 
 - **Architecture:** V2
@@ -260,6 +284,17 @@ npm run test:v2.1
 ```
 
 CI also verifies runtime syntax, provider routing, artifact/storage integration, multi-stage execution, PostgreSQL lifecycle, retries and recovery, concurrency ownership, lease fencing, artifact idempotency, crash recovery, reconciliation, validation, publication, structured production planning, and asset orchestration.
+
+## V2.7 Operator Production Console
+
+V2.7 makes the localhost Dashboard the primary operator interface. It builds canonical V2.6 production requests from a simple form, loads safe Brand Brain context, runs mandatory zero-generation preflight, and routes an explicit Start through the same production runtime used by the CLI. Durable PostgreSQL state survives browser refresh/closure, and retry is kept distinct from immutable whole-production regeneration.
+
+```bash
+npm run test:v2.7
+npm run dashboard:build
+```
+
+See [`docs/V2.7-OPERATOR-CONSOLE.md`](docs/V2.7-OPERATOR-CONSOLE.md) for architecture, local startup, provider boundaries, recovery, and controlled real certification.
 
 ## V2.3 Control Dashboard
 

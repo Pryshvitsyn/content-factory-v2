@@ -13,20 +13,22 @@ function describeProviders(env = process.env) {
   const replicate = Boolean(env.REPLICATE_API_TOKEN);
   const openai = Boolean(env.OPENAI_API_KEY);
   const preferredVideo = env.VIDEO_PROVIDER || 'nvidia';
-  const mptConfigured = env.MPT_ENABLED === 'true' && Boolean(env.MPT_BASE_URL);
+  const mptConfigured = env.MPT_ENABLED === 'true' && Boolean(env.MPT_BASE_URL)
+    && env.MPT_AUTO_PUBLISH_DISABLED === 'true';
   return [
-    { capability: 'FAST RENDERER', provider: 'MoneyPrinterTurbo', model: env.MPT_VERSION || 'v1.3.3',
+    { mode: 'FAST', capability: 'FAST RENDERER', provider: 'MoneyPrinterTurbo', model: env.MPT_VERSION || 'v1.3.3',
       enabled: env.MPT_ENABLED === 'true', configured: mptConfigured, availability: status(mptConfigured),
-      route: env.FAST_RENDERER === 'moneyprinterturbo' ? 'primary' : 'optional' },
+      route: env.FAST_RENDERER === 'moneyprinterturbo' ? 'primary' : 'optional', captionsRendered: true,
+      publication: 'AUTO_PUBLISH_DISABLED' },
     { capability: 'TEXT / REASONING', provider: 'NVIDIA', model: env.NVIDIA_MODEL || NVIDIA_TEXT_MODEL,
       enabled: true, configured: nvidia, availability: status(nvidia), route: 'primary' },
-    { capability: 'VIDEO', provider: 'Replicate', model: env.REPLICATE_VIDEO_MODEL || REPLICATE_VIDEO_MODEL,
+    { mode: 'QUALITY', capability: 'VIDEO', provider: 'Replicate', model: env.REPLICATE_VIDEO_MODEL || REPLICATE_VIDEO_MODEL,
       enabled: replicate, configured: replicate, availability: status(replicate), route: preferredVideo === 'replicate' ? 'primary' : 'alternative' },
     { capability: 'VIDEO', provider: 'NVIDIA', model: env.NVIDIA_VIDEO_MODEL || 'nvidia/cosmos3-nano',
       enabled: true, configured: nvidia, availability: status(nvidia), route: preferredVideo === 'nvidia' ? 'primary' : 'alternative' },
     { capability: 'IMAGE', provider: openai ? 'OpenAI' : 'Unavailable', model: openai ? env.OPENAI_IMAGE_MODEL || DEFAULT_IMAGE_MODEL : null,
       enabled: openai, configured: openai, availability: status(openai), route: openai ? 'primary' : null },
-    { capability: 'SPEECH', provider: openai ? 'OpenAI' : 'Unavailable', model: openai ? env.OPENAI_SPEECH_MODEL || DEFAULT_SPEECH_MODEL : null,
+    { mode: 'QUALITY', capability: 'SPEECH', provider: openai ? 'OpenAI' : 'Unavailable', model: openai ? env.OPENAI_SPEECH_MODEL || DEFAULT_SPEECH_MODEL : null,
       enabled: openai, configured: openai, availability: status(openai), route: openai ? 'primary' : null },
   ];
 }

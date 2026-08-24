@@ -196,6 +196,12 @@ jobs:
           node --check tests/v2.6-moneyprinterturbo-adapter-test.js
           node --check tests/v2.6-fast-renderer-test.js
           node --check tests/v2.6-postgres-integration-test.js
+          node --check src/v2.7/operator-production-input.js
+          node --check src/v2.7/production-command-service.js
+          node --check src/v2.7/production-runtime.js
+          node --check tests/v2.7-production-command-test.js
+          node --check tests/v2.7-control-api-test.js
+          node --check tests/v2.7-operator-console-postgres-integration-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -370,6 +376,17 @@ jobs:
         run: |
           createdb --maintenance-db=postgres v26_fast_test
           npm run test:v2.6:postgres
+        timeout-minutes: 5
+      - name: Run V2.7 operator console contracts (mock/local only, no live services)
+        run: npm run test:v2.7
+        timeout-minutes: 5
+      - name: Run V2.7 PostgreSQL local operator-console certification
+        env:
+          CONTENT_FACTORY_TEST_DATABASE: "1"
+          PGDATABASE: v27_operator_test
+        run: |
+          createdb --maintenance-db=postgres v27_operator_test
+          npm run test:v2.7:postgres
         timeout-minutes: 5
 
       - name: Check smoke test syntax

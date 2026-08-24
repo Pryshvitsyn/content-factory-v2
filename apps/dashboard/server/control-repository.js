@@ -18,10 +18,12 @@ class ControlRepository {
         (SELECT count(*)::int FROM v2_1.productions WHERE status IN ('DRAFT','RUNNING')) AS "activeProductions",
         (SELECT count(*)::int FROM v2_1.jobs WHERE status='QUEUED') AS "queuedJobs",
         (SELECT count(*)::int FROM v2_1.jobs WHERE status='RUNNING') AS "runningJobs",
-        (SELECT count(*)::int FROM v2_1.jobs WHERE status IN ('FAILED','DEAD_LETTER')) AS "failedJobs",
+        (SELECT count(*)::int FROM v2_1.jobs WHERE status IN ('FAILED','DEAD_LETTER','RETRYING')) AS "failedJobs",
         (SELECT count(*)::int FROM v2_3.master_review_items ri
           LEFT JOIN v2_3.master_review_decisions rd ON rd.review_item_id=ri.id
           WHERE ri.validation_status='PASS' AND rd.id IS NULL) AS "awaitingReview",
+        (SELECT count(*)::int FROM v2_1.productions
+          WHERE status='COMPLETED' AND completed_at >= date_trunc('day',now())) AS "completedToday",
         (SELECT count(*)::int FROM v2_1.productions
           WHERE status='COMPLETED' AND completed_at >= now() - interval '7 days') AS "recentlyCompleted"`);
     const activity = await this.db.query(`/* dashboard:activity */
@@ -85,17 +87,26 @@ class ControlRepository {
       campaigns: campaigns.rows, knowledge: knowledge.rows, assets: assets.rows };
   }
 
-  async listProductions({ brandId = null, status = null } = {}) {
+  async listProductions({ brandId = null, status = null, renderMode = null, needsReview = false, failed = false } = {}) {
     const result = await this.db.query(`/* dashboard:list-productions */
       SELECT p.id, p.workspace_id AS "workspaceId", p.brand_id AS "brandId", b.name AS "brandName",
-        p.name, p.objective, p.status, p.created_at AS "createdAt", p.updated_at AS "updatedAt",
+        p.name, COALESCE(p.metadata->'canonical_request'->>'title',p.name) AS title,
+        p.objective, p.status, p.created_at AS "createdAt", p.updated_at AS "updatedAt",
         COALESCE(p.metadata->>'render_mode','QUALITY') AS "renderMode",
         COALESCE(p.metadata->>'renderer','v2.5-quality') AS renderer,
+        (p.metadata->'canonical_request'->>'targetDurationSeconds')::numeric AS "targetDurationSeconds",
+        latest_job.id AS "jobId", latest_job.status AS "jobStatus", latest_job.error AS error,
         current_stage.stage AS "currentStage", current_stage.status AS "currentStageStatus",
+        CASE WHEN p.metadata ? 'publication_policy'
+          AND coalesce((p.metadata->'publication_policy'->>'autoPublish')::boolean,false)=false THEN 'DISABLED'
+          WHEN p.metadata ? 'publication_policy' THEN 'NOT_TRIGGERED' ELSE 'NOT_CONFIGURED' END AS "publicationStatus",
         COALESCE(decision.decision,
           CASE WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE NULL END) AS "reviewState"
       FROM v2_1.productions p
       LEFT JOIN v2_2.brands b ON b.id=p.brand_id AND b.workspace_id=p.workspace_id
+      LEFT JOIN LATERAL (
+        SELECT j.id,j.status,j.error FROM v2_1.jobs j WHERE j.production_id=p.id ORDER BY j.created_at DESC LIMIT 1
+      ) latest_job ON true
       LEFT JOIN LATERAL (
         SELECT sr.stage, sr.status FROM v2_1.stage_runs sr JOIN v2_1.jobs j ON j.id=sr.job_id
         WHERE j.production_id=p.id ORDER BY sr.updated_at DESC LIMIT 1
@@ -105,7 +116,10 @@ class ControlRepository {
       ) review ON true
       LEFT JOIN v2_3.master_review_decisions decision ON decision.review_item_id=review.id
       WHERE ($1::uuid IS NULL OR p.brand_id=$1) AND ($2::text IS NULL OR p.status=$2)
-      ORDER BY p.created_at DESC`, [brandId, status]);
+        AND ($3::text IS NULL OR COALESCE(p.metadata->>'render_mode','QUALITY')=$3)
+        AND (NOT $4::boolean OR (review.id IS NOT NULL AND decision.id IS NULL))
+        AND (NOT $5::boolean OR p.status='FAILED' OR latest_job.status IN ('FAILED','DEAD_LETTER','RETRYING'))
+      ORDER BY p.created_at DESC`, [brandId, status, renderMode, needsReview, failed]);
     return result.rows;
   }
 
@@ -114,11 +128,57 @@ class ControlRepository {
       SELECT p.*, p.workspace_id AS "workspaceId", p.brand_id AS "brandId", p.product_id AS "productId",
         p.campaign_id AS "campaignId", p.content_item_id AS "contentItemId", b.name AS "brandName",
         COALESCE(p.metadata->>'render_mode','QUALITY') AS "renderMode",
-        COALESCE(p.metadata->>'renderer','v2.5-quality') AS renderer
+        COALESCE(p.metadata->>'renderer','v2.5-quality') AS renderer,
+        COALESCE(p.metadata->'canonical_request'->>'title',p.name) AS title,
+        p.metadata->'canonical_request' AS "canonicalRequest",
+        p.metadata->>'regeneration_of' AS "regenerationOf",
+        latest_job.id AS "jobId", latest_job.status AS "jobStatus", latest_job.payload AS "jobPayload",
+        latest_job.result AS "jobResult", latest_job.error AS "jobError",
+        CASE WHEN decision.id IS NOT NULL THEN decision.decision
+          WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE NULL END AS "reviewState",
+        review.validation_status AS "validationStatus", review.validation_evidence AS "validationEvidence",
+        review.review_payload AS "reviewPayload"
       FROM v2_1.productions p
       LEFT JOIN v2_2.brands b ON b.id=p.brand_id AND b.workspace_id=p.workspace_id
+      LEFT JOIN LATERAL (
+        SELECT j.* FROM v2_1.jobs j WHERE j.production_id=p.id ORDER BY j.created_at DESC LIMIT 1
+      ) latest_job ON true
+      LEFT JOIN LATERAL (
+        SELECT ri.id,ri.validation_status,ri.validation_evidence,ri.review_payload FROM v2_3.master_review_items ri
+        WHERE ri.production_id=p.id ORDER BY ri.created_at DESC LIMIT 1
+      ) review ON true
+      LEFT JOIN v2_3.master_review_decisions decision ON decision.review_item_id=review.id
       WHERE p.id=$1 AND ($2::uuid IS NULL OR p.brand_id=$2)`, [productionId, brandId]);
     return result.rows[0] || null;
+  }
+
+  async getCommandProduction(productionId, brandId) {
+    return this.getProduction(productionId, brandId);
+  }
+
+  async executionSafety(productionId) {
+    const tables = await this.db.query(`/* dashboard:execution-safety-schema */ SELECT
+      to_regclass('v2_5.media_executions') IS NOT NULL AS media,
+      to_regclass('v2_6.fast_render_executions') IS NOT NULL AS fast`);
+    let ambiguousExecutions = 0;
+    let actualProviderCalls = 0;
+    if (tables.rows[0]?.media) {
+      const media = await this.db.query(`/* dashboard:media-execution-safety */ SELECT
+        count(*) FILTER (WHERE status IN ('MAY_HAVE_STARTED','NEEDS_RECONCILIATION'))::int AS ambiguous,
+        count(provider_request_id)::int AS calls
+        FROM v2_5.media_executions WHERE production_id=$1`, [productionId]);
+      ambiguousExecutions += media.rows[0]?.ambiguous || 0;
+      actualProviderCalls += media.rows[0]?.calls || 0;
+    }
+    if (tables.rows[0]?.fast) {
+      const fast = await this.db.query(`/* dashboard:fast-execution-safety */ SELECT
+        count(*) FILTER (WHERE status IN ('MAY_HAVE_STARTED','REQUEST_ACCEPTED','PROCESSING','NEEDS_RECONCILIATION'))::int AS ambiguous,
+        count(renderer_task_id)::int AS calls
+        FROM v2_6.fast_render_executions WHERE production_id=$1`, [productionId]);
+      ambiguousExecutions += fast.rows[0]?.ambiguous || 0;
+      actualProviderCalls += fast.rows[0]?.calls || 0;
+    }
+    return { ambiguousExecutions, actualProviderCalls };
   }
 
   async listStages(productionId, brandId = null) {
@@ -174,6 +234,7 @@ class ControlRepository {
         CASE WHEN rd.id IS NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE rd.decision END AS "reviewStatus",
         CASE WHEN coalesce((p.metadata->'publication_policy'->>'autoPublish')::boolean,false)=false
           THEN 'DISABLED_PENDING_APPROVAL' ELSE 'NOT_TRIGGERED' END AS "publicationStatus",
+        (p.metadata->>'source'='v2.7-operator-console') AS "commandAvailable",
         p.metadata->'publication_policy' AS "publicationPolicy",
         rd.decision, rd.actor, rd.reason, rd.decided_at AS "decidedAt"
       FROM v2_3.master_review_items ri

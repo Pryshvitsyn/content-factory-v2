@@ -38,7 +38,22 @@ function createControlServer({ service, logger = console } = {}) {
         return json(response, 200, await service.getBrand(segments[2]));
       }
       if (request.method === 'GET' && url.pathname === '/api/productions') {
-        return json(response, 200, await service.listProductions({ brandId: url.searchParams.get('brandId'), status: url.searchParams.get('status') }));
+        return json(response, 200, await service.listProductions({ brandId: url.searchParams.get('brandId'),
+          status: url.searchParams.get('status'), renderMode: url.searchParams.get('renderMode'),
+          needsReview: url.searchParams.get('needsReview') === 'true', failed: url.searchParams.get('failed') === 'true' }));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/productions/preflight') {
+        return json(response, 200, await service.preflightProduction(await readJson(request)));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/productions') {
+        return json(response, 201, await service.createProduction(await readJson(request)));
+      }
+      if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
+        && segments.length === 4 && ['start','retry','regenerate'].includes(segments[3])) {
+        const body = await readJson(request);
+        if (segments[3] === 'start') return json(response, 202, await service.startProduction({ productionId: segments[2], ...body }));
+        if (segments[3] === 'retry') return json(response, 202, await service.retryProduction({ productionId: segments[2], ...body }));
+        return json(response, 201, await service.regenerateProduction({ productionId: segments[2], ...body }));
       }
       if (request.method === 'GET' && segments[0] === 'api' && segments[1] === 'productions' && segments.length === 3) {
         return json(response, 200, await service.production(segments[2], url.searchParams.get('brandId')));
@@ -64,7 +79,7 @@ function createControlServer({ service, logger = console } = {}) {
       }
       return json(response, 404, { error: { code: 'ROUTE_NOT_FOUND', message: 'Route not found' } });
     } catch (error) {
-      const status = error instanceof ControlError ? error.status : 500;
+      const status = error instanceof ControlError || Number.isInteger(error.status) ? error.status : 500;
       if (status === 500) logger.error?.('Control API error', { code: error.code || 'INTERNAL_ERROR', message: error.message });
       return json(response, status, { error: { code: error.code || 'INTERNAL_ERROR', message: status === 500 ? 'Internal server error' : error.message } });
     }
