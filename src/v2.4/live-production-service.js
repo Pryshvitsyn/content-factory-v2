@@ -12,6 +12,7 @@ const {
   verifyArtifactStorage,
   verifyTransactionalLiveWrites,
 } = require('./schema-compatibility');
+const { QualityRendererLane, RendererRouter } = require('../v2.6/renderer-router');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LIVE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
@@ -163,9 +164,9 @@ async function validateStorageRoot(root) {
 class LiveProductionService {
   constructor({ db, masterOrchestrator, artifactService, storageRoot, storageValidator = validateStorageRoot,
     schemaInspector = inspectSchemaCompatibility, transactionProbe = verifyTransactionalLiveWrites,
-    storageProbe = verifyArtifactStorage, mediaExecutionRepository = null, logger = console } = {}) {
+    storageProbe = verifyArtifactStorage, mediaExecutionRepository = null, rendererRouter = null, logger = console } = {}) {
     if (!db || typeof db.query !== 'function') throw new Error('db is required');
-    if (!masterOrchestrator || typeof masterOrchestrator.build !== 'function') throw new Error('masterOrchestrator is required');
+    if (!rendererRouter && (!masterOrchestrator || typeof masterOrchestrator.build !== 'function')) throw new Error('masterOrchestrator is required');
     if (!artifactService || typeof artifactService.createVersion !== 'function') throw new Error('artifactService is required');
     this.db = db;
     this.masterOrchestrator = masterOrchestrator;
@@ -176,6 +177,9 @@ class LiveProductionService {
     this.transactionProbe = transactionProbe;
     this.storageProbe = storageProbe;
     this.mediaExecutionRepository = mediaExecutionRepository;
+    this.rendererRouter = rendererRouter || new RendererRouter({
+      qualityLane: new QualityRendererLane({ masterOrchestrator, mediaExecutionRepository }),
+    });
     this.logger = logger;
   }
 
@@ -203,36 +207,16 @@ class LiveProductionService {
     return result.rows[0] || null;
   }
 
-  summary({ brand, input, config, existing, mediaExecutions = [] }) {
-    const completedAssets = new Set(mediaExecutions.filter((item) => item.status === 'SUCCEEDED').map((item) => item.asset_id));
-    const ambiguousAssets = new Set(mediaExecutions.filter((item) => ['MAY_HAVE_STARTED','NEEDS_RECONCILIATION'].includes(item.status)).map((item) => item.asset_id));
-    const pending = existing?.jobStatus === 'COMPLETED' ? [] : input.assetPlan.assets.filter((asset) => (
-      !completedAssets.has(asset.asset_id) && !ambiguousAssets.has(asset.asset_id)
-    ));
-    const videos = input.assetPlan.assets.filter((asset) => asset.kind === 'video');
-    const audio = input.assetPlan.assets.filter((asset) => asset.kind === 'voice' || asset.kind === 'audio');
-    const videoProfile = videos[0]?.generation_requirements || input.profile || {};
-    const audioProfile = audio[0]?.generation_requirements || {};
+  summary({ brand, input, config, existing, laneState }) {
+    const lanePlan = this.rendererRouter.plan({ brand, input, config, existing, laneState });
     return Object.freeze({
       brand: `${brand.name} (${brand.id})`,
       production: existing?.productionId || this.productionName(input),
       productionKey: this.productionKey(input),
       targetDurationSeconds: input.targetDurationSeconds || Number((input.profile.numFrames / input.profile.framesPerSecond).toFixed(3)),
-      provider: videoProfile.provider || config.provider,
-      model: videoProfile.model || config.model,
-      resolution: videoProfile.resolution,
-      aspectRatio: videoProfile.aspect_ratio || videoProfile.aspectRatio,
-      numFrames: videoProfile.num_frames || videoProfile.numFrames,
-      fps: videoProfile.frames_per_second || videoProfile.framesPerSecond,
-      expectedVideoGenerations: pending.filter((asset) => asset.kind === 'video').length,
-      expectedAudioGenerations: pending.filter((asset) => asset.kind === 'voice' || asset.kind === 'audio').length,
-      audioProvider: audioProfile.provider || null,
-      audioModel: audioProfile.model || null,
-      expectedPaidProviderCalls: pending.length,
-      ambiguousProviderExecutions: ambiguousAssets.size,
-      masterAssemblyMode: videos.length > 1 || audio.length ? 'ffmpeg-multi-track' : 'ffmpeg-single-visual',
-      estimatedCost: null,
-      costNote: 'Provider pricing is not encoded in the certified engine; verify current provider pricing before paid execution.',
+      ...lanePlan,
+      estimatedCost: lanePlan.estimatedCost ?? null,
+      costNote: lanePlan.costNote || 'Provider pricing is not encoded in the certified engine; verify current provider pricing before paid execution.',
       paidLiveRun: config.live,
       existingState: existing?.jobStatus || null,
       publicationPolicy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
@@ -255,20 +239,11 @@ class LiveProductionService {
     const databaseProbe = await this.transactionProbe(this.db, {
       workspaceId: brand.workspaceId, brandId: brand.id, objective: scopedInput.objective,
     });
-    let mediaPlanProbe = null;
-    let mediaExecutions = [];
-    if (input.schemaVersion >= 2) {
-      if (!this.mediaExecutionRepository) throw new LiveProductionError('V25_MEDIA_EXECUTION_REQUIRED', 'V2.5 durable media execution repository is required');
-      await this.mediaExecutionRepository.inspectSchema();
-      mediaPlanProbe = await this.mediaExecutionRepository.verifyTransactionalPlan({
-        workspaceId: brand.workspaceId, brandId: brand.id, objective: scopedInput.objective,
-        inputFingerprint: input.fingerprint, assets: input.assetPlan.assets,
-      });
-      if (existing?.productionId) mediaExecutions = await this.mediaExecutionRepository.list(existing.productionId);
-    }
+    const laneState = await this.rendererRouter.preflight({ input: scopedInput, brand, existing, config });
+    const mediaPlanProbe = laneState.probe;
     const storageProbe = await this.storageProbe(this.artifactService.storage);
-    return { brand, input: scopedInput, existing, schemaReport, databaseProbe, mediaPlanProbe, storageProbe,
-      plan: this.summary({ brand, input: scopedInput, config, existing, mediaExecutions }) };
+    return { brand, input: scopedInput, existing, schemaReport, databaseProbe, mediaPlanProbe, laneState, storageProbe,
+      plan: this.summary({ brand, input: scopedInput, config, existing, laneState }) };
   }
 
   async findCachedVideo({ input, productionId }) {
@@ -292,8 +267,9 @@ class LiveProductionService {
         VALUES($1,$2,$3,'DRAFT',$4,$5::jsonb)
         ON CONFLICT(workspace_id,name) DO NOTHING`,
       [input.workspaceId, input.brandId, this.productionName(input), input.objective, JSON.stringify({
-        source: input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
+        source: input.schemaVersion >= 3 ? 'v2.6-real-content-cli' : input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
         live_test_key: this.productionKey(input), production_key: this.productionKey(input), live_input_fingerprint: input.fingerprint,
+        render_mode: input.renderMode || 'QUALITY', renderer: input.renderer || 'v2.5-quality',
         publication_policy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
       })]);
       const productionResult = await client.query(`/* v2.4:get-production-for-run */
@@ -308,9 +284,10 @@ class LiveProductionService {
         VALUES($1,'EDIT','QUEUED',$2,$3::jsonb)
         ON CONFLICT(production_id,idempotency_key) DO NOTHING`,
       [production.id, this.jobKey(input), JSON.stringify({
-        source: input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
+        source: input.schemaVersion >= 3 ? 'v2.6-real-content-cli' : input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
         liveTestKey: this.productionKey(input), productionKey: this.productionKey(input), inputFingerprint: input.fingerprint,
-        provider: config.provider, model: config.model, providerRequestState: 'NOT_STARTED',
+        renderMode: input.renderMode || 'QUALITY', renderer: input.renderer || 'v2.5-quality',
+        provider: config.provider, model: config.model, providerRequestState: 'NOT_STARTED', rendererRequestState: 'NOT_STARTED',
       })]);
       const jobResult = await client.query(`/* v2.4:get-live-job */
         SELECT * FROM v2_1.jobs WHERE production_id=$1 AND idempotency_key=$2 FOR UPDATE`,
@@ -400,26 +377,29 @@ class LiveProductionService {
         artifactId: `production:${claimed.production.id}:live-input`,
         type: 'text',
         content: JSON.stringify({
-          schemaVersion: input.schemaVersion || 1, brandId: input.brandId,
-          productionKey: this.productionKey(input), objective: input.objective,
-          targetPlatform: input.targetPlatform || null, targetDurationSeconds: input.targetDurationSeconds || null,
-          publicationPolicy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
-          script: input.script, shotPlan: input.shotPlan, assetPlan: input.assetPlan,
+          schemaVersion: prepared.input.schemaVersion || 1, brandId: prepared.input.brandId,
+          productionKey: this.productionKey(prepared.input), objective: prepared.input.objective,
+          targetPlatform: prepared.input.targetPlatform || null, targetDurationSeconds: prepared.input.targetDurationSeconds || null,
+          renderMode: prepared.input.renderMode || 'QUALITY', renderer: prepared.input.renderer || 'v2.5-quality',
+          publicationPolicy: prepared.input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
+          script: prepared.input.script, shotPlan: prepared.input.shotPlan, assetPlan: prepared.input.assetPlan,
         }),
-        idempotencyKey: `${input.brandId}:${claimed.production.id}:live-input:${input.fingerprint}`,
-        provider: 'operator', model: input.schemaVersion >= 2 ? 'v2.5-real-content-input' : 'v2.4-structured-live-input', validationStatus: 'validated',
+        idempotencyKey: `${prepared.input.brandId}:${claimed.production.id}:live-input:${prepared.input.fingerprint}`,
+        provider: 'operator', model: prepared.input.schemaVersion >= 3 ? 'v2.6-real-content-input'
+          : prepared.input.schemaVersion >= 2 ? 'v2.5-real-content-input' : 'v2.4-structured-live-input', validationStatus: 'validated',
       });
       await this.markProviderBoundary({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId });
       providerBoundaryCrossed = true;
-      const masterResult = await this.masterOrchestrator.build({
+      const masterResult = await this.rendererRouter.render({
         productionId: claimed.production.id,
-        workspaceId: input.workspaceId,
-        brandId: input.brandId,
+        workspaceId: prepared.input.workspaceId,
+        brandId: prepared.input.brandId,
         workerId: config.workerId,
-        script: input.script,
-        shotPlan: input.shotPlan,
-        assetPlan: input.assetPlan,
-        qualityPolicy: { requireVoiceForSpokenCopy: input.schemaVersion >= 2 && input.voiceover?.enabled === true },
+        input: prepared.input,
+        script: prepared.input.script,
+        shotPlan: prepared.input.shotPlan,
+        assetPlan: prepared.input.assetPlan,
+        qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.schemaVersion >= 2 && prepared.input.voiceover?.enabled === true },
       });
       const mediaResults = [...new Map(masterResult.assembly.clips.map((clip) => [clip.media.assetId, clip.media])).values()];
       const videoMedia = mediaResults.find((media) => media.kind === 'video' || media.kind === 'image') || mediaResults[0];
@@ -436,14 +416,16 @@ class LiveProductionService {
         FROM v2_3.master_review_items ri
         LEFT JOIN v2_3.master_review_decisions rd ON rd.review_item_id=ri.id
         WHERE ri.production_id=$1 AND ri.brand_id=$2 AND ri.master_storage_key=$3`,
-      [claimed.production.id, input.brandId, masterResult.master.artifact.storageKey]);
+      [claimed.production.id, prepared.input.brandId, masterResult.master.artifact.storageKey]);
       if (!review.rows[0] || review.rows[0].status !== 'AWAITING_HUMAN_APPROVAL') {
         throw new LiveProductionError('LIVE_REVIEW_NOT_PENDING', 'Exact master was not registered as pending human review');
       }
       const result = {
         productionId: claimed.production.id,
-        brandId: input.brandId,
-        productionKey: this.productionKey(input),
+        brandId: prepared.input.brandId,
+        productionKey: this.productionKey(prepared.input),
+        renderMode: prepared.input.renderMode || 'QUALITY',
+        renderer: prepared.input.renderer || 'v2.5-quality',
         inputArtifact: { id: inputArtifact.artifactId, version: inputArtifact.version, storageKey: inputArtifact.storageKey },
         videoArtifact: videoMedia ? { id: videoMedia.artifact.artifactId, version: videoMedia.artifact.version, storageKey: videoMedia.artifact.storageKey } : null,
         videoArtifacts: mediaResults.filter((media) => media.kind === 'video').map((media) => ({
@@ -470,7 +452,7 @@ class LiveProductionService {
       return result;
     } catch (error) {
       await this.fail({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId,
-        error, providerBoundaryCrossed, durableAssetRecovery: input.schemaVersion >= 2 });
+        error, providerBoundaryCrossed, durableAssetRecovery: prepared.input.schemaVersion >= 2 });
       throw error;
     }
   }

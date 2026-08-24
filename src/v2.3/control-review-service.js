@@ -22,7 +22,7 @@ class ControlReviewService {
     this.db = db;
   }
 
-  async registerMasterForReview({ productionId, brandId, master, script, quality, mediaResults = [] } = {}) {
+  async registerMasterForReview({ productionId, brandId, master, script, quality, mediaResults = [], renderContext = null } = {}) {
     requireText('productionId', productionId);
     requireText('brandId', brandId);
     if (!master?.artifact?.artifactId || !master.artifact.storageKey || !master.artifact.contentHash) {
@@ -43,6 +43,9 @@ class ControlReviewService {
       audioCodec: master.probe?.audioCodec || null,
       hasAudio: master.probe?.hasAudio === true,
       technicalValidation: quality.checks || [],
+      renderMode: renderContext?.renderMode || 'QUALITY',
+      renderer: renderContext?.renderer || master.artifact.provenance?.provider || 'ffmpeg',
+      rendererStatus: renderContext?.rendererStatus || 'SUCCEEDED',
     };
     const assets = mediaResults.map((media) => ({
       assetId: media.assetId,
@@ -73,7 +76,11 @@ class ControlReviewService {
         JSON.stringify(payload), JSON.stringify(quality), JSON.stringify({
           provider: master.artifact.provenance?.provider || null,
           model: master.artifact.provenance?.model || null,
-          renderer: master.artifact.provenance?.provider || 'ffmpeg',
+          renderer: renderContext?.renderer || master.artifact.provenance?.provider || 'ffmpeg',
+          renderMode: renderContext?.renderMode || 'QUALITY',
+          rendererStatus: renderContext?.rendererStatus || 'SUCCEEDED',
+          cost: renderContext?.cost || { status: 'unknown' },
+          rendererProvenance: renderContext?.provenance || null,
         }), JSON.stringify(assets)],
     );
     if (result.rows[0]) return result.rows[0];

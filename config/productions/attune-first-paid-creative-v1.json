@@ -1,0 +1,144 @@
+{
+  "schema_version": "2.5",
+  "brand_id": "a03def76-bd3d-4c8e-b00a-ec77616c5191",
+  "production_key": "attune-first-paid-creative-v1",
+  "title": "Attune — First Paid Creative V1",
+  "objective": "ENGAGEMENT",
+  "target_platform": "Instagram Reels and TikTok",
+  "target_duration_seconds": 10,
+  "aspect_ratio": "9:16",
+  "hook": "Silence can feel like distance.",
+  "core_message": "Assumption becomes attention, and attention creates understanding.",
+  "creative_concept": "A quiet moment of ambiguity becomes connection when one partner pauses before assuming and pays closer attention.",
+  "cta": "Don't guess. Tune in.",
+  "scenes": [
+    {
+      "scene_id": "ambiguity",
+      "duration_seconds": 5,
+      "location": "A warm, lived-in apartment living room in the evening",
+      "visual": "A woman sits quietly beside her partner on the sofa; he notices her silence and has a restrained moment of uncertainty without reacting or turning it into conflict.",
+      "emotional_intent": "The uncertainty created by an assumption, expressed only through believable micro-behavior.",
+      "dialogue_or_voiceover": "Silence can feel like distance.",
+      "shots": [
+        {
+          "shot_id": "shot-ambiguity",
+          "asset_id": "video-ambiguity",
+          "duration_seconds": 5,
+          "framing": "vertical eye-level medium two-shot",
+          "camera": "restrained observational camera with an almost imperceptible slow push-in",
+          "subject": "the same specifically described couple seated together at home",
+          "action": "she remains naturally quiet while he glances toward her and briefly wonders whether her silence means emotional distance",
+          "continuity": "Establish the specified couple, wardrobe, apartment geography, sofa, practical lamp, 2900K evening light, 50mm lens language, and restrained performance for the next shot.",
+          "video": {
+            "provider": "replicate",
+            "model": "wan-video/wan-2.2-t2v-fast",
+            "prompt": "Realistic evening interior with believable human behavior. Same couple continuity reference: woman, approximately 31, shoulder-length wavy dark-brown hair, oval face, medium build, wearing a soft beige knit sweater and dark trousers; man, approximately 33, short dark-brown hair, light stubble, lean build, wearing a charcoal overshirt over a plain off-white T-shirt and dark trousers. Same apartment continuity reference: beige linen sofa against the back wall, low oak coffee table, brass practical lamp with a cream shade on the left side of the sofa, warm 2900K evening color temperature. Camera continuity: vertical 9:16, eye-level 50mm full-frame-equivalent lens, natural shallow depth of field, restrained observational movement. The woman is quiet, neither angry nor visibly sad. Her partner looks toward her and has a subtle moment of uncertainty, as though he might interpret her silence as emotional distance, but he does not confront her or react. Natural micro-expressions, quiet breathing, understated body language, cinematic naturalism. No argument, no melodrama, no exaggerated sadness, no app UI, no phone close-up, no glossy stock-ad look, no text in the generated image.",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "num_frames": 81,
+            "frames_per_second": 16,
+            "go_fast": true,
+            "seed": 8242026
+          }
+        }
+      ]
+    },
+    {
+      "scene_id": "attention",
+      "duration_seconds": 5,
+      "location": "The same warm, lived-in apartment living room in the evening",
+      "visual": "He pauses before following his assumption, pays closer attention, moves slightly nearer, and gently touches her hand; her expression softens almost imperceptibly.",
+      "emotional_intent": "Attention becomes understanding and quiet connection without sentimentality.",
+      "dialogue_or_voiceover": "Before you assume, tune in. Don't guess. Tune in.",
+      "shots": [
+        {
+          "shot_id": "shot-attention",
+          "asset_id": "video-attention",
+          "duration_seconds": 5,
+          "framing": "vertical eye-level intimate medium two-shot",
+          "camera": "restrained observational camera with a subtle settled move closer",
+          "subject": "the same specifically described couple seated together in the same apartment",
+          "action": "he pauses, notices her more carefully, shifts slightly closer, and gently touches her hand as her expression subtly softens",
+          "continuity": "Match the specified traits and environment as closely as independent generation permits, using the same deterministic seed without treating face identity as guaranteed.",
+          "video": {
+            "provider": "replicate",
+            "model": "wan-video/wan-2.2-t2v-fast",
+            "prompt": "Realistic evening interior with believable human behavior. Same couple continuity reference: woman, approximately 31, shoulder-length wavy dark-brown hair, oval face, medium build, wearing a soft beige knit sweater and dark trousers; man, approximately 33, short dark-brown hair, light stubble, lean build, wearing a charcoal overshirt over a plain off-white T-shirt and dark trousers. Same apartment continuity reference: beige linen sofa against the back wall, low oak coffee table, brass practical lamp with a cream shade on the left side of the sofa, warm 2900K evening color temperature. Camera continuity: vertical 9:16, eye-level 50mm full-frame-equivalent lens, natural shallow depth of field, restrained observational movement. Instead of reacting to his assumption, the man pauses and pays closer attention. He moves slightly closer and gently touches her hand, a small ordinary gesture rather than a romantic advertising pose. Her expression softens subtly, with no smile required. Natural micro-expressions, quiet breathing, understated body language, cinematic naturalism. No argument, no melodrama, no exaggerated emotional acting, no sentimentality, no app UI, no phone close-up, no glossy stock-ad look, no text in the generated image.",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "num_frames": 81,
+            "frames_per_second": 16,
+            "go_fast": true,
+            "seed": 8242026
+          }
+        }
+      ]
+    }
+  ],
+  "voiceover": {
+    "enabled": true,
+    "asset_id": "voiceover-main",
+    "provider": "openai-media",
+    "model": "gpt-4o-mini-tts",
+    "voice": "alloy",
+    "language": "en",
+    "instructions": "Warm, quiet, intimate English delivery. Calm and emotionally perceptive, with natural pauses and clear articulation. Fit comfortably within ten seconds. Keep speech fully intelligible and the final brand line restrained.",
+    "text": "Silence can feel like distance. Before you assume, tune in. Don't guess. Tune in."
+  },
+  "continuity": {
+    "characters": [
+      "woman, approximately 31, shoulder-length wavy dark-brown hair, oval face, medium build",
+      "man, approximately 33, short dark-brown hair, light stubble, lean build"
+    ],
+    "locations": [
+      "one lived-in apartment living room with a beige linen sofa against the back wall and a low oak coffee table"
+    ],
+    "products": [
+      "Attune brand is communicated by the voiceover; no app UI or generated on-screen text"
+    ],
+    "wardrobe": [
+      "woman in a soft beige knit sweater and dark trousers",
+      "man in a charcoal overshirt, plain off-white T-shirt, and dark trousers"
+    ],
+    "props": [
+      "beige linen sofa",
+      "low oak coffee table",
+      "brass practical lamp with cream shade positioned left of the sofa"
+    ],
+    "visual_style": "cinematic naturalism, believable micro-behavior, warm 2900K evening practical light, vertical eye-level 50mm lens language, restrained observational camera",
+    "character_rules": "Repeat the exact age, hair, face, build, and wardrobe descriptors in every generation prompt. Use the same seed for best-effort continuity; independent video generations do not guarantee identical faces.",
+    "location_rules": "Repeat the exact apartment layout, beige sofa, oak table, left-side brass practical lamp, 2900K color temperature, eye-level 50mm lens language, and restrained camera behavior in every generation prompt."
+  },
+  "visual_style": {
+    "realism": "cinematic naturalism rather than commercial polish",
+    "lighting": "warm 2900K practical evening light from the lamp left of the sofa",
+    "camera": "vertical 9:16, eye-level 50mm full-frame-equivalent lens, natural shallow depth of field, restrained observational movement",
+    "performance": "subtle micro-expressions, believable pauses, and a small unsentimental hand touch",
+    "avoid": [
+      "argument",
+      "melodrama",
+      "exaggerated sadness",
+      "exaggerated emotional acting",
+      "app UI",
+      "phone close-ups",
+      "glossy stock-ad styling",
+      "generated on-screen text"
+    ]
+  },
+  "audio": {
+    "ambience_intent": "Quiet apartment room tone beneath the voiceover.",
+    "music_intent": "No paid or generated music; speech intelligibility takes priority.",
+    "speech_priority": true,
+    "paid_music_generation": false
+  },
+  "captions": {
+    "enabled": false,
+    "intent": "Disabled because the current FFmpeg renderer does not burn captions or an end title into the final master.",
+    "end_title": null
+  },
+  "publication_policy": {
+    "requires_human_approval": true,
+    "auto_publish": false,
+    "destination": "disabled"
+  }
+}

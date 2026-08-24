@@ -84,8 +84,8 @@ function Productions() {
         <option value="">All states</option>{['DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED'].map((status) => <option key={status}>{status}</option>)}</select>
     </div>
     {selected ? <ProductionDetail production={selected} onBack={() => setSelected(null)} /> : <Section title="Newest first"><State state={list}>{(items) => items.length ?
-      <div className="table-wrap"><table><thead><tr><th>Production</th><th>Brand</th><th>Objective</th><th>Stage</th><th>Status</th><th>Review</th><th>Updated</th></tr></thead>
-      <tbody>{items.map((item) => <tr key={item.id} onClick={() => setSelected(item)}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.brandName || 'Unscoped legacy'}</td><td>{item.objective || '—'}</td><td>{item.currentStage || '—'}</td><td><Badge value={item.status} /></td><td>{item.reviewState ? <Badge value={item.reviewState} /> : '—'}</td><td>{formatDate(item.updatedAt)}</td></tr>)}</tbody></table></div> : <Empty text="No productions match the filters." />}</State></Section>}
+      <div className="table-wrap"><table><thead><tr><th>Production</th><th>Brand</th><th>Mode / renderer</th><th>Objective</th><th>Stage</th><th>Status</th><th>Review</th><th>Updated</th></tr></thead>
+      <tbody>{items.map((item) => <tr key={item.id} onClick={() => setSelected(item)}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.brandName || 'Unscoped legacy'}</td><td><Badge value={item.renderMode || 'QUALITY'} /><small>{item.renderer || 'v2.5-quality'}</small></td><td>{item.objective || '—'}</td><td>{item.currentStage || '—'}</td><td><Badge value={item.status} /></td><td>{item.reviewState ? <Badge value={item.reviewState} /> : '—'}</td><td>{formatDate(item.updatedAt)}</td></tr>)}</tbody></table></div> : <Empty text="No productions match the filters." />}</State></Section>}
   </Page>;
 }
 
@@ -97,6 +97,7 @@ function ProductionDetail({ production, onBack }) {
   return <State state={state}>{({ item, stages, artifacts }) => <>
     <button className="back" onClick={onBack}>← All productions</button>
     <div className="detail-head"><div><h2>{item.name}</h2><code>{item.id}</code></div><Badge value={item.status} /></div>
+    <p className="page-note">Render mode: {item.renderMode || 'QUALITY'} · Renderer: {item.renderer || 'v2.5-quality'}</p>
     <Section title="Canonical pipeline"><div className="pipeline">{stages.map((stage) => <article className="stage" key={stage.stage}>
       <span>{String(stage.sequence).padStart(2, '0')}</span><strong>{stage.stage}</strong><Badge value={stage.status || 'NOT_STARTED'} />
       <small>Attempt {stage.attempt || '—'} · {stage.provider || 'provider n/a'} / {stage.model || 'model n/a'}</small>
@@ -141,6 +142,8 @@ export function ReviewQueue() {
           <KeyValue label="Duration" value={item.reviewPayload?.durationMs ? `${item.reviewPayload.durationMs / 1000}s` : null} />
           <KeyValue label="Quality" value={`${item.validationEvidence?.status || item.validationStatus} · ${item.validationEvidence?.score ?? 'n/a'}`} />
           <KeyValue label="Production" value={item.productionStatus} /><KeyValue label="Review" value={item.reviewStatus} />
+          <KeyValue label="Render mode" value={item.renderMode || item.reviewPayload?.renderMode} />
+          <KeyValue label="Renderer" value={`${item.renderer || item.reviewPayload?.renderer || 'Not recorded'} · ${item.rendererStatus || item.reviewPayload?.rendererStatus || 'Not recorded'}`} />
           <KeyValue label="Publication" value={item.publicationStatus} />
           <KeyValue label="Master media" value={`${item.reviewPayload?.width || '?'}×${item.reviewPayload?.height || '?'} · ${item.reviewPayload?.videoCodec || 'video n/a'} / ${item.reviewPayload?.audioCodec || 'audio n/a'}`} /></div>
         <Collection title="Generated assets" items={item.generatedAssets} render={(asset) => `${asset.kind} · ${asset.assetId} · ${asset.provider || 'provider n/a'} / ${asset.model || 'model n/a'}${asset.durationMs ? ` · ${asset.durationMs / 1000}s` : ''}`} />

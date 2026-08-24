@@ -8,6 +8,7 @@ const { validateStructuredConsistency } = require('../../worker/v2.1-production-
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
 const OBJECTIVES = new Set(['ORGANIC_REACH','ENGAGEMENT','TRAFFIC','LEAD_GENERATION','APP_INSTALL','PURCHASE','BOOKING','SEO_AUTHORITY','RETENTION','EXPERIMENT']);
+const RENDER_MODES = new Set(['FAST', 'QUALITY']);
 
 class ProductionInputError extends Error {
   constructor(message, details = null) {
@@ -79,11 +80,11 @@ function normalizePublicationPolicy(raw = {}) {
   return Object.freeze({ requiresHumanApproval: true, autoPublish: false, destination: optionalText(policy.destination) });
 }
 
-function normalizeVideoProfile(raw, aspectRatio) {
+function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
   const video = object('shot.video', raw);
   const profile = {
-    provider: video.provider || 'replicate',
-    model: video.model || DEFAULT_VIDEO_MODEL,
+    provider: renderMode === 'FAST' ? 'fast-render-plan' : video.provider || 'replicate',
+    model: renderMode === 'FAST' ? null : video.model || DEFAULT_VIDEO_MODEL,
     prompt: text('shot.video.prompt', video.prompt),
     resolution: video.resolution || '480p',
     aspectRatio: video.aspect_ratio || aspectRatio,
@@ -92,18 +93,45 @@ function normalizeVideoProfile(raw, aspectRatio) {
     goFast: video.go_fast ?? true,
     seed: video.seed,
   };
-  if (profile.provider !== 'replicate') throw new ProductionInputError('shot.video.provider must currently be replicate');
+  if (renderMode === 'QUALITY' && profile.provider !== 'replicate') throw new ProductionInputError('shot.video.provider must currently be replicate');
   if (!Number.isInteger(profile.numFrames) || !Number.isInteger(profile.framesPerSecond)) {
     throw new ProductionInputError('shot.video frame settings must be integers');
   }
   if (typeof profile.goFast !== 'boolean') throw new ProductionInputError('shot.video.go_fast must be a boolean');
-  buildWanInput(profile);
+  if (renderMode === 'QUALITY') buildWanInput(profile);
   return Object.freeze(profile);
+}
+
+function normalizeFastRender(raw, captions) {
+  const fast = object('fast_render', raw);
+  const renderer = text('fast_render.renderer', fast.renderer).toLowerCase();
+  if (!KEY_PATTERN.test(renderer)) throw new ProductionInputError('fast_render.renderer has invalid characters or length');
+  if (typeof fast.captions !== 'boolean') throw new ProductionInputError('fast_render.captions must be a boolean');
+  if (typeof fast.music !== 'boolean') throw new ProductionInputError('fast_render.music must be a boolean');
+  if (fast.captions !== captions.enabled) {
+    throw new ProductionInputError('fast_render.captions must match captions.enabled');
+  }
+  const providerOptions = fast.provider_options === undefined ? {} : object('fast_render.provider_options', fast.provider_options);
+  const allowed = new Set([
+    'video_terms', 'voice_name', 'voice_volume', 'voice_rate', 'bgm_volume', 'clip_duration_seconds',
+    'concat_mode', 'transition_mode', 'match_materials_to_script', 'subtitle_position', 'font_name',
+    'font_size', 'text_fore_color', 'stroke_color', 'stroke_width', 'threads',
+  ]);
+  const unsupported = Object.keys(providerOptions).filter((key) => !allowed.has(key));
+  if (unsupported.length) throw new ProductionInputError(`fast_render.provider_options contains unsupported fields: ${unsupported.join(', ')}`);
+  return Object.freeze({
+    renderer,
+    mediaSource: text('fast_render.media_source', fast.media_source),
+    captions: fast.captions,
+    music: fast.music,
+    providerOptions: Object.freeze({ ...providerOptions }),
+  });
 }
 
 function buildProductionInput(raw = {}) {
   object('input', raw);
-  if (raw.schema_version !== '2.5') throw new ProductionInputError('schema_version must be 2.5');
+  if (!['2.5', '2.6'].includes(raw.schema_version)) throw new ProductionInputError('schema_version must be 2.5 or 2.6');
+  const isV26 = raw.schema_version === '2.6';
   const brandId = text('brand_id', raw.brand_id);
   if (!UUID_PATTERN.test(brandId)) throw new ProductionInputError('brand_id must be a UUID');
   const productionKey = text('production_key', raw.production_key);
@@ -125,6 +153,9 @@ function buildProductionInput(raw = {}) {
   const audioIntent = object('audio', raw.audio);
   const captions = object('captions', raw.captions);
   if (typeof captions.enabled !== 'boolean') throw new ProductionInputError('captions.enabled must be a boolean');
+  const renderMode = isV26 ? text('render_mode', raw.render_mode || 'QUALITY').toUpperCase() : 'QUALITY';
+  if (!RENDER_MODES.has(renderMode)) throw new ProductionInputError('render_mode must be FAST or QUALITY');
+  const fastRender = renderMode === 'FAST' ? normalizeFastRender(raw.fast_render, captions) : null;
 
   if (!Array.isArray(raw.scenes) || raw.scenes.length === 0) throw new ProductionInputError('scenes must be a non-empty array');
   const sceneIds = raw.scenes.map((scene, index) => text(`scenes[${index}].scene_id`, scene?.scene_id));
@@ -161,7 +192,7 @@ function buildProductionInput(raw = {}) {
       const shotId = text(`scenes[${sceneIndex}].shots[${shotIndex}].shot_id`, shot.shot_id);
       const durationSeconds = positiveNumber(`shot ${shotId}.duration_seconds`, shot.duration_seconds);
       const assetId = text(`shot ${shotId}.asset_id`, shot.asset_id || `video-${shotId}`);
-      const profile = normalizeVideoProfile(shot.video, aspectRatio);
+      const profile = normalizeVideoProfile(shot.video, aspectRatio, renderMode);
       const generationDurationMs = Math.round((profile.numFrames / profile.framesPerSecond) * 1000);
       const continuityPrompt = [
         `Creative concept: ${creativeConcept}`,
@@ -252,11 +283,11 @@ function buildProductionInput(raw = {}) {
   validateStructuredConsistency('ASSET_PLAN', assetPlan, [JSON.stringify(shotPlan)]);
 
   const normalized = {
-    schemaVersion: 2,
+    schemaVersion: isV26 ? 3 : 2,
     brandId,
     productionKey,
     liveTestKey: productionKey,
-    productionNamespace: 'v2.5-real',
+    productionNamespace: isV26 ? 'v2.6-real' : 'v2.5-real',
     title,
     objective,
     targetPlatform,
@@ -277,12 +308,24 @@ function buildProductionInput(raw = {}) {
     assetPlan,
     profile: videoAssets[0].generation_requirements,
   };
-  return Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
+  if (isV26) {
+    normalized.renderMode = renderMode;
+    normalized.renderer = renderMode === 'FAST' ? fastRender.renderer : 'v2.5-quality';
+    normalized.fastRender = fastRender;
+  }
+  const fingerprint = stableFingerprint(normalized);
+  return Object.freeze({
+    ...normalized,
+    ...(!isV26 ? { renderMode: 'QUALITY', renderer: 'v2.5-quality', fastRender: null } : {}),
+    fingerprint,
+  });
 }
 
 module.exports = {
   ProductionInputError,
   buildProductionInput,
+  normalizeFastRender,
   normalizePublicationPolicy,
+  RENDER_MODES,
   stableFingerprint,
 };

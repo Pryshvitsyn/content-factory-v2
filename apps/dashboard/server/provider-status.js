@@ -13,7 +13,11 @@ function describeProviders(env = process.env) {
   const replicate = Boolean(env.REPLICATE_API_TOKEN);
   const openai = Boolean(env.OPENAI_API_KEY);
   const preferredVideo = env.VIDEO_PROVIDER || 'nvidia';
+  const mptConfigured = env.MPT_ENABLED === 'true' && Boolean(env.MPT_BASE_URL);
   return [
+    { capability: 'FAST RENDERER', provider: 'MoneyPrinterTurbo', model: env.MPT_VERSION || 'v1.3.3',
+      enabled: env.MPT_ENABLED === 'true', configured: mptConfigured, availability: status(mptConfigured),
+      route: env.FAST_RENDERER === 'moneyprinterturbo' ? 'primary' : 'optional' },
     { capability: 'TEXT / REASONING', provider: 'NVIDIA', model: env.NVIDIA_MODEL || NVIDIA_TEXT_MODEL,
       enabled: true, configured: nvidia, availability: status(nvidia), route: 'primary' },
     { capability: 'VIDEO', provider: 'Replicate', model: env.REPLICATE_VIDEO_MODEL || REPLICATE_VIDEO_MODEL,

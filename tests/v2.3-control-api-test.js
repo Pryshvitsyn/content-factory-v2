@@ -76,8 +76,12 @@ async function main() {
   await assert.rejects(() => control.production(PRODUCTION_ID, BRAND_ID), (error) => error.code === 'PRODUCTION_NOT_FOUND');
   await assert.rejects(() => control.artifactContent({ sourceId: REVIEW_ID, artifactId: '../secret', version: 1, brandId: BRAND_ID }), (error) => error.code === 'ARTIFACT_NOT_FOUND');
 
-  const providerPayload = JSON.stringify(describeProviders({ NVIDIA_API_KEY: 'private-nv', REPLICATE_API_TOKEN: 'private-replicate', OPENAI_API_KEY: 'private-openai' }));
-  assert.doesNotMatch(providerPayload, /private-(nv|replicate|openai)/, 'provider response must not expose secrets');
+  const providerPayload = JSON.stringify(describeProviders({ NVIDIA_API_KEY: 'private-nv', REPLICATE_API_TOKEN: 'private-replicate',
+    OPENAI_API_KEY: 'private-openai', MPT_ENABLED: 'true', MPT_BASE_URL: 'http://127.0.0.1:8080',
+    MPT_API_KEY: 'private-mpt', FAST_RENDERER: 'moneyprinterturbo' }));
+  assert.doesNotMatch(providerPayload, /private-(nv|replicate|openai|mpt)/, 'provider response must not expose secrets');
+  const fast = JSON.parse(providerPayload).find((item) => item.capability === 'FAST RENDERER');
+  assert.equal(fast.provider, 'MoneyPrinterTurbo'); assert.equal(fast.configured, true);
   console.log('V2.3 Control API contract passed.');
 }
 
