@@ -35,7 +35,7 @@ function createOpenAIMediaProvider({
       return false;
     },
 
-    async generate({ capability, prompt, model, idempotencyKey } = {}) {
+    async generate({ capability, prompt, model, idempotencyKey, onProviderRequest = null } = {}) {
       const asset = parseAssetPrompt(prompt);
       const requirements = asset.generation_requirements || {};
       try {
@@ -50,6 +50,7 @@ function createOpenAIMediaProvider({
             n: 1,
           }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined);
           const item = response?.data?.[0] || {};
+          if (onProviderRequest && response.id) await onProviderRequest({ requestId: response.id, status: 'succeeded', provider: 'openai-media', model: selectedModel });
           const output = item.b64_json ? Buffer.from(item.b64_json, 'base64') : null;
           return assertProviderResult({
             provider: 'openai-media', model: selectedModel, capability,
@@ -70,11 +71,13 @@ function createOpenAIMediaProvider({
             response_format: 'mp3',
             ...(requirements.instructions ? { instructions: requirements.instructions } : {}),
           }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined);
+          const requestId = response.headers?.get?.('x-request-id') || null;
+          if (onProviderRequest && requestId) await onProviderRequest({ requestId, status: 'succeeded', provider: 'openai-media', model: selectedModel });
           const output = Buffer.from(await response.arrayBuffer());
           return assertProviderResult({
             provider: 'openai-media', model: selectedModel, capability,
             output, contentType: 'audio/mpeg',
-            requestId: response.headers?.get?.('x-request-id') || null,
+            requestId,
             provenance: { provider: 'openai-media', model: selectedModel, voice: requirements.voice || defaultVoice },
           });
         }

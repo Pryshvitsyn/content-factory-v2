@@ -28,6 +28,7 @@ async function main() {
   assert.throws(() => buildWanInput({ prompt: 'x', resolution: '1080p' }), (error) => error.code === 'REPLICATE_INPUT_INVALID');
 
   const lifecycleCalls = [];
+  const durableBoundaries = [];
   const states = [
     { id: 'prediction-1', status: 'starting' },
     { id: 'prediction-1', status: 'processing' },
@@ -47,6 +48,7 @@ async function main() {
   const result = await adapter.generate({
     capability: 'video-generation',
     idempotencyKey: 'brand-a:production-1:media:video-1',
+    onProviderRequest: async (request) => durableBoundaries.push(request),
     prompt: JSON.stringify({
       description: 'fallback description',
       generation_requirements: {
@@ -74,6 +76,7 @@ async function main() {
   assert.equal(result.provenance.predictionId, 'prediction-1');
   assert.equal(result.provenance.idempotencyKey, 'brand-a:production-1:media:video-1');
   assert.deepEqual(result.usage, { predict_time: 4.2 });
+  assert.deepEqual(durableBoundaries, [{ requestId: 'prediction-1', status: 'queued', provider: 'replicate', model: 'wan-video/wan-2.2-t2v-fast' }]);
   assert.equal(JSON.stringify(result).includes('test-token'), false);
 
   const terminalAdapter = (prediction, extra = {}) => new ReplicateWanVideoAdapter({
@@ -119,6 +122,18 @@ async function main() {
   }).generate({ capability: 'video-generation', prompt: 'x' });
   assert.equal(retried.output.toString(), 'retry-mp4');
   assert.equal(pollingGets, 2);
+
+  let recoveryPosts = 0;
+  const recovered = await new ReplicateWanVideoAdapter({
+    apiToken: 'test-token', maxHttpRetries: 0,
+    fetchImpl: async (url, options) => {
+      if (options.method === 'POST') recoveryPosts += 1;
+      if (url.includes('/predictions/existing-1')) return json({ id: 'existing-1', status: 'succeeded', output: 'https://files.replicate.test/existing.mp4' });
+      return media('recovered-mp4');
+    },
+  }).recover({ capability: 'video-generation', requestId: 'existing-1' });
+  assert.equal(recovered.output.toString(), 'recovered-mp4');
+  assert.equal(recoveryPosts, 0, 'recovery must never create another paid prediction');
 
   let creates = 0;
   const duplicateAdapter = new ReplicateWanVideoAdapter({

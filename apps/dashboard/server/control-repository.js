@@ -163,7 +163,12 @@ class ControlRepository {
         ri.master_artifact_version AS "artifactVersion", ri.content_type AS "contentType",
         ri.validation_status AS "validationStatus", ri.review_payload AS "reviewPayload",
         ri.validation_evidence AS "validationEvidence", ri.provenance, ri.generated_assets AS "generatedAssets",
-        ri.created_at AS "createdAt", rd.decision, rd.actor, rd.reason, rd.decided_at AS "decidedAt"
+        ri.created_at AS "createdAt", p.status AS "productionStatus",
+        CASE WHEN rd.id IS NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE rd.decision END AS "reviewStatus",
+        CASE WHEN coalesce((p.metadata->'publication_policy'->>'autoPublish')::boolean,false)=false
+          THEN 'DISABLED_PENDING_APPROVAL' ELSE 'NOT_TRIGGERED' END AS "publicationStatus",
+        p.metadata->'publication_policy' AS "publicationPolicy",
+        rd.decision, rd.actor, rd.reason, rd.decided_at AS "decidedAt"
       FROM v2_3.master_review_items ri
       JOIN v2_1.productions p ON p.id=ri.production_id AND p.brand_id=ri.brand_id AND p.workspace_id=ri.workspace_id
       JOIN v2_2.brands b ON b.id=ri.brand_id AND b.workspace_id=ri.workspace_id

@@ -139,7 +139,11 @@ export function ReviewQueue() {
         <code>{item.artifactId} · v{item.artifactVersion}</code>
         <div className="review-copy"><KeyValue label="Hook" value={item.reviewPayload?.hook} /><KeyValue label="CTA" value={item.reviewPayload?.cta} />
           <KeyValue label="Duration" value={item.reviewPayload?.durationMs ? `${item.reviewPayload.durationMs / 1000}s` : null} />
-          <KeyValue label="Quality" value={`${item.validationEvidence?.status || item.validationStatus} · ${item.validationEvidence?.score ?? 'n/a'}`} /></div>
+          <KeyValue label="Quality" value={`${item.validationEvidence?.status || item.validationStatus} · ${item.validationEvidence?.score ?? 'n/a'}`} />
+          <KeyValue label="Production" value={item.productionStatus} /><KeyValue label="Review" value={item.reviewStatus} />
+          <KeyValue label="Publication" value={item.publicationStatus} />
+          <KeyValue label="Master media" value={`${item.reviewPayload?.width || '?'}×${item.reviewPayload?.height || '?'} · ${item.reviewPayload?.videoCodec || 'video n/a'} / ${item.reviewPayload?.audioCodec || 'audio n/a'}`} /></div>
+        <Collection title="Generated assets" items={item.generatedAssets} render={(asset) => `${asset.kind} · ${asset.assetId} · ${asset.provider || 'provider n/a'} / ${asset.model || 'model n/a'}${asset.durationMs ? ` · ${asset.durationMs / 1000}s` : ''}`} />
         <details><summary>Script</summary><pre>{JSON.stringify(item.reviewPayload?.script, null, 2)}</pre></details>
         <details><summary>Validation & provenance</summary><pre>{JSON.stringify({ checks: item.reviewPayload?.technicalValidation, provenance: item.provenance, assets: item.generatedAssets }, null, 2)}</pre></details>
         <div className="actions"><button className="approve" disabled={busy === item.id} onClick={() => decide(item, 'approve')}>APPROVE</button>
@@ -161,7 +165,7 @@ function Page({ title, eyebrow, children }) { return <main><header className="pa
 function Section({ title, children }) { return <section className="panel"><h2 className="panel-title">{title}</h2>{children}</section>; }
 function Empty({ text }) { return <div className="empty">{text}</div>; }
 function KeyValue({ label, value }) { return <div className="key-value"><span>{label}</span><p>{value || 'Not recorded'}</p></div>; }
-function Collection({ title, items, render }) { return <div className="collection"><h4>{title}</h4>{items?.length ? items.map((item) => <p key={item.id}>{render(item)}</p>) : <small>Not recorded</small>}</div>; }
+function Collection({ title, items, render }) { return <div className="collection"><h4>{title}</h4>{items?.length ? items.map((item, index) => <p key={item.id || item.assetId || `${title}-${index}`}>{render(item)}</p>) : <small>Not recorded</small>}</div>; }
 function formatDate(value) { return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—'; }
 
 export default function App() {

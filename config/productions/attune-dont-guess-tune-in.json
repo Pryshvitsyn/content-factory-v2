@@ -1,0 +1,151 @@
+{
+  "schema_version": "2.5",
+  "brand_id": "a03def76-bd3d-4c8e-b00a-ec77616c5191",
+  "production_key": "attune-dont-guess-tune-in-20260824-v1",
+  "title": "Attune — Don't Guess. Tune In.",
+  "objective": "ENGAGEMENT",
+  "target_platform": "Instagram Reels and TikTok",
+  "target_duration_seconds": 10,
+  "aspect_ratio": "9:16",
+  "hook": "Sometimes silence feels like distance.",
+  "core_message": "Don't guess. Tune in.",
+  "creative_concept": "A quiet evening misunderstanding becomes a moment of recognition and connection when one partner pauses, notices, moves closer, and gently takes the other's hand.",
+  "cta": "Don't guess. Tune in.",
+  "scenes": [
+    {
+      "scene_id": "quiet-distance",
+      "duration_seconds": 3,
+      "location": "Warm lived-in apartment living room in the evening",
+      "visual": "A woman sits quietly on a sofa, emotionally withdrawn but natural; her partner notices the silence from nearby.",
+      "emotional_intent": "Ambiguity and emotional distance without blame or melodrama.",
+      "dialogue_or_voiceover": "Sometimes silence feels like distance.",
+      "shots": [
+        {
+          "shot_id": "shot-quiet-distance",
+          "asset_id": "video-quiet-distance",
+          "duration_seconds": 3,
+          "framing": "vertical medium two-shot",
+          "camera": "restrained slow push-in",
+          "subject": "the same couple seated in their apartment",
+          "action": "she looks inward and quiet while he notices her silence without reacting",
+          "continuity": "Establish the exact couple, wardrobe, sofa, lamp placement, and warm evening light for all later shots.",
+          "video": {
+            "provider": "replicate",
+            "model": "wan-video/wan-2.2-t2v-fast",
+            "prompt": "Cinematic realistic couple at home in the evening. The woman is quiet and subtly withdrawn on the sofa. Her partner notices. Natural micro-expressions, premium editorial realism, no melodrama, no app or phone UI, no advertising gestures.",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "num_frames": 81,
+            "frames_per_second": 16,
+            "go_fast": true,
+            "seed": 42017
+          }
+        }
+      ]
+    },
+    {
+      "scene_id": "pause-and-notice",
+      "duration_seconds": 4,
+      "location": "The same apartment living room, same sofa and practical lighting",
+      "visual": "Her partner catches himself before assuming distance, softens, moves closer, and gently reaches for her hand.",
+      "emotional_intent": "A visible internal pause followed by care and understanding.",
+      "dialogue_or_voiceover": "Until you understand what's really there.",
+      "shots": [
+        {
+          "shot_id": "shot-pause-and-notice",
+          "asset_id": "video-pause-and-notice",
+          "duration_seconds": 4,
+          "framing": "vertical intimate medium close-up",
+          "camera": "subtle lateral move, nearly locked",
+          "subject": "the identical couple from shot one",
+          "action": "he pauses, reads the moment, shifts closer, and gently takes her hand",
+          "continuity": "Match both faces, hair, age, wardrobe, sofa position, hand placement direction, warm lamp light, and evening color from shot one.",
+          "video": {
+            "provider": "replicate",
+            "model": "wan-video/wan-2.2-t2v-fast",
+            "prompt": "Continue the same cinematic realistic couple and apartment. The man stops himself from reacting defensively, notices her emotional state, moves closer and gently takes her hand. Subtle natural acting and micro-expressions, restrained camera, no melodrama, no app UI, no glossy luxury-ad staging.",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "num_frames": 81,
+            "frames_per_second": 16,
+            "go_fast": true,
+            "seed": 42017
+          }
+        }
+      ]
+    },
+    {
+      "scene_id": "recognition",
+      "duration_seconds": 3,
+      "location": "The same apartment living room and unchanged evening light",
+      "visual": "Their joined hands and her expression softening into recognition; finish on a quiet connected two-shot with a restrained Attune end title.",
+      "emotional_intent": "Recognition, relief, and genuine connection.",
+      "dialogue_or_voiceover": "Don't guess. Tune in.",
+      "shots": [
+        {
+          "shot_id": "shot-recognition",
+          "asset_id": "video-recognition",
+          "duration_seconds": 3,
+          "framing": "vertical close detail resolving to intimate two-shot",
+          "camera": "minimal settled movement",
+          "subject": "the identical couple and their joined hands",
+          "action": "her expression softly opens and they share a quiet look of mutual understanding",
+          "continuity": "Preserve the exact couple, wardrobe, hands, sofa, apartment geography, lighting, lens feel, and color established in prior shots.",
+          "video": {
+            "provider": "replicate",
+            "model": "wan-video/wan-2.2-t2v-fast",
+            "prompt": "Continue the exact same couple in the exact same warm apartment. Their hands remain gently joined. Her expression softens into recognition and connection. End with a quiet natural shared look. Cinematic realism, emotionally subtle, restrained camera, no melodrama, no app UI, no aggressive advertising.",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "num_frames": 81,
+            "frames_per_second": 16,
+            "go_fast": true,
+            "seed": 42017
+          }
+        }
+      ]
+    }
+  ],
+  "voiceover": {
+    "enabled": true,
+    "asset_id": "voiceover-main",
+    "provider": "openai-media",
+    "model": "gpt-4o-mini-tts",
+    "voice": "alloy",
+    "language": "en",
+    "instructions": "Warm, intimate English delivery. Calm, emotionally perceptive, human, and clearly audible. Keep the final line assured but restrained.",
+    "text": "Sometimes silence feels like distance. Until you understand what's really there. Don't guess. Tune in."
+  },
+  "continuity": {
+    "characters": ["the same woman", "the same male partner"],
+    "locations": ["one warm evening apartment living room"],
+    "products": ["Attune brand end title only"],
+    "wardrobe": ["unchanged understated home clothing for both characters"],
+    "props": ["sofa", "warm practical lamp"],
+    "visual_style": "cinematic realism, natural human acting, warm evening apartment, premium but not artificial, restrained camera movement",
+    "character_rules": "Maintain identical faces, approximate age, hair, build, wardrobe, and relationship energy across every generated segment.",
+    "location_rules": "Maintain the same sofa, apartment geometry, practical lamp, warm color temperature, and evening exposure across every segment."
+  },
+  "visual_style": {
+    "realism": "cinematic naturalism",
+    "lighting": "warm practical evening light",
+    "camera": "restrained and observational",
+    "performance": "subtle micro-expressions and believable touch",
+    "avoid": ["melodrama", "app UI", "phone close-ups", "aggressive advertising", "luxury-ad artificiality"]
+  },
+  "audio": {
+    "ambience_intent": "Subtle warm apartment room tone beneath speech.",
+    "music_intent": "Optional restrained tonal bed below speech; omit rather than compromise intelligibility.",
+    "speech_priority": true
+  },
+  "captions": {
+    "enabled": true,
+    "intent": "Minimal high-contrast captions timed to the three voiceover lines; final restrained Attune title after the core line.",
+    "end_title": "Attune"
+  },
+  "publication_policy": {
+    "requires_human_approval": true,
+    "auto_publish": false,
+    "destination": "disabled"
+  }
+}

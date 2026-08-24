@@ -55,6 +55,26 @@ class ProviderGateway {
 
     throw lastError || new Error(`No provider could generate capability '${capability}'`);
   }
+
+  async recover({ capability = 'text-generation', provider, model, requestId, ...request } = {}) {
+    if (!provider) throw new Error('provider is required for recovery');
+    if (!requestId) throw new Error('requestId is required for recovery');
+    const normalizedCapability = normalizeCapability(capability);
+    const adapter = this.get(provider);
+    if (typeof adapter.recover !== 'function') {
+      const error = new Error(`Provider '${provider}' does not support request recovery`);
+      error.code = 'PROVIDER_RECOVERY_UNSUPPORTED';
+      throw error;
+    }
+    const result = await adapter.recover({ capability: normalizedCapability, model, requestId, ...request });
+    return {
+      ...result,
+      provenance: {
+        ...(result.provenance || {}), provider: result.provider || provider,
+        model: result.model || model || null, recovery: true,
+      },
+    };
+  }
 }
 
 module.exports = { ProviderGateway };

@@ -163,7 +163,7 @@ async function validateStorageRoot(root) {
 class LiveProductionService {
   constructor({ db, masterOrchestrator, artifactService, storageRoot, storageValidator = validateStorageRoot,
     schemaInspector = inspectSchemaCompatibility, transactionProbe = verifyTransactionalLiveWrites,
-    storageProbe = verifyArtifactStorage, logger = console } = {}) {
+    storageProbe = verifyArtifactStorage, mediaExecutionRepository = null, logger = console } = {}) {
     if (!db || typeof db.query !== 'function') throw new Error('db is required');
     if (!masterOrchestrator || typeof masterOrchestrator.build !== 'function') throw new Error('masterOrchestrator is required');
     if (!artifactService || typeof artifactService.createVersion !== 'function') throw new Error('artifactService is required');
@@ -175,8 +175,14 @@ class LiveProductionService {
     this.schemaInspector = schemaInspector;
     this.transactionProbe = transactionProbe;
     this.storageProbe = storageProbe;
+    this.mediaExecutionRepository = mediaExecutionRepository;
     this.logger = logger;
   }
+
+  productionKey(input) { return input.productionKey || input.liveTestKey; }
+  productionNamespace(input) { return input.productionNamespace || 'v2.4-live'; }
+  productionName(input) { return `${this.productionNamespace(input)}:${this.productionKey(input)}`; }
+  jobKey(input) { return `${this.productionNamespace(input)}:${this.productionKey(input)}`; }
 
   async inspectBrand(brandId) {
     const result = await this.db.query(`/* v2.4:get-brand */
@@ -193,23 +199,44 @@ class LiveProductionService {
       FROM v2_1.productions p
       LEFT JOIN v2_1.jobs j ON j.production_id=p.id AND j.idempotency_key=$3
       WHERE p.workspace_id=$1 AND p.name=$2`,
-    [input.workspaceId, `v2.4-live:${input.liveTestKey}`, `v2.4-live:${input.liveTestKey}`]);
+    [input.workspaceId, this.productionName(input), this.jobKey(input)]);
     return result.rows[0] || null;
   }
 
-  summary({ brand, input, config, existing }) {
+  summary({ brand, input, config, existing, mediaExecutions = [] }) {
+    const completedAssets = new Set(mediaExecutions.filter((item) => item.status === 'SUCCEEDED').map((item) => item.asset_id));
+    const ambiguousAssets = new Set(mediaExecutions.filter((item) => ['MAY_HAVE_STARTED','NEEDS_RECONCILIATION'].includes(item.status)).map((item) => item.asset_id));
+    const pending = existing?.jobStatus === 'COMPLETED' ? [] : input.assetPlan.assets.filter((asset) => (
+      !completedAssets.has(asset.asset_id) && !ambiguousAssets.has(asset.asset_id)
+    ));
+    const videos = input.assetPlan.assets.filter((asset) => asset.kind === 'video');
+    const audio = input.assetPlan.assets.filter((asset) => asset.kind === 'voice' || asset.kind === 'audio');
+    const videoProfile = videos[0]?.generation_requirements || input.profile || {};
+    const audioProfile = audio[0]?.generation_requirements || {};
     return Object.freeze({
       brand: `${brand.name} (${brand.id})`,
-      production: existing?.productionId || `v2.4-live:${input.liveTestKey}`,
-      provider: config.provider,
-      model: config.model,
-      resolution: input.profile.resolution,
-      aspectRatio: input.profile.aspectRatio,
-      numFrames: input.profile.numFrames,
-      fps: input.profile.framesPerSecond,
-      expectedVideoGenerations: existing?.jobStatus === 'COMPLETED' ? 0 : 1,
+      production: existing?.productionId || this.productionName(input),
+      productionKey: this.productionKey(input),
+      targetDurationSeconds: input.targetDurationSeconds || Number((input.profile.numFrames / input.profile.framesPerSecond).toFixed(3)),
+      provider: videoProfile.provider || config.provider,
+      model: videoProfile.model || config.model,
+      resolution: videoProfile.resolution,
+      aspectRatio: videoProfile.aspect_ratio || videoProfile.aspectRatio,
+      numFrames: videoProfile.num_frames || videoProfile.numFrames,
+      fps: videoProfile.frames_per_second || videoProfile.framesPerSecond,
+      expectedVideoGenerations: pending.filter((asset) => asset.kind === 'video').length,
+      expectedAudioGenerations: pending.filter((asset) => asset.kind === 'voice' || asset.kind === 'audio').length,
+      audioProvider: audioProfile.provider || null,
+      audioModel: audioProfile.model || null,
+      expectedPaidProviderCalls: pending.length,
+      ambiguousProviderExecutions: ambiguousAssets.size,
+      masterAssemblyMode: videos.length > 1 || audio.length ? 'ffmpeg-multi-track' : 'ffmpeg-single-visual',
+      estimatedCost: null,
+      costNote: 'Provider pricing is not encoded in the certified engine; verify current provider pricing before paid execution.',
       paidLiveRun: config.live,
       existingState: existing?.jobStatus || null,
+      publicationPolicy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
+      dryRunProviderCalls: 0,
       schemaCompatibility: 'READY',
     });
   }
@@ -228,9 +255,20 @@ class LiveProductionService {
     const databaseProbe = await this.transactionProbe(this.db, {
       workspaceId: brand.workspaceId, brandId: brand.id, objective: scopedInput.objective,
     });
+    let mediaPlanProbe = null;
+    let mediaExecutions = [];
+    if (input.schemaVersion >= 2) {
+      if (!this.mediaExecutionRepository) throw new LiveProductionError('V25_MEDIA_EXECUTION_REQUIRED', 'V2.5 durable media execution repository is required');
+      await this.mediaExecutionRepository.inspectSchema();
+      mediaPlanProbe = await this.mediaExecutionRepository.verifyTransactionalPlan({
+        workspaceId: brand.workspaceId, brandId: brand.id, objective: scopedInput.objective,
+        inputFingerprint: input.fingerprint, assets: input.assetPlan.assets,
+      });
+      if (existing?.productionId) mediaExecutions = await this.mediaExecutionRepository.list(existing.productionId);
+    }
     const storageProbe = await this.storageProbe(this.artifactService.storage);
-    return { brand, input: scopedInput, existing, schemaReport, databaseProbe, storageProbe,
-      plan: this.summary({ brand, input: scopedInput, config, existing }) };
+    return { brand, input: scopedInput, existing, schemaReport, databaseProbe, mediaPlanProbe, storageProbe,
+      plan: this.summary({ brand, input: scopedInput, config, existing, mediaExecutions }) };
   }
 
   async findCachedVideo({ input, productionId }) {
@@ -253,12 +291,14 @@ class LiveProductionService {
         INSERT INTO v2_1.productions(workspace_id,brand_id,name,status,objective,metadata)
         VALUES($1,$2,$3,'DRAFT',$4,$5::jsonb)
         ON CONFLICT(workspace_id,name) DO NOTHING`,
-      [input.workspaceId, input.brandId, `v2.4-live:${input.liveTestKey}`, input.objective, JSON.stringify({
-        source: 'v2.4-controlled-live-cli', live_test_key: input.liveTestKey, live_input_fingerprint: input.fingerprint,
+      [input.workspaceId, input.brandId, this.productionName(input), input.objective, JSON.stringify({
+        source: input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
+        live_test_key: this.productionKey(input), production_key: this.productionKey(input), live_input_fingerprint: input.fingerprint,
+        publication_policy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
       })]);
       const productionResult = await client.query(`/* v2.4:get-production-for-run */
         SELECT * FROM v2_1.productions WHERE workspace_id=$1 AND name=$2 FOR UPDATE`,
-      [input.workspaceId, `v2.4-live:${input.liveTestKey}`]);
+      [input.workspaceId, this.productionName(input)]);
       const production = productionResult.rows[0];
       if (!production || production.brand_id !== input.brandId || production.metadata?.live_input_fingerprint !== input.fingerprint) {
         throw new LiveProductionError('LIVE_INPUT_CONFLICT', 'Existing production does not match brand or structured input');
@@ -267,13 +307,14 @@ class LiveProductionService {
         INSERT INTO v2_1.jobs(production_id,stage,status,idempotency_key,payload)
         VALUES($1,'EDIT','QUEUED',$2,$3::jsonb)
         ON CONFLICT(production_id,idempotency_key) DO NOTHING`,
-      [production.id, `v2.4-live:${input.liveTestKey}`, JSON.stringify({
-        source: 'v2.4-controlled-live-cli', liveTestKey: input.liveTestKey, inputFingerprint: input.fingerprint,
+      [production.id, this.jobKey(input), JSON.stringify({
+        source: input.schemaVersion >= 2 ? 'v2.5-real-content-cli' : 'v2.4-controlled-live-cli',
+        liveTestKey: this.productionKey(input), productionKey: this.productionKey(input), inputFingerprint: input.fingerprint,
         provider: config.provider, model: config.model, providerRequestState: 'NOT_STARTED',
       })]);
       const jobResult = await client.query(`/* v2.4:get-live-job */
         SELECT * FROM v2_1.jobs WHERE production_id=$1 AND idempotency_key=$2 FOR UPDATE`,
-      [production.id, `v2.4-live:${input.liveTestKey}`]);
+      [production.id, this.jobKey(input)]);
       const job = jobResult.rows[0];
       if (job.status === 'COMPLETED') {
         await client.query('COMMIT');
@@ -317,14 +358,15 @@ class LiveProductionService {
     if (!marked.rows[0]) throw new LiveProductionError('LIVE_JOB_FENCED', 'Live job ownership was lost before provider boundary');
   }
 
-  async fail({ productionId, jobId, workerId, error, providerBoundaryCrossed }) {
-    const retryableBeforeProvider = providerBoundaryCrossed !== true;
+  async fail({ productionId, jobId, workerId, error, providerBoundaryCrossed, durableAssetRecovery = false }) {
+    const retryableBeforeProvider = providerBoundaryCrossed !== true || durableAssetRecovery;
     await this.db.query(`/* v2.4:fail-live-job */
       UPDATE v2_1.jobs SET status=$5, error=$4::jsonb, worker_id=NULL, lease_expires_at=NULL,
         heartbeat_at=now(), completed_at=CASE WHEN $5='FAILED' THEN now() ELSE NULL END, updated_at=now()
       WHERE id=$1 AND production_id=$2 AND worker_id=$3 AND status='RUNNING'`,
     [jobId, productionId, workerId, JSON.stringify({ code: error.code || 'LIVE_PRODUCTION_FAILED', message: error.message,
-      details: error.details || null, providerBoundaryCrossed: !retryableBeforeProvider }), retryableBeforeProvider ? 'RETRYING' : 'FAILED']);
+      details: error.details || null, providerBoundaryCrossed: providerBoundaryCrossed === true,
+      durableAssetRecovery }), retryableBeforeProvider ? 'RETRYING' : 'FAILED']);
     if (!retryableBeforeProvider) {
       await this.db.query(`UPDATE v2_1.productions SET status='FAILED', completed_at=now(), updated_at=now() WHERE id=$1 AND status='RUNNING'`, [productionId]);
     }
@@ -337,7 +379,9 @@ class LiveProductionService {
 
     let allowRecoveredRetry = false;
     if (prepared.existing?.jobStatus === 'RETRYING') {
-      if (prepared.existing.payload?.providerRequestState === 'NOT_STARTED') {
+      if (input.schemaVersion >= 2) {
+        allowRecoveredRetry = true;
+      } else if (prepared.existing.payload?.providerRequestState === 'NOT_STARTED') {
         allowRecoveredRetry = true;
       } else {
         const cachedVideo = await this.findCachedVideo({ input: prepared.input, productionId: prepared.existing.productionId });
@@ -356,24 +400,30 @@ class LiveProductionService {
         artifactId: `production:${claimed.production.id}:live-input`,
         type: 'text',
         content: JSON.stringify({
-          schemaVersion: 1, brandId: input.brandId, liveTestKey: input.liveTestKey, objective: input.objective,
+          schemaVersion: input.schemaVersion || 1, brandId: input.brandId,
+          productionKey: this.productionKey(input), objective: input.objective,
+          targetPlatform: input.targetPlatform || null, targetDurationSeconds: input.targetDurationSeconds || null,
+          publicationPolicy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
           script: input.script, shotPlan: input.shotPlan, assetPlan: input.assetPlan,
         }),
         idempotencyKey: `${input.brandId}:${claimed.production.id}:live-input:${input.fingerprint}`,
-        provider: 'operator', model: 'v2.4-structured-live-input', validationStatus: 'validated',
+        provider: 'operator', model: input.schemaVersion >= 2 ? 'v2.5-real-content-input' : 'v2.4-structured-live-input', validationStatus: 'validated',
       });
       await this.markProviderBoundary({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId });
       providerBoundaryCrossed = true;
       const masterResult = await this.masterOrchestrator.build({
         productionId: claimed.production.id,
+        workspaceId: input.workspaceId,
         brandId: input.brandId,
         workerId: config.workerId,
         script: input.script,
         shotPlan: input.shotPlan,
         assetPlan: input.assetPlan,
-        qualityPolicy: { requireVoiceForSpokenCopy: false },
+        qualityPolicy: { requireVoiceForSpokenCopy: input.schemaVersion >= 2 && input.voiceover?.enabled === true },
       });
-      const media = masterResult.assembly.clips[0].media;
+      const mediaResults = [...new Map(masterResult.assembly.clips.map((clip) => [clip.media.assetId, clip.media])).values()];
+      const videoMedia = mediaResults.find((media) => media.kind === 'video' || media.kind === 'image') || mediaResults[0];
+      const audioMedia = mediaResults.find((media) => media.kind === 'voice' || media.kind === 'audio');
       if (masterResult.quality.status !== 'PASS' || !masterResult.quality.readyForHumanReview) {
         throw new LiveProductionError('LIVE_MASTER_VALIDATION_FAILED', 'Master failed required quality validation', {
           quality: masterResult.quality,
@@ -393,22 +443,34 @@ class LiveProductionService {
       const result = {
         productionId: claimed.production.id,
         brandId: input.brandId,
+        productionKey: this.productionKey(input),
         inputArtifact: { id: inputArtifact.artifactId, version: inputArtifact.version, storageKey: inputArtifact.storageKey },
-        videoArtifact: { id: media.artifact.artifactId, version: media.artifact.version, storageKey: media.artifact.storageKey },
+        videoArtifact: videoMedia ? { id: videoMedia.artifact.artifactId, version: videoMedia.artifact.version, storageKey: videoMedia.artifact.storageKey } : null,
+        videoArtifacts: mediaResults.filter((media) => media.kind === 'video').map((media) => ({
+          assetId: media.assetId, id: media.artifact.artifactId, version: media.artifact.version,
+          storageKey: media.artifact.storageKey, provider: media.provider, model: media.model,
+          requestId: media.requestId || media.provenance?.predictionId || null,
+        })),
+        audioArtifact: audioMedia ? { assetId: audioMedia.assetId, id: audioMedia.artifact.artifactId,
+          version: audioMedia.artifact.version, storageKey: audioMedia.artifact.storageKey,
+          provider: audioMedia.provider, model: audioMedia.model, requestId: audioMedia.requestId || null } : null,
         masterArtifact: { id: masterResult.master.artifact.artifactId, version: masterResult.master.artifact.version, storageKey: masterResult.master.artifact.storageKey },
+        masterProbe: masterResult.master.probe,
+        mediaValidation: masterResult.mediaValidation || null,
         validationStatus: masterResult.quality.status,
         reviewStatus: review.rows[0].status,
         reviewItemId: review.rows[0].id,
-        provider: media.provider,
-        model: media.model,
-        predictionId: media.provenance?.predictionId || media.requestId || null,
-        paidGenerationPerformed: media.provenance?.source !== 'immutable-artifact-cache',
+        provider: videoMedia?.provider || null,
+        model: videoMedia?.model || null,
+        predictionId: videoMedia?.provenance?.predictionId || videoMedia?.requestId || null,
+        paidGenerationPerformed: mediaResults.some((media) => media.provenance?.source !== 'immutable-artifact-cache'),
         publicationTriggered: false,
       };
       await this.complete({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId, result });
       return result;
     } catch (error) {
-      await this.fail({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId, error, providerBoundaryCrossed });
+      await this.fail({ productionId: claimed.production.id, jobId: claimed.job.id, workerId: config.workerId,
+        error, providerBoundaryCrossed, durableAssetRecovery: input.schemaVersion >= 2 });
       throw error;
     }
   }

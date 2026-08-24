@@ -8,8 +8,11 @@ const review = {
   id: '33333333-3333-4333-8333-333333333333', brandId, brandName: 'Acme',
   productionId: '22222222-2222-4222-8222-222222222222', productionName: 'Launch master',
   artifactId: 'production:master', artifactVersion: 1, contentType: 'video/mp4', validationStatus: 'PASS',
-  reviewPayload: { hook: 'Stop scrolling', cta: 'Start now', durationMs: 5000, script: { scenes: [] }, technicalValidation: [] },
-  validationEvidence: { status: 'PASS', score: 1 }, provenance: { provider: 'ffmpeg' }, generatedAssets: [],
+  productionStatus: 'COMPLETED', reviewStatus: 'AWAITING_HUMAN_APPROVAL', publicationStatus: 'DISABLED_PENDING_APPROVAL',
+  reviewPayload: { hook: 'Stop scrolling', cta: 'Start now', durationMs: 5000, width: 1080, height: 1920,
+    videoCodec: 'h264', audioCodec: 'aac', hasAudio: true, script: { scenes: [] }, technicalValidation: [] },
+  validationEvidence: { status: 'PASS', score: 1 }, provenance: { provider: 'ffmpeg' },
+  generatedAssets: [{ assetId: 'video-1', kind: 'video', provider: 'replicate', model: 'wan-test', durationMs: 5000 }],
 };
 
 function response(payload, ok = true) { return Promise.resolve({ ok, status: ok ? 200 : 400, json: async () => payload }); }
@@ -42,6 +45,8 @@ describe('V2.3 dashboard', () => {
     render(<ReviewQueue />);
     expect(await screen.findByText('Launch master')).toBeTruthy();
     expect(screen.getByText('Stop scrolling')).toBeTruthy();
+    expect(screen.getByText('DISABLED_PENDING_APPROVAL')).toBeTruthy();
+    expect(screen.getByText(/video · video-1 · replicate \/ wan-test/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'APPROVE' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/reviews/${review.id}/approve`, expect.objectContaining({ method: 'POST' })));
     expect(await screen.findByText('No validated masters are awaiting human review.')).toBeTruthy();

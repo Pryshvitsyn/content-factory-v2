@@ -218,6 +218,24 @@ async function main() {
     assert.doesNotMatch(`${dryRun.stdout}${dryRun.stderr}`, /synthetic-test-token/);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_1.productions WHERE name LIKE 'v2.4-live:%'`)).rows[0].count, 0,
       'CLI dry-run must not persist a production');
+    const v25Raw = JSON.parse(await fs.readFile(path.resolve('config/productions/attune-dont-guess-tune-in.json'), 'utf8'));
+    v25Raw.brand_id = BRAND_ID;
+    v25Raw.production_key = 'v25-disposable-dry-run';
+    const v25InputFile = path.join(storageRoot, 'v25-operator-input.json');
+    await fs.writeFile(v25InputFile, JSON.stringify(v25Raw), 'utf8');
+    const v25DryRun = spawnSync(process.execPath, ['scripts/real-content-production.js'], {
+      cwd: path.resolve(__dirname, '..'), encoding: 'utf8',
+      env: { ...process.env, DATABASE_URL: testDatabaseUrl(), LIVE_PAID_GENERATION: 'false',
+        VIDEO_PROVIDER: 'replicate', AUDIO_PROVIDER: 'openai-media', CONTENT_FACTORY_STORAGE_ROOT: storageRoot,
+        REAL_PRODUCTION_INPUT: v25InputFile, REPLICATE_API_TOKEN: '', OPENAI_API_KEY: '' },
+    });
+    assert.equal(v25DryRun.status, 0, `${v25DryRun.stdout}\n${v25DryRun.stderr}`);
+    assert.match(v25DryRun.stdout, /V2\.5 DRY RUN PASSED — provider calls = 0/);
+    assert.match(v25DryRun.stdout, /"expectedVideoGenerations": 3/);
+    assert.match(v25DryRun.stdout, /"expectedAudioGenerations": 1/);
+    assert.match(v25DryRun.stdout, /"expectedPaidProviderCalls": 4/);
+    assert.equal((await db.query(`SELECT count(*)::int AS count FROM v2_1.productions WHERE name LIKE 'v2.5-real:%' OR name LIKE 'v2.5-preflight:%'`)).rows[0].count, 0,
+      'V2.5 dry-run and transactional media claims must roll back all writes');
     const storage = new FilesystemStorageAdapter({ root: storageRoot });
     const artifacts = new ArtifactService({ storage });
     const reviews = new ControlReviewService({ db });

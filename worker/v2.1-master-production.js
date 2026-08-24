@@ -167,7 +167,7 @@ function validateMasterQuality({ script, shotPlan, assetPlan, timeline, probe, p
 }
 
 class MasterProductionOrchestrator {
-  constructor({ providerGateway, artifactService, renderer, reviewService = null } = {}) {
+  constructor({ providerGateway, artifactService, renderer, reviewService = null, mediaExecutor = null, masterProbeValidator = null } = {}) {
     requireValue('providerGateway', providerGateway);
     requireValue('artifactService', artifactService);
     requireValue('renderer', renderer);
@@ -175,9 +175,11 @@ class MasterProductionOrchestrator {
     this.artifactService = artifactService;
     this.renderer = renderer;
     this.reviewService = reviewService;
+    this.mediaExecutor = mediaExecutor;
+    this.masterProbeValidator = masterProbeValidator;
   }
 
-  async build({ productionId, brandId, workerId, script, shotPlan, assetPlan, resolvedMedia = [], qualityPolicy = {} } = {}) {
+  async build({ productionId, workspaceId = null, brandId, workerId, script, shotPlan, assetPlan, resolvedMedia = [], qualityPolicy = {} } = {}) {
     requireValue('productionId', productionId);
     requireValue('workerId', workerId);
     assertBrandScope(brandId, { script, shotPlan, assetPlan });
@@ -196,6 +198,10 @@ class MasterProductionOrchestrator {
           throw error;
         }
         if (!media.artifact) throw new Error(`Resolved media ${asset.asset_id} must reference an immutable artifact`);
+      } else if (this.mediaExecutor) {
+        requireValue('workspaceId', workspaceId);
+        media = await this.mediaExecutor.execute({ workspaceId, productionId, brandId, workerId, asset });
+        if (!media?.artifact) throw new Error(`Durable media executor did not persist asset ${asset.asset_id}`);
       } else {
         const mediaFingerprint = canonicalFingerprint({ brandId, productionId, asset });
         const artifactId = `brand:${brandId}:asset:${asset.asset_id}`;
@@ -288,6 +294,11 @@ class MasterProductionOrchestrator {
       assembly,
       profile: { width: settings.width, height: settings.height, fps: settings.fps },
     });
+    const mediaValidation = this.masterProbeValidator ? this.masterProbeValidator({
+      probe: rendered.probe, width: settings.width, height: settings.height,
+      durationMs: timeline.durationMs, durationToleranceMs: settings.durationToleranceMs,
+      requireAudio: true,
+    }) : null;
     const quality = validateMasterQuality({ script, shotPlan, assetPlan, timeline, probe: rendered.probe, policy: settings });
     const fingerprint = canonicalFingerprint({ brandId, productionId, script, shotPlan, assetPlan, settings });
     const artifact = await this.artifactService.createVersion({
@@ -307,6 +318,7 @@ class MasterProductionOrchestrator {
       timeline,
       assembly,
       master: Object.freeze({ artifact, contentType: rendered.contentType, probe: rendered.probe }),
+      mediaValidation,
       quality,
       nextAction: quality.readyForHumanReview ? 'HUMAN_REVIEW' : 'REVISE',
     });

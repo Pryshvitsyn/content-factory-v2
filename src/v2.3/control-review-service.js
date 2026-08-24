@@ -37,6 +37,11 @@ class ControlReviewService {
       hook: script?.hook || null,
       cta: script?.cta || null,
       durationMs: master.probe?.durationMs || null,
+      width: master.probe?.width || null,
+      height: master.probe?.height || null,
+      videoCodec: master.probe?.videoCodec || null,
+      audioCodec: master.probe?.audioCodec || null,
+      hasAudio: master.probe?.hasAudio === true,
       technicalValidation: quality.checks || [],
     };
     const assets = mediaResults.map((media) => ({
@@ -46,6 +51,9 @@ class ControlReviewService {
       model: media.model || null,
       artifactId: media.artifact?.artifactId || null,
       artifactVersion: media.artifact?.version || null,
+      contentType: media.contentType || null,
+      durationMs: media.mediaProbe?.durationMs || media.temporal?.durationMs || null,
+      requestId: media.requestId || media.provenance?.predictionId || null,
     }));
 
     const result = await this.db.query(
