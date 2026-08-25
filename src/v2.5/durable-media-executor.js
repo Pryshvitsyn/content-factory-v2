@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { generateMediaAsset, capabilityForAssetKind, normalizeMediaResult } = require('../../worker/v2.1-media-generation');
 const { canonicalFingerprint, contentTypeForKind } = require('../../worker/v2.1-master-production');
+const { fromAsset } = require('../v2.8/canonical-media-request');
 
 class DurableMediaError extends Error {
   constructor(code, message, details = null) {
@@ -231,7 +232,8 @@ class DurableMediaExecutor {
         boundaryCrossed = true;
         const recovered = await this.providerGateway.recover({
           capability: capabilityForAssetKind(asset.kind), provider: row.provider, model: row.model,
-          requestId: row.provider_request_id,
+          requestId: row.provider_request_id, canonicalRequest: fromAsset({ ...asset,
+            generation_requirements: { ...(asset.generation_requirements || {}), provider: row.provider, model: row.model } }),
         });
         media = normalizeMediaResult({ asset, response: recovered });
       } else {

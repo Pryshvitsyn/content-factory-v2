@@ -5,6 +5,8 @@
   "main": "index.js",
   "directories": { "test": "tests" },
   "scripts": {
+    "test:v2.8": "node tests/v2.8-universal-provider-test.js && vitest run --config apps/dashboard/client/vite.config.js",
+    "test:v2.8:postgres": "node tests/v2.8-postgres-integration-test.js",
     "real:production": "node scripts/real-content-production.js",
     "real:production:local": "node scripts/real-content-production-local.js",
     "test:v2.5": "node tests/v2.5-production-input-test.js && node tests/v2.5-live-workspace-propagation-test.js && node tests/v2.5-durable-media-test.js && node tests/v2.5-real-master-test.js",

@@ -10,6 +10,7 @@ on:
       - "feat/v2.5-real-content-production"
       - "feat/v2.6-fast-renderer-moneyprinterturbo"
       - "feat/v2.7.1-quality-production-pass"
+      - "feat/v2.8-universal-provider-layer"
       - "release/**"
       - "develop/**"
     paths:
@@ -21,6 +22,7 @@ on:
       - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
       - "docs/V2.6-FAST-RENDERING.md"
       - "docs/V2.7.1-QUALITY-PRODUCTION.md"
+      - "docs/V2.8-UNIVERSAL-PROVIDERS.md"
       - "deploy/moneyprinterturbo/**"
       - "config/live-production.example.json"
       - "config/productions/**"
@@ -45,6 +47,7 @@ on:
       - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
       - "docs/V2.6-FAST-RENDERING.md"
       - "docs/V2.7.1-QUALITY-PRODUCTION.md"
+      - "docs/V2.8-UNIVERSAL-PROVIDERS.md"
       - "deploy/moneyprinterturbo/**"
       - "config/live-production.example.json"
       - "config/productions/**"
@@ -208,6 +211,9 @@ jobs:
           node --check tests/v2.7-production-command-test.js
           node --check tests/v2.7-control-api-test.js
           node --check tests/v2.7-operator-console-postgres-integration-test.js
+          for file in src/v2.8/*.js; do node --check "$file"; done
+          node --check tests/v2.8-universal-provider-test.js
+          node --check tests/v2.8-postgres-integration-test.js
           node --check tests/v2.1-provider-contract-test.js
           node --check tests/v2.1-production-orchestrator-test.js
           node --check tests/v2.1-provider-artifact-integration-test.js
@@ -394,6 +400,17 @@ jobs:
           createdb --maintenance-db=postgres v27_operator_test
           npm run test:v2.7:postgres
         timeout-minutes: 5
+      - name: Run V2.8 universal provider contracts (mocked, zero provider calls)
+        run: npm run test:v2.8
+        timeout-minutes: 5
+      - name: Run V2.8 PostgreSQL catalog migration and isolation certification
+        env:
+          CONTENT_FACTORY_TEST_DATABASE: "1"
+          PGDATABASE: v28_provider_test
+        run: |
+          createdb --maintenance-db=postgres v28_provider_test
+          npm run test:v2.8:postgres
+        timeout-minutes: 5
 
       - name: Check smoke test syntax
         run: node --check tests/smoke-test.js
@@ -417,6 +434,7 @@ jobs:
           test -s migrations/20260823_v2_5_durable_media_executions.sql
           test -s migrations/20260824_v2_6_fast_render_executions.sql
           test -s migrations/20260824_v2_7_1_shot_regenerations.sql
+          test -s migrations/20260825_v2_8_universal_provider_catalog.sql
           test -s deploy/moneyprinterturbo/docker-compose.yml
         timeout-minutes: 2
       - name: Check required project files

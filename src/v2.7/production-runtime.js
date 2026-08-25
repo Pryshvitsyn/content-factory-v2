@@ -2,8 +2,8 @@
 
 const { ArtifactService } = require('../artifacts/artifact-service');
 const { ProviderGateway } = require('../providers/provider-gateway');
-const { ReplicateWanVideoAdapter } = require('../providers/replicate-wan-video-adapter');
 const { createOpenAIMediaProvider } = require('../providers/openai-media-provider');
+const { createVideoAdapter } = require('../v2.8/provider-adapter-factory');
 const { PostgresAssetRepository } = require('../v2.1/asset-repository');
 const { FfmpegMasterRenderer } = require('../v2.1/ffmpeg-master-renderer');
 const { ControlReviewService } = require('../v2.3/control-review-service');
@@ -26,16 +26,18 @@ function planOnlyAdapter(provider, capability, model) {
 }
 
 function providerGateway({ config, live, env = process.env }) {
+  const videoProvider = config.provider;
   const providers = live ? {
-    replicate: new ReplicateWanVideoAdapter({ apiToken: env.REPLICATE_API_TOKEN, model: config.model }),
+    [videoProvider]: createVideoAdapter({ provider: videoProvider, model: config.model,
+      adapterFamily: config.adapterFamily || (videoProvider === 'replicate' ? 'replicate-wan' : null) }, { env }),
     'openai-media': createOpenAIMediaProvider({ apiKey: env.OPENAI_API_KEY, speechModel: config.audioModel }),
   } : {
-    replicate: planOnlyAdapter('replicate', 'video-generation', config.model),
+    [videoProvider]: planOnlyAdapter(videoProvider, 'video-generation', config.model),
     'openai-media': planOnlyAdapter('openai-media', 'speech-generation', config.audioModel),
   };
   return new ProviderGateway({
     providers,
-    priorities: { 'video-generation': ['replicate'], 'media:video': ['replicate'],
+    priorities: { 'video-generation': [videoProvider], 'media:video': [videoProvider],
       'speech-generation': ['openai-media'], 'media:voice': ['openai-media'] },
     routing: { strategy: 'priority', fallbackOnError: false },
   });

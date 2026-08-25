@@ -4,7 +4,7 @@ const { assertPaidCredentials, resolveV25Configuration } = require('../v2.5/conf
 const { buildProductionInput, stableFingerprint } = require('../v2.5/production-input');
 const { createProductionRuntime } = require('./production-runtime');
 const { buildOperatorProductionInput } = require('./operator-production-input');
-const { resolveQualityVideoProfile } = require('./quality-video-profile');
+const { resolveQualityVideoProfile, qualityProfileFromSelection } = require('./quality-video-profile');
 const { buildShotRevision } = require('./shot-regeneration');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -35,7 +35,7 @@ class ProductionCommandService {
   constructor({ repository, storage, env = process.env, actor = 'local-operator', logger = console,
     runtimeFactory = createProductionRuntime, configResolver = resolveV25Configuration,
     credentialCheck = assertPaidCredentials, scheduler = defaultSchedule, providers = [],
-    qualityProfileResolver = resolveQualityVideoProfile } = {}) {
+    qualityProfileResolver = resolveQualityVideoProfile, providerCatalog = null } = {}) {
     if (!repository || !storage) throw new Error('repository and storage are required');
     this.repository = repository;
     this.storage = storage;
@@ -48,6 +48,7 @@ class ProductionCommandService {
     this.scheduler = scheduler;
     this.providers = providers;
     this.qualityProfileResolver = qualityProfileResolver;
+    this.providerCatalog = providerCatalog;
   }
 
   assertCapability(input) {
@@ -56,6 +57,12 @@ class ProductionCommandService {
     if (input.renderMode === 'FAST') {
       if (!configured('FAST RENDERER', 'moneyprinterturbo')) {
         throw new ProductionCommandError(409, 'FAST_RENDERER_UNAVAILABLE', 'FAST is unavailable: MoneyPrinterTurbo is not configured');
+      }
+      return;
+    }
+    if (this.providerCatalog) {
+      if (input.voiceover?.enabled && !this.env.OPENAI_API_KEY) {
+        throw new ProductionCommandError(409, 'CREDENTIALS_MISSING', 'OpenAI speech credentials are not configured');
       }
       return;
     }
@@ -77,9 +84,11 @@ class ProductionCommandService {
       ...this.env,
       REAL_PRODUCTION_INPUT: this.env.REAL_PRODUCTION_INPUT || 'dashboard://operator-console',
       RENDER_MODE: input.renderMode,
-      VIDEO_PROVIDER: 'replicate',
+      VIDEO_PROVIDER: input.qualityVideoProfile?.provider || 'replicate',
       AUDIO_PROVIDER: 'openai-media',
-      ...(input.qualityVideoProfile ? { REPLICATE_VIDEO_MODEL: input.qualityVideoProfile.model } : {}),
+      ...(input.qualityVideoProfile ? { REPLICATE_VIDEO_MODEL: input.qualityVideoProfile.model,
+        QUALITY_VIDEO_MODEL: input.qualityVideoProfile.model,
+        QUALITY_VIDEO_PROVIDER: input.qualityVideoProfile.provider } : {}),
       FAST_RENDERER: input.renderMode === 'FAST' ? input.fastRender.renderer : this.env.FAST_RENDERER,
       ...(forceDryRun ? { LIVE_PAID_GENERATION: 'false' } : {}),
     };
@@ -102,16 +111,46 @@ class ProductionCommandService {
       throw new ProductionCommandError(404, 'BRAND_NOT_FOUND', 'Active brand not found in canonical workspace scope');
     }
     let built;
+    let scopedCatalog = this.providerCatalog;
     try {
-      const qualityProfile = String(request.renderMode || '').toUpperCase() === 'QUALITY'
-        ? this.qualityProfileResolver(this.env) : null;
+      let qualityProfile = null;
+      if (String(request.renderMode || '').toUpperCase() === 'QUALITY') {
+        if (this.providerCatalog) {
+          scopedCatalog = await this.providerCatalog.forWorkspace(brand.workspaceId);
+          const selection = scopedCatalog.resolveSelection({
+            provider: request.provider || this.env.DEFAULT_QUALITY_PROVIDER,
+            model: request.model || this.env.DEFAULT_QUALITY_MODEL,
+            profile: request.profile || this.env.DEFAULT_QUALITY_PROFILE || 'STANDARD',
+            capability: request.capability || 'TEXT_TO_VIDEO', aspectRatio: request.aspectRatio || '9:16',
+            allowExperimental: request.allowExperimental === true,
+          });
+          qualityProfile = qualityProfileFromSelection(selection);
+        } else qualityProfile = this.qualityProfileResolver(this.env);
+      }
       built = buildOperatorProductionInput(request, brand, { productionKey, qualityProfile });
     }
     catch (error) {
-      if (['V27_INPUT_INVALID','V25_INPUT_INVALID','QUALITY_PROFILE_INVALID','QUALITY_MODEL_REQUIRED','QUALITY_CAPABILITY_UNAVAILABLE'].includes(error.code)) {
+      if (['V27_INPUT_INVALID','V25_INPUT_INVALID','QUALITY_PROFILE_INVALID','QUALITY_MODEL_REQUIRED','QUALITY_CAPABILITY_UNAVAILABLE',
+        'SELECTED_PROVIDER_UNAVAILABLE','SELECTED_MODEL_UNAVAILABLE','SELECTED_PROFILE_UNAVAILABLE','CAPABILITY_UNSUPPORTED',
+        'CREDENTIALS_MISSING','UNSUPPORTED_DURATION','UNSUPPORTED_RESOLUTION','UNSUPPORTED_ASPECT_RATIO'].includes(error.code)) {
         throw new ProductionCommandError(400, error.code, error.message, error.details);
       }
       throw error;
+    }
+    if (scopedCatalog && built.input.renderMode === 'QUALITY') {
+      try {
+        for (const asset of built.input.assetPlan.assets.filter((item) => item.kind === 'video')) {
+          const requirements = asset.generation_requirements;
+          scopedCatalog.validateSelection({ provider: requirements.provider, model: requirements.model,
+            profile: requirements.profile, capability: requirements.capability,
+            durationSeconds: requirements.target_clip_duration_ms / 1000,
+            resolution: requirements.resolution, aspectRatio: requirements.aspect_ratio,
+            allowExperimental: request.allowExperimental === true });
+        }
+      } catch (error) {
+        if (error.code) throw new ProductionCommandError(error.status || 409, error.code, error.message, error.details);
+        throw error;
+      }
     }
     this.assertCapability(built.input);
     const runtime = this.runtime(built.input, { forceDryRun: true });
@@ -139,6 +178,11 @@ class ProductionCommandService {
       provider: plan.provider,
       model: plan.model,
       qualityProfile: command.input.qualityVideoProfile,
+      profile: command.input.qualityVideoProfile?.name || null,
+      vendor: command.input.qualityVideoProfile?.vendor || null,
+      capability: command.input.qualityVideoProfile?.capability || (command.input.renderMode === 'FAST' ? 'FAST_RENDER' : null),
+      resolvedGenerationSettings: command.input.qualityVideoProfile?.resolvedSettings || null,
+      configurationStatus: command.input.renderMode === 'QUALITY' ? 'CONFIGURED' : plan.rendererAvailability?.availability || 'READY',
       resolution: command.input.qualityVideoProfile?.resolution || null,
       qualityMode: command.input.qualityVideoProfile?.goFast === false ? 'QUALITY' : 'FAST',
       promptOptimization: command.input.qualityVideoProfile?.optimizePrompt ?? null,

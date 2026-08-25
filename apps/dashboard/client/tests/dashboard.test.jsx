@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import App, { NewProduction, ProductionDetail, ReviewQueue } from '../src/App';
+import App, { NewProduction, ProductionDetail, ReviewQueue, Providers } from '../src/App';
 
 const brandId = '11111111-1111-4111-8111-111111111111';
 const review = {
@@ -224,5 +224,52 @@ describe('V2.7 operator console', () => {
     await waitFor(() => expect(calls.some(([url]) => url.endsWith('/shots/operator-shot-1/preflight'))).toBe(true));
     await waitFor(() => expect(calls.some(([url, method, body]) => url.endsWith('/shots/operator-shot-1/regenerate')
       && method === 'POST' && JSON.parse(body).confirmation === true)).toBe(true));
+  });
+});
+
+describe('V2.8 universal provider controls', () => {
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn()); });
+  afterEach(() => vi.unstubAllGlobals());
+  const brands = [{ id: brandId, name: 'Attune', status: 'ACTIVE' }];
+  const model = (modelId, displayName, profiles) => ({ modelId, displayName, vendor: 'vendor',
+    capabilities: ['TEXT_TO_VIDEO'], profiles, experimental: false });
+  const catalog = [
+    { id: 'replicate', displayName: 'Replicate', type: 'AGGREGATOR', configured: true, availability: 'CONFIGURED_NOT_PROBED',
+      credentialStatus: 'CONFIGURED', modelCount: 1, capabilities: ['TEXT_TO_VIDEO'], models: [model('wan/video','Wan', { ECONOMY: {}, STANDARD: {} })] },
+    { id: 'fal', displayName: 'fal.ai', type: 'AGGREGATOR', configured: true, availability: 'CONFIGURED_NOT_PROBED',
+      credentialStatus: 'CONFIGURED', modelCount: 1, capabilities: ['TEXT_TO_VIDEO'], models: [model('bytedance/seedance','Seedance', { STANDARD: {}, PREMIUM: {} })] },
+    { id: 'runway', displayName: 'Runway', type: 'DIRECT', configured: true, availability: 'CONFIGURED_NOT_PROBED',
+      credentialStatus: 'CONFIGURED', modelCount: 1, capabilities: ['TEXT_TO_VIDEO'], models: [model('gen4.5','Gen-4.5', { STANDARD: {} })] },
+    { id: 'openai', displayName: 'OpenAI', type: 'DIRECT', configured: true, availability: 'CONFIGURED_NOT_PROBED',
+      credentialStatus: 'CONFIGURED', modelCount: 1, capabilities: ['SPEECH'], models: [] },
+    { id: 'moneyprinterturbo', displayName: 'MoneyPrinterTurbo', type: 'LOCAL', configured: false, availability: 'NOT_CONFIGURED',
+      credentialStatus: 'NOT_CONFIGURED', modelCount: 1, capabilities: ['FAST_RENDER'], models: [] },
+  ];
+
+  it('filters provider, model, and model-aware profile dropdowns from the backend catalog', async () => {
+    fetch.mockImplementation((url) => response(url === '/api/brands' ? brands : catalog));
+    render(<NewProduction />);
+    fireEvent.click(await screen.findByRole('button', { name: /QUALITY/ }));
+    expect(screen.getByRole('option', { name: 'Replicate' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'fal.ai' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Runway' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'OpenAI' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'fal' } });
+    expect(screen.getByRole('option', { name: 'Seedance' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Wan' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'PREMIUM' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'runway' } });
+    expect(screen.getByRole('option', { name: 'Gen-4.5' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'STANDARD' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'PREMIUM' })).toBeNull();
+  });
+
+  it('shows provider health without rendering secret values', async () => {
+    fetch.mockImplementation((url) => response(url === '/api/providers' ? catalog : brands));
+    const view = render(<Providers />);
+    expect(await screen.findByRole('heading', { name: 'fal.ai' })).toBeTruthy();
+    expect(screen.getAllByText('CONFIGURED NOT PROBED').length).toBeGreaterThan(0);
+    expect(view.container.textContent).not.toContain('synthetic-test-key');
+    expect(screen.getByRole('button', { name: 'ADD MODEL' })).toBeTruthy();
   });
 });

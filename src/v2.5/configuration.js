@@ -83,16 +83,18 @@ function resolveV25Configuration(env = process.env, input = null) {
       }),
     });
   }
-  if ((env.VIDEO_PROVIDER || 'replicate') !== 'replicate') {
-    throw new V25ConfigurationError('LIVE_PROVIDER_MISMATCH', 'VIDEO_PROVIDER must be replicate for the current certified video adapter');
+  const selectedVideoProvider = input?.qualityVideoProfile?.provider || 'replicate';
+  if ((env.VIDEO_PROVIDER || selectedVideoProvider) !== selectedVideoProvider) {
+    throw new V25ConfigurationError('LIVE_PROVIDER_MISMATCH', 'VIDEO_PROVIDER must match the immutable production provider selection');
   }
   if ((env.AUDIO_PROVIDER || 'openai-media') !== 'openai-media') {
     throw new V25ConfigurationError('LIVE_AUDIO_PROVIDER_MISMATCH', 'AUDIO_PROVIDER must be openai-media for the current certified speech adapter');
   }
   return Object.freeze({
     ...common,
-    provider: 'replicate',
-    model: env.REPLICATE_VIDEO_MODEL || DEFAULT_VIDEO_MODEL,
+    provider: selectedVideoProvider,
+    model: input?.qualityVideoProfile?.model || env.REPLICATE_VIDEO_MODEL || DEFAULT_VIDEO_MODEL,
+    adapterFamily: input?.qualityVideoProfile?.adapterFamily || (selectedVideoProvider === 'replicate' ? 'replicate-wan' : null),
     audioProvider: 'openai-media',
     audioModel: env.OPENAI_SPEECH_MODEL || DEFAULT_SPEECH_MODEL,
     workerId: env.LIVE_PRODUCTION_WORKER_ID || `v2.5-real-cli:${process.pid}`,
@@ -107,8 +109,13 @@ function assertPaidCredentials({ config, input, env = process.env }) {
     }
     return;
   }
-  if (input.assetPlan.assets.some((asset) => asset.kind === 'video') && !env.REPLICATE_API_TOKEN) {
-    throw new V25ConfigurationError('LIVE_REPLICATE_TOKEN_REQUIRED', 'REPLICATE_API_TOKEN is required only for explicit paid video execution');
+  const videoProvider = input.qualityVideoProfile?.provider || 'replicate';
+  const credentialNames = { replicate: ['REPLICATE_API_TOKEN'], fal: ['FAL_KEY'], runway: ['RUNWAYML_API_SECRET'],
+    google: ['GOOGLE_API_KEY','GEMINI_API_KEY'], luma: ['LUMA_API_KEY'] };
+  if (input.assetPlan.assets.some((asset) => asset.kind === 'video')
+    && !(credentialNames[videoProvider] || []).some((name) => Boolean(env[name]))) {
+    throw new V25ConfigurationError(videoProvider === 'replicate' ? 'LIVE_REPLICATE_TOKEN_REQUIRED' : 'CREDENTIALS_MISSING',
+      `Credentials are required for explicit ${videoProvider} video execution`);
   }
   if (input.assetPlan.assets.some((asset) => asset.kind === 'voice') && !env.OPENAI_API_KEY) {
     throw new V25ConfigurationError('LIVE_AUDIO_TOKEN_REQUIRED', 'OPENAI_API_KEY is required only for explicit paid voice execution');

@@ -10,6 +10,7 @@ const { ControlRepository } = require('./control-repository');
 const { ControlService } = require('./control-service');
 const { createControlServer } = require('./http-server');
 const { describeProviders } = require('./provider-status');
+const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
 
 function createDashboardRuntime(env = process.env) {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
@@ -20,10 +21,11 @@ function createDashboardRuntime(env = process.env) {
   const repository = new ControlRepository({ db });
   const reviewService = new ControlReviewService({ db });
   const providers = describeProviders(env);
+  const providerCatalog = new ProviderCatalog({ env, repository: new PostgresProviderCatalogRepository({ db }) });
   const actor = env.DASHBOARD_ACTOR || 'local-operator';
-  const commandService = new ProductionCommandService({ repository, storage, providers, env, actor });
+  const commandService = new ProductionCommandService({ repository, storage, providers, providerCatalog, env, actor });
   const service = new ControlService({
-    repository, reviewService, commandService, storage, providers, actor,
+    repository, reviewService, commandService, storage, providers, providerCatalog, actor,
   });
   return { db, server: createControlServer({ service }) };
 }

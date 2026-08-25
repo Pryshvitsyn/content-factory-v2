@@ -290,6 +290,12 @@ class LiveProductionService {
       live_input_fingerprint: input.fingerprint,
       render_mode: input.renderMode || 'QUALITY',
       renderer: input.renderer || 'v2.5-quality',
+      ...(input.qualityVideoProfile ? { provider_selection: {
+        provider: input.qualityVideoProfile.provider, vendor: input.qualityVideoProfile.vendor || null,
+        model: input.qualityVideoProfile.model, modelVersion: input.qualityVideoProfile.modelVersion || null,
+        profile: input.qualityVideoProfile.name, capability: input.qualityVideoProfile.capability || 'TEXT_TO_VIDEO',
+        resolvedSettings: input.qualityVideoProfile.resolvedSettings || {},
+      } } : {}),
       publication_policy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
       ...(command ? {
         operator_request_id: command.requestId,
@@ -323,6 +329,7 @@ class LiveProductionService {
       renderer: input.renderer || 'v2.5-quality',
       provider: config.provider,
       model: config.model,
+      ...(input.qualityVideoProfile ? { providerSelection: productionMetadata.provider_selection } : {}),
       providerRequestState: 'NOT_STARTED',
       rendererRequestState: 'NOT_STARTED',
       ...(command ? {
