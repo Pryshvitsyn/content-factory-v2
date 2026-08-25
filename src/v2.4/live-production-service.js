@@ -5,7 +5,8 @@ const fs = require('node:fs/promises');
 const { constants: fsConstants } = require('node:fs');
 const { buildWanInput, DEFAULT_MODEL } = require('../../src/providers/replicate-wan-video-adapter');
 const { validateStructuredConsistency } = require('../../worker/v2.1-production-orchestrator');
-const { canonicalFingerprint } = require('../../worker/v2.1-master-production');
+const { canonicalFingerprint, FINAL_MASTER_DELIVERY_PROFILE,
+  validatePreExecutionQuality } = require('../../worker/v2.1-master-production');
 const {
   assertSchemaCompatible,
   inspectSchemaCompatibility,
@@ -207,7 +208,7 @@ class LiveProductionService {
     return result.rows[0] || null;
   }
 
-  summary({ brand, input, config, existing, laneState }) {
+  summary({ brand, input, config, existing, laneState, preExecutionValidation }) {
     const lanePlan = this.rendererRouter.plan({ brand, input, config, existing, laneState });
     return Object.freeze({
       brand: `${brand.name} (${brand.id})`,
@@ -220,6 +221,9 @@ class LiveProductionService {
       paidLiveRun: config.live,
       existingState: existing?.jobStatus || null,
       publicationPolicy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
+      readiness: preExecutionValidation?.status === 'PASS' ? 'READY' : 'NOT_READY',
+      preExecutionValidation,
+      finalMasterDeliveryProfile: FINAL_MASTER_DELIVERY_PROFILE,
       dryRunProviderCalls: 0,
       schemaCompatibility: 'READY',
     });
@@ -232,6 +236,18 @@ class LiveProductionService {
     assertSchemaCompatible(schemaReport);
     const brand = await this.inspectBrand(input.brandId);
     const scopedInput = { ...input, workspaceId: brand.workspaceId };
+    const preExecutionValidation = validatePreExecutionQuality({ productionId: `preflight:${input.fingerprint}`,
+      script: scopedInput.script, shotPlan: scopedInput.shotPlan, assetPlan: scopedInput.assetPlan,
+      policy: { requireVoiceForSpokenCopy: scopedInput.voiceover?.enabled === true,
+        strictApprovedCopy: scopedInput.spokenCopyPolicy?.strictApprovedCopy !== false,
+        requireVoiceTimingPlan: scopedInput.schemaVersion >= 2,
+        requireProviderCompatibility: scopedInput.schemaVersion >= 2 && scopedInput.renderMode === 'QUALITY' } });
+    if (preExecutionValidation.status !== 'PASS') {
+      throw new LiveProductionError('LIVE_PREFLIGHT_VALIDATION_FAILED',
+        'Preflight is NOT READY: deterministic production validation failed before provider execution', {
+          validation: preExecutionValidation, providerExecutions: 0,
+        });
+    }
     const existing = await this.inspectExisting(scopedInput);
     if (existing?.metadata?.live_input_fingerprint && existing.metadata.live_input_fingerprint !== input.fingerprint) {
       throw new LiveProductionError('LIVE_INPUT_CONFLICT', 'live_test_key already belongs to different structured input');
@@ -243,7 +259,8 @@ class LiveProductionService {
     const mediaPlanProbe = laneState.probe;
     const storageProbe = await this.storageProbe(this.artifactService.storage);
     return { brand, input: scopedInput, existing, schemaReport, databaseProbe, mediaPlanProbe, laneState, storageProbe,
-      plan: this.summary({ brand, input: scopedInput, config, existing, laneState }) };
+      preExecutionValidation,
+      plan: this.summary({ brand, input: scopedInput, config, existing, laneState, preExecutionValidation }) };
   }
 
   async prepareRevision({ input, config, productionId }) {
@@ -258,9 +275,21 @@ class LiveProductionService {
     if (!ownership.rows[0]) throw new LiveProductionError('LIVE_PRODUCTION_NOT_FOUND', 'Production not found in canonical brand/workspace scope');
     const scopedInput = { ...input, workspaceId: brand.workspaceId };
     const existing = { ...ownership.rows[0], jobStatus: 'RUNNING' };
+    const preExecutionValidation = validatePreExecutionQuality({ productionId,
+      script: scopedInput.script, shotPlan: scopedInput.shotPlan, assetPlan: scopedInput.assetPlan,
+      policy: { requireVoiceForSpokenCopy: scopedInput.voiceover?.enabled === true,
+        strictApprovedCopy: scopedInput.spokenCopyPolicy?.strictApprovedCopy !== false,
+        requireVoiceTimingPlan: scopedInput.schemaVersion >= 2,
+        requireProviderCompatibility: scopedInput.schemaVersion >= 2 && scopedInput.renderMode === 'QUALITY' } });
+    if (preExecutionValidation.status !== 'PASS') {
+      throw new LiveProductionError('LIVE_PREFLIGHT_VALIDATION_FAILED',
+        'Revision preflight is NOT READY: deterministic validation failed before provider execution', {
+          validation: preExecutionValidation, providerExecutions: 0,
+        });
+    }
     const laneState = await this.rendererRouter.preflight({ input: scopedInput, brand, existing, config });
-    const plan = this.summary({ brand, input: scopedInput, config, existing, laneState });
-    return { brand, input: scopedInput, existing, laneState, schemaReport, plan };
+    const plan = this.summary({ brand, input: scopedInput, config, existing, laneState, preExecutionValidation });
+    return { brand, input: scopedInput, existing, laneState, schemaReport, preExecutionValidation, plan };
   }
 
   async findCachedVideo({ input, productionId }) {
@@ -426,13 +455,22 @@ class LiveProductionService {
 
   async fail({ productionId, jobId, workerId, error, providerBoundaryCrossed, durableAssetRecovery = false }) {
     const retryableBeforeProvider = providerBoundaryCrossed !== true || durableAssetRecovery;
+    const quality = error.details?.quality || error.details?.validation || null;
+    const validation = quality ? {
+      status: quality.status,
+      score: quality.score,
+      checks: quality.checks,
+      validationClass: quality.validationClass || (error.code === 'LIVE_MASTER_VALIDATION_FAILED' ? 'POST_RENDER' : 'PRE_EXECUTION'),
+      timestamp: new Date().toISOString(),
+      masterArtifact: error.details?.masterArtifact || null,
+    } : null;
     await this.db.query(`/* v2.4:fail-live-job */
       UPDATE v2_1.jobs SET status=$5, error=$4::jsonb, worker_id=NULL, lease_expires_at=NULL,
         heartbeat_at=now(), completed_at=CASE WHEN $5='FAILED' THEN now() ELSE NULL END, updated_at=now()
       WHERE id=$1 AND production_id=$2 AND worker_id=$3 AND status='RUNNING'`,
     [jobId, productionId, workerId, JSON.stringify({ code: error.code || 'LIVE_PRODUCTION_FAILED', message: error.message,
       details: error.details || null, providerBoundaryCrossed: providerBoundaryCrossed === true,
-      durableAssetRecovery }), retryableBeforeProvider ? 'RETRYING' : 'FAILED']);
+      durableAssetRecovery, validation }), retryableBeforeProvider ? 'RETRYING' : 'FAILED']);
     if (!retryableBeforeProvider) {
       await this.db.query(`UPDATE v2_1.productions SET status='FAILED', completed_at=now(), updated_at=now() WHERE id=$1 AND status='RUNNING'`, [productionId]);
     }
@@ -492,7 +530,10 @@ class LiveProductionService {
         script: prepared.input.script,
         shotPlan: prepared.input.shotPlan,
         assetPlan: prepared.input.assetPlan,
-        qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.schemaVersion >= 2 && prepared.input.voiceover?.enabled === true },
+        qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.schemaVersion >= 2 && prepared.input.voiceover?.enabled === true,
+          strictApprovedCopy: prepared.input.spokenCopyPolicy?.strictApprovedCopy !== false,
+          requireVoiceTimingPlan: prepared.input.schemaVersion >= 2,
+          requireProviderCompatibility: prepared.input.schemaVersion >= 2 && prepared.input.renderMode === 'QUALITY' },
       });
       const mediaResults = [...new Map(masterResult.assembly.clips.map((clip) => [clip.media.assetId, clip.media])).values()];
       const videoMedia = mediaResults.find((media) => media.kind === 'video' || media.kind === 'image') || mediaResults[0];

@@ -154,7 +154,14 @@ class ProductionCommandService {
     }
     this.assertCapability(built.input);
     const runtime = this.runtime(built.input, { forceDryRun: true });
-    const prepared = await runtime.service.prepare({ input: built.input, config: runtime.config });
+    let prepared;
+    try { prepared = await runtime.service.prepare({ input: built.input, config: runtime.config }); }
+    catch (error) {
+      if (error.code === 'LIVE_PREFLIGHT_VALIDATION_FAILED') {
+        throw new ProductionCommandError(409, error.code, error.message, error.details);
+      }
+      throw error;
+    }
     const rendererUnavailable = prepared.plan.rendererAvailability?.availability === 'UNAVAILABLE'
       || prepared.plan.rendererAvailability?.status === 'UNAVAILABLE';
     if (rendererUnavailable) throw new ProductionCommandError(409, 'RENDERER_UNAVAILABLE', 'Selected renderer health check is unavailable');
@@ -200,6 +207,9 @@ class ProductionCommandService {
       costNote: plan.costNote,
       rendererStatus: plan.rendererAvailability?.availability || plan.rendererAvailability?.status || 'READY',
       schemaStatus: plan.schemaCompatibility,
+      readiness: plan.readiness || 'READY',
+      preExecutionValidation: plan.preExecutionValidation || null,
+      finalMasterDeliveryProfile: plan.finalMasterDeliveryProfile || null,
       humanApprovalRequired: plan.publicationPolicy?.requiresHumanApproval === true,
       autoPublish: false,
       preflightProviderExecutions: 0,
@@ -392,7 +402,10 @@ class ProductionCommandService {
           workspaceId: prepared.input.workspaceId, brandId: args.brandId, workerId: runtime.config.workerId,
           input: prepared.input, script: prepared.input.script, shotPlan: prepared.input.shotPlan,
           assetPlan: prepared.input.assetPlan,
-          qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.voiceover?.enabled === true } });
+          qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.voiceover?.enabled === true,
+            strictApprovedCopy: prepared.input.spokenCopyPolicy?.strictApprovedCopy !== false,
+            requireVoiceTimingPlan: prepared.input.schemaVersion >= 2,
+            requireProviderCompatibility: prepared.input.schemaVersion >= 2 } });
         await this.repository.completeShotRegeneration(record.id, { replacementAssetId: revision?.replacementAssetId
           || record.replacementAssetId || record.replacement_asset_id,
           masterArtifact: master.master?.artifact || null, quality: master.quality || null,

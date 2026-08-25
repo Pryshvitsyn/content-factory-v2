@@ -96,12 +96,16 @@ class ControlRepository {
         COALESCE(p.metadata->>'renderer','v2.5-quality') AS renderer,
         (p.metadata->'canonical_request'->>'targetDurationSeconds')::numeric AS "targetDurationSeconds",
         latest_job.id AS "jobId", latest_job.status AS "jobStatus", latest_job.error AS error,
+        COALESCE(review.validation_status,latest_job.error->'validation'->>'status',
+          latest_job.error->'details'->'quality'->>'status') AS "validationStatus",
         current_stage.stage AS "currentStage", current_stage.status AS "currentStageStatus",
         CASE WHEN p.metadata ? 'publication_policy'
           AND coalesce((p.metadata->'publication_policy'->>'autoPublish')::boolean,false)=false THEN 'DISABLED'
           WHEN p.metadata ? 'publication_policy' THEN 'NOT_TRIGGERED' ELSE 'NOT_CONFIGURED' END AS "publicationStatus",
         COALESCE(decision.decision,
-          CASE WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE NULL END) AS "reviewState"
+          CASE WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL'
+            WHEN COALESCE(latest_job.error->'validation'->>'status',latest_job.error->'details'->'quality'->>'status')='FAIL'
+              THEN 'BLOCKED' ELSE NULL END) AS "reviewState"
       FROM v2_1.productions p
       LEFT JOIN v2_2.brands b ON b.id=p.brand_id AND b.workspace_id=p.workspace_id
       LEFT JOIN LATERAL (
@@ -112,7 +116,7 @@ class ControlRepository {
         WHERE j.production_id=p.id ORDER BY sr.updated_at DESC LIMIT 1
       ) current_stage ON true
       LEFT JOIN LATERAL (
-        SELECT ri.id FROM v2_3.master_review_items ri WHERE ri.production_id=p.id ORDER BY ri.created_at DESC LIMIT 1
+        SELECT ri.id,ri.validation_status FROM v2_3.master_review_items ri WHERE ri.production_id=p.id ORDER BY ri.created_at DESC LIMIT 1
       ) review ON true
       LEFT JOIN v2_3.master_review_decisions decision ON decision.review_item_id=review.id
       WHERE ($1::uuid IS NULL OR p.brand_id=$1) AND ($2::text IS NULL OR p.status=$2)
@@ -135,8 +139,17 @@ class ControlRepository {
         latest_job.id AS "jobId", latest_job.status AS "jobStatus", latest_job.payload AS "jobPayload",
         latest_job.result AS "jobResult", latest_job.error AS "jobError",
         CASE WHEN decision.id IS NOT NULL THEN decision.decision
-          WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL' ELSE NULL END AS "reviewState",
-        review.validation_status AS "validationStatus", review.validation_evidence AS "validationEvidence",
+          WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL'
+          WHEN COALESCE(latest_job.error->'validation'->>'status',latest_job.error->'details'->'quality'->>'status')='FAIL'
+            THEN 'BLOCKED' ELSE NULL END AS "reviewState",
+        COALESCE(review.validation_status,latest_job.error->'validation'->>'status',
+          latest_job.error->'details'->'quality'->>'status') AS "validationStatus",
+        COALESCE(review.validation_evidence,latest_job.error->'validation',
+          CASE WHEN latest_job.error->'details'->'quality' IS NOT NULL THEN
+            latest_job.error->'details'->'quality' || jsonb_build_object(
+              'validationClass','POST_RENDER','timestamp',latest_job.updated_at,
+              'masterArtifact',latest_job.error->'details'->'masterArtifact')
+          ELSE NULL END) AS "validationEvidence",
         review.review_payload AS "reviewPayload"
       FROM v2_1.productions p
       LEFT JOIN v2_2.brands b ON b.id=p.brand_id AND b.workspace_id=p.workspace_id

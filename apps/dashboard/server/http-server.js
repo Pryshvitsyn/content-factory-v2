@@ -12,6 +12,12 @@ function json(response, status, payload) {
   response.end(body);
 }
 
+function safeErrorDetails(error) {
+  const validation = error?.details?.validation || error?.details?.quality;
+  if (!validation) return undefined;
+  return { validation, providerExecutions: Number(error.details?.providerExecutions || 0) };
+}
+
 async function readJson(request) {
   let size = 0;
   const chunks = [];
@@ -93,9 +99,12 @@ function createControlServer({ service, logger = console } = {}) {
     } catch (error) {
       const status = error instanceof ControlError || Number.isInteger(error.status) ? error.status : 500;
       if (status === 500) logger.error?.('Control API error', { code: error.code || 'INTERNAL_ERROR', message: error.message });
-      return json(response, status, { error: { code: error.code || 'INTERNAL_ERROR', message: status === 500 ? 'Internal server error' : error.message } });
+      const details = safeErrorDetails(error);
+      return json(response, status, { error: { code: error.code || 'INTERNAL_ERROR',
+        message: status === 500 ? 'Internal server error' : error.message,
+        ...(details ? { details } : {}) } });
     }
   });
 }
 
-module.exports = { createControlServer, readJson, BODY_LIMIT };
+module.exports = { createControlServer, readJson, safeErrorDetails, BODY_LIMIT };

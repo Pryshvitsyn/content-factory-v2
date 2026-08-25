@@ -14,7 +14,14 @@ async function post(base, path, body) {
 async function main() {
   const calls = [];
   const service = {
-    async preflightProduction(body) { calls.push(['preflight', body]); return { preflightId: 'fingerprint', preflightProviderExecutions: 0 }; },
+    async preflightProduction(body) {
+      calls.push(['preflight', body]);
+      if (body.invalid) throw Object.assign(new Error('Preflight is NOT READY'), { status: 409,
+        code: 'LIVE_PREFLIGHT_VALIDATION_FAILED', details: { providerExecutions: 0,
+          validation: { status: 'FAIL', checks: [{ code: 'voice_copy_integrity', status: 'FAIL',
+            message: 'Planned speech text mismatch.', details: { actual: 'a', expected: 'b' } }] } } });
+      return { preflightId: 'fingerprint', preflightProviderExecutions: 0 };
+    },
     async createProduction(body) { calls.push(['create', body]); return { productionId: PRODUCTION_ID, jobStatus: 'QUEUED' }; },
     async startProduction(body) { calls.push(['start', body]); return { productionId: PRODUCTION_ID, accepted: true }; },
     async retryProduction(body) { calls.push(['retry', body]); return { productionId: PRODUCTION_ID, accepted: true }; },
@@ -30,6 +37,9 @@ async function main() {
     const preflight = await post(base, '/api/productions/preflight', { brandId: BRAND_ID, renderMode: 'FAST' });
     assert.equal(preflight.status, 200); assert.equal(preflight.payload.preflightProviderExecutions, 0);
     assert.deepEqual(calls.map(([name]) => name), ['preflight'], 'preflight must not create or start production');
+    const blocked = await post(base, '/api/productions/preflight', { brandId: BRAND_ID, invalid: true });
+    assert.equal(blocked.status, 409); assert.equal(blocked.payload.error.details.providerExecutions, 0);
+    assert.equal(blocked.payload.error.details.validation.checks[0].code, 'voice_copy_integrity');
     const created = await post(base, '/api/productions', { request: { brandId: BRAND_ID }, preflightId: 'fingerprint' });
     assert.equal(created.status, 201); assert.equal(created.payload.jobStatus, 'QUEUED');
     const started = await post(base, `/api/productions/${PRODUCTION_ID}/start`, { brandId: BRAND_ID, confirmation: true });
@@ -51,7 +61,7 @@ async function main() {
     assert.equal(shotRegenerated.status, 202); assert.equal(shotRegenerated.payload.publicationTriggered, false);
     const added = await post(base, '/api/provider-models', { brandId: BRAND_ID, provider: 'fal', modelId: 'acme/video', preset: 'VIDEO_STANDARD' });
     assert.equal(added.status, 201); assert.equal(added.payload.modelId, 'acme/video');
-    assert.deepEqual(calls.map(([name]) => name), ['preflight','create','start','retry','regenerate','shot-preflight','shot-regenerate','add-model']);
+    assert.deepEqual(calls.map(([name]) => name), ['preflight','preflight','create','start','retry','regenerate','shot-preflight','shot-regenerate','add-model']);
     console.log('V2.7 Control API production command routes passed (zero provider calls).');
   } finally { await new Promise((resolve) => server.close(resolve)); }
 }

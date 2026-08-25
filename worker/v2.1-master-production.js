@@ -4,15 +4,24 @@ const crypto = require('node:crypto');
 const { validateShape } = require('./v2.1-structured-production');
 const { generateMediaAsset } = require('./v2.1-media-generation');
 const { buildTimeline, assembleMedia } = require('./v2.1-timeline-assembly');
+const { containsSemanticSegment, normalizeSpokenCopy, semanticCopyEqual,
+  semanticSegmentsEqual } = require('../src/v2.8.1/spoken-copy-contract');
 
-const DEFAULT_QUALITY_POLICY = Object.freeze({
+const FINAL_MASTER_DELIVERY_PROFILE = Object.freeze({
   width: 1080,
   height: 1920,
   fps: 30,
+});
+
+const DEFAULT_QUALITY_POLICY = Object.freeze({
+  ...FINAL_MASTER_DELIVERY_PROFILE,
   durationToleranceMs: 1000,
   requireHook: true,
   requireCta: true,
   requireVoiceForSpokenCopy: true,
+  requireAudio: true,
+  requireProviderCompatibility: false,
+  requireVoiceTimingPlan: false,
 });
 
 function requireValue(name, value) {
@@ -116,54 +125,139 @@ function buildMasterTimeline({ productionId, script, shotPlan, assetPlan, fps = 
   return buildTimeline({ productionId, clips, fps });
 }
 
-function validateMasterQuality({ script, shotPlan, assetPlan, timeline, probe, policy = {} } = {}) {
+function qualityResult(checks, validationClass) {
+  const status = checks.some((check) => check.status === 'FAIL') ? 'FAIL' : 'PASS';
+  return Object.freeze({
+    status,
+    score: Number((checks.filter((check) => check.status === 'PASS').length / checks.length).toFixed(3)),
+    validationClass,
+    checks: Object.freeze(checks),
+    readyForHumanReview: validationClass === 'COMBINED' && status === 'PASS',
+    publicationAllowed: false,
+    approvalStatus: validationClass === 'COMBINED'
+      ? (status === 'PASS' ? 'AWAITING_HUMAN_APPROVAL' : 'BLOCKED')
+      : 'NOT_APPLICABLE',
+  });
+}
+
+function validationCheck(code, ok, message, actual, expected, details = {}) {
+  return Object.freeze({ code, status: ok ? 'PASS' : 'FAIL', message,
+    details: Object.freeze({ actual, expected, ...details }) });
+}
+
+function validatePreExecutionQuality({ productionId = 'preflight', script, shotPlan, assetPlan, policy = {} } = {}) {
   const settings = { ...DEFAULT_QUALITY_POLICY, ...policy };
   const checks = [];
-  const add = (code, ok, message, details = {}) => checks.push({ code, status: ok ? 'PASS' : 'FAIL', message, details });
-  const dialogue = script.scenes.map((scene) => String(scene.dialogue_or_voiceover || '')).join(' ').trim();
-  const normalizeCopy = (value) => String(value || '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-  const normalizedDialogue = normalizeCopy(dialogue);
-  const firstSceneCopy = normalizeCopy(script.scenes[0]?.dialogue_or_voiceover);
-  const normalizedHook = normalizeCopy(script.hook);
-  const normalizedCta = normalizeCopy(script.cta);
-  const voiceCopy = normalizeCopy(assetPlan.assets.filter((asset) => asset.kind === 'voice')
-    .map((asset) => asset.generation_requirements?.text || '').join(' '));
-  const hasVoiceAsset = assetPlan.assets.some((asset) => asset.kind === 'voice');
-  const visualClips = timeline.clips.filter((clip) => clip.track === 'video-main').sort((a, b) => a.startMs - b.startMs);
-  const visualCoverage = visualClips.length === shotPlan.shots.length && visualClips.every((clip, index) => (
-    clip.startMs === (index === 0 ? 0 : visualClips[index - 1].endMs)
-  ));
-
+  const add = (code, ok, message, actual, expected, details) => {
+    checks.push(validationCheck(code, ok, message, actual, expected, details));
+  };
+  const sceneCopy = script.scenes.map((scene) => String(scene.dialogue_or_voiceover || ''));
+  const legacySceneCopy = sceneCopy.filter(Boolean).join(' ');
+  const approvedCopy = String(script.approved_spoken_copy || legacySceneCopy).trim();
+  const normalizedApproved = normalizeSpokenCopy(approvedCopy);
+  const normalizedScenes = sceneCopy.map(normalizeSpokenCopy);
+  const voiceAssets = assetPlan.assets.filter((asset) => asset.kind === 'voice');
+  const plannedVoiceCopy = voiceAssets.map((asset) => asset.generation_requirements?.text || '').join(' ').trim();
+  const strictApprovedCopy = policy.strictApprovedCopy ?? script.spoken_copy_policy?.strict_approved_copy ?? true;
+  const sceneIds = new Set(script.scenes.map((scene) => String(scene.scene_number)));
+  const shotIds = new Set(shotPlan.shots.map((shot) => String(shot.shot_id)));
+  const assets = new Map(assetPlan.assets.map((asset) => [String(asset.asset_id), asset]));
+  const shotSceneReferences = shotPlan.shots.every((shot) => sceneIds.has(String(shot.scene_id)));
+  const requiredAssetReferences = shotPlan.shots.every((shot) => shot.required_assets.every((id) => assets.has(String(id))))
+    && assetPlan.assets.every((asset) => asset.required_for_shots.every((id) => shotIds.has(String(id))));
+  const masterStructure = shotPlan.shots.every((shot) => {
+    const visualCount = shot.required_assets.map((id) => assets.get(String(id)))
+      .filter((asset) => asset && ['image','video'].includes(asset.kind)).length;
+    return visualCount === 1;
+  });
   const sceneTiming = script.scenes.every((scene) => {
     const planned = shotPlan.shots.filter((shot) => String(shot.scene_id) === String(scene.scene_number))
       .reduce((sum, shot) => sum + Number(shot.duration_seconds) * 1000, 0);
     return Math.abs(planned - Number(scene.duration_seconds) * 1000) <= 250;
   });
-
-  add('editorial_hook', !settings.requireHook || Boolean(normalizedHook), 'Сценарий содержит явный хук.');
-  add('hook_delivery', !settings.requireHook || (normalizedHook && firstSceneCopy.includes(normalizedHook)), 'Хук присутствует в первой сцене.');
-  add('editorial_cta', !settings.requireCta || Boolean(normalizedCta), 'Сценарий содержит явный CTA.');
-  add('cta_delivery', !settings.requireCta || (normalizedCta && normalizedDialogue.includes(normalizedCta)), 'CTA присутствует в озвучиваемом тексте.');
-  add('spoken_copy_voice', !settings.requireVoiceForSpokenCopy || !dialogue || hasVoiceAsset, 'Для озвучиваемого текста предусмотрен voice-asset.');
-  add('voice_copy_integrity', !settings.requireVoiceForSpokenCopy || !dialogue || voiceCopy.includes(normalizedDialogue), 'Voice-asset содержит утверждённый текст сценария.');
-  add('scene_timing', sceneTiming, 'Тайминг шотов соответствует сценарию.');
-  add('visual_coverage', visualCoverage && visualClips.at(-1)?.endMs === timeline.durationMs, 'Каждый шот имеет непрерывное визуальное покрытие.');
-  add('continuity', Boolean(String(shotPlan.continuity?.visual_style || '').trim()), 'Зафиксирован визуальный стиль и continuity.');
-  add('resolution', probe.width === settings.width && probe.height === settings.height, 'Мастер соответствует целевому разрешению.', { actual: `${probe.width}x${probe.height}`, expected: `${settings.width}x${settings.height}` });
-  add('frame_rate', Math.abs(probe.fps - settings.fps) < 0.1, 'Мастер соответствует целевой частоте кадров.', { actual: probe.fps, expected: settings.fps });
-  add('duration', Math.abs(probe.durationMs - timeline.durationMs) <= settings.durationToleranceMs, 'Длительность мастера соответствует таймлайну.', { actualMs: probe.durationMs, expectedMs: timeline.durationMs });
-  add('video_codec', Boolean(probe.videoCodec), 'Мастер содержит видеопоток.');
-  add('audio_track', probe.hasAudio, 'Мастер содержит аудиодорожку.');
-
-  const status = checks.some((check) => check.status === 'FAIL') ? 'FAIL' : 'PASS';
-  return Object.freeze({
-    status,
-    score: Number((checks.filter((check) => check.status === 'PASS').length / checks.length).toFixed(3)),
-    checks: Object.freeze(checks),
-    readyForHumanReview: status === 'PASS',
-    publicationAllowed: false,
-    approvalStatus: 'AWAITING_HUMAN_APPROVAL',
+  const plannedDurationMs = shotPlan.shots.reduce((sum, shot) => sum + Math.round(Number(shot.duration_seconds) * 1000), 0);
+  const voiceTimingPlan = voiceAssets.every((asset) => {
+    const temporal = asset.generation_requirements?.temporal;
+    return temporal && Number(temporal.startMs) === 0
+      && Math.abs(Number(temporal.durationMs) - plannedDurationMs) <= 250
+      && Math.abs(Number(temporal.endMs) - plannedDurationMs) <= 250;
   });
+  let timelineError = null;
+  try { buildMasterTimeline({ productionId, script, shotPlan, assetPlan, fps: settings.fps }); }
+  catch (error) { timelineError = error; }
+  const providerPlanValid = assetPlan.assets.filter((asset) => asset.source_preference === 'generate').every((asset) => {
+    const requirements = asset.generation_requirements || {};
+    const providerModel = typeof requirements.provider === 'string' && requirements.provider.trim()
+      && typeof requirements.model === 'string' && requirements.model.trim();
+    return Boolean(providerModel && (asset.kind !== 'video' || (
+      typeof requirements.profile === 'string' && requirements.profile.trim()
+      && typeof requirements.capability === 'string' && requirements.capability.trim()
+      && typeof requirements.aspect_ratio === 'string' && requirements.aspect_ratio.trim()
+      && typeof requirements.resolution === 'string' && requirements.resolution.trim()
+    )));
+  });
+
+  add('approved_spoken_copy', Boolean(normalizedApproved), 'Approved spoken copy is present.', normalizedApproved, 'non-empty canonical token sequence');
+  add('editorial_hook', !settings.requireHook || containsSemanticSegment(approvedCopy, script.hook),
+    'The required hook is present in approved spoken copy.', normalizeSpokenCopy(script.hook), 'ordered segment of approved_spoken_copy');
+  add('editorial_cta', !settings.requireCta || containsSemanticSegment(approvedCopy, script.cta),
+    'The required CTA is present in approved spoken copy.', normalizeSpokenCopy(script.cta), 'ordered segment of approved_spoken_copy');
+  add('scene_copy_distribution', semanticSegmentsEqual(sceneCopy, approvedCopy),
+    'Ordered scene spoken-copy segments preserve the approved narrative.', normalizedScenes, normalizedApproved);
+  add('spoken_copy_voice', !settings.requireVoiceForSpokenCopy || !normalizedApproved || voiceAssets.length === 1,
+    'Exactly one voice asset is planned when approved spoken copy requires speech.', voiceAssets.length, settings.requireVoiceForSpokenCopy ? 1 : 'not required');
+  add('voice_copy_integrity', !settings.requireVoiceForSpokenCopy || !normalizedApproved
+    || (strictApprovedCopy ? semanticCopyEqual(plannedVoiceCopy, approvedCopy)
+      : containsSemanticSegment(plannedVoiceCopy, approvedCopy)),
+    'Planned speech text matches authoritative approved spoken copy.', normalizeSpokenCopy(plannedVoiceCopy), normalizedApproved,
+    { strictApprovedCopy });
+  add('shot_scene_references', shotSceneReferences, 'Every shot references a known scene.', shotSceneReferences, true);
+  add('required_assets', requiredAssetReferences, 'Shot and asset references are complete and bidirectionally valid.', requiredAssetReferences, true);
+  add('scene_timing', sceneTiming, 'Shot timing matches each scene plan.', sceneTiming, true);
+  add('voice_timing_plan', !settings.requireVoiceTimingPlan || !settings.requireVoiceForSpokenCopy || voiceTimingPlan,
+    'Planned voice timing spans the deterministic master timeline.',
+    voiceAssets.map((asset) => asset.generation_requirements?.temporal || null), { startMs: 0, durationMs: plannedDurationMs, endMs: plannedDurationMs });
+  add('expected_master_structure', masterStructure && !timelineError,
+    'The planned master has one visual per shot and a buildable timeline.', timelineError?.message || masterStructure, true);
+  add('continuity', Boolean(String(shotPlan.continuity?.visual_style || '').trim()),
+    'A visual continuity style is defined.', String(shotPlan.continuity?.visual_style || ''), 'non-empty');
+  add('provider_compatibility', !settings.requireProviderCompatibility || providerPlanValid,
+    'Generated assets have compatible explicit provider, model, profile, capability, and format selections.', providerPlanValid, true);
+  add('final_delivery_profile', settings.width > 0 && settings.height > 0 && settings.fps > 0,
+    'Final master delivery settings are explicit and independent of provider source settings.',
+    { width: settings.width, height: settings.height, fps: settings.fps },
+    { width: settings.width, height: settings.height, fps: settings.fps },
+    { canonicalDefault: FINAL_MASTER_DELIVERY_PROFILE });
+  return qualityResult(checks, 'PRE_EXECUTION');
+}
+
+function validatePostRenderQuality({ timeline, probe, policy = {} } = {}) {
+  const settings = { ...DEFAULT_QUALITY_POLICY, ...policy };
+  const checks = [
+    validationCheck('resolution', probe.width === settings.width && probe.height === settings.height,
+      'Final master matches the delivery resolution.', `${probe.width}x${probe.height}`, `${settings.width}x${settings.height}`),
+    validationCheck('frame_rate', Math.abs(probe.fps - settings.fps) < 0.1,
+      'Final master matches the delivery frame rate.', probe.fps, settings.fps),
+    validationCheck('duration', Math.abs(probe.durationMs - timeline.durationMs) <= settings.durationToleranceMs,
+      'Final master duration matches the planned timeline.', probe.durationMs, timeline.durationMs,
+      { toleranceMs: settings.durationToleranceMs }),
+    validationCheck('video_codec', Boolean(probe.videoCodec), 'Final master contains a video stream.', probe.videoCodec || null, 'present'),
+    validationCheck('audio_track', !settings.requireAudio || probe.hasAudio === true,
+      'Final master contains the required audio stream.', probe.hasAudio === true, settings.requireAudio),
+  ];
+  return qualityResult(checks, 'POST_RENDER');
+}
+
+function combineQuality(preExecution, postRender) {
+  const combined = qualityResult([...preExecution.checks, ...postRender.checks], 'COMBINED');
+  return Object.freeze({ ...combined, preExecution, postRender });
+}
+
+function validateMasterQuality({ productionId = 'validation', script, shotPlan, assetPlan, timeline, probe, policy = {} } = {}) {
+  return combineQuality(
+    validatePreExecutionQuality({ productionId, script, shotPlan, assetPlan, policy }),
+    validatePostRenderQuality({ timeline, probe, policy }),
+  );
 }
 
 class MasterProductionOrchestrator {
@@ -185,6 +279,13 @@ class MasterProductionOrchestrator {
     assertBrandScope(brandId, { script, shotPlan, assetPlan });
 
     const settings = { ...DEFAULT_QUALITY_POLICY, ...qualityPolicy };
+    const preExecutionValidation = validatePreExecutionQuality({ productionId, script, shotPlan, assetPlan, policy: settings });
+    if (preExecutionValidation.status !== 'PASS') {
+      const error = new Error('Deterministic master plan validation failed before provider execution');
+      error.code = 'PRE_EXECUTION_VALIDATION_FAILED';
+      error.details = { validation: preExecutionValidation, providerExecutions: 0 };
+      throw error;
+    }
     const timeline = buildMasterTimeline({ productionId, script, shotPlan, assetPlan, fps: settings.fps });
     const reusable = new Map(resolvedMedia.map((media) => [String(media.assetId), media]));
     const mediaResults = [];
@@ -299,7 +400,8 @@ class MasterProductionOrchestrator {
       durationMs: timeline.durationMs, durationToleranceMs: settings.durationToleranceMs,
       requireAudio: true,
     }) : null;
-    const quality = validateMasterQuality({ script, shotPlan, assetPlan, timeline, probe: rendered.probe, policy: settings });
+    const postRenderValidation = validatePostRenderQuality({ timeline, probe: rendered.probe, policy: settings });
+    const quality = combineQuality(preExecutionValidation, postRenderValidation);
     const fingerprint = canonicalFingerprint({ brandId, productionId, script, shotPlan, assetPlan, settings });
     const artifact = await this.artifactService.createVersion({
       artifactId: `production:${productionId}:master`,
@@ -338,10 +440,14 @@ class MasterProductionOrchestrator {
 
 module.exports = {
   DEFAULT_QUALITY_POLICY,
+  FINAL_MASTER_DELIVERY_PROFILE,
   MasterProductionOrchestrator,
   assertBrandScope,
   buildMasterTimeline,
   canonicalFingerprint,
+  combineQuality,
   contentTypeForKind,
   validateMasterQuality,
+  validatePostRenderQuality,
+  validatePreExecutionQuality,
 };
