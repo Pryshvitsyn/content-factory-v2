@@ -52,7 +52,7 @@ function progressFor(item) {
 }
 
 class ControlService {
-  constructor({ repository, reviewService, commandService = null, storage, providers, actor = 'local-operator' } = {}) {
+  constructor({ repository, reviewService, commandService = null, storage, providers, providerCatalog = null, actor = 'local-operator' } = {}) {
     if (!repository) throw new Error('repository is required');
     if (!reviewService) throw new Error('reviewService is required');
     if (!storage) throw new Error('storage is required');
@@ -61,12 +61,22 @@ class ControlService {
     this.commandService = commandService;
     this.storage = storage;
     this.providers = providers || [];
+    this.providerCatalog = providerCatalog;
     this.actor = actor;
   }
 
   async health() { return { status: 'ok', database: await this.repository.health() }; }
   async overview() { return this.repository.overview(); }
   async listBrands() { return this.repository.listBrands(); }
+  async listProviders() { return this.providerCatalog ? this.providerCatalog.snapshot() : this.providers; }
+
+  async addProviderModel({ brandId, provider, modelId, displayName, preset }) {
+    if (!this.providerCatalog) throw new ControlError(503, 'CATALOG_PERSISTENCE_UNAVAILABLE', 'Provider catalog is unavailable');
+    const brand = await this.repository.getBrand(requiredUuid('brandId', brandId));
+    if (!brand?.workspaceId) throw new ControlError(404, 'BRAND_NOT_FOUND', 'Active brand workspace was not found');
+    try { return await this.providerCatalog.addModel({ workspaceId: brand.workspaceId, provider, modelId, displayName, preset }); }
+    catch (error) { if (error.status) throw new ControlError(error.status, error.code, error.message); throw error; }
+  }
 
   async getBrand(brandId) {
     const item = await this.repository.getBrand(requiredUuid('brandId', brandId));

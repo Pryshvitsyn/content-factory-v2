@@ -43,7 +43,7 @@ function Overview({ navigate }) {
       <Section title="Recent productions">{productions.length ? productions.slice(0, 6).map((item, index) => <button className="row-button" key={item.id || `recent-${index}`} onClick={() => navigate('Productions', item)}><span><strong>{item.title || item.name}</strong><small>{item.brandName} · {formatDate(item.createdAt)}</small></span><Badge value={item.operationalStatus || item.status} /></button>) : <Empty text="No productions yet." />}</Section>
       <Section title="Needs attention">{productions.filter((item) => ['FAILED','FAILED_RETRYABLE'].includes(item.operationalStatus)).length ? productions.filter((item) => ['FAILED','FAILED_RETRYABLE'].includes(item.operationalStatus)).slice(0, 5).map((item) => <p key={item.id}>{item.title} · <Badge value={item.operationalStatus} /></p>) : <Empty text="No failed productions." />}</Section>
       <Section title="Review queue">{reviews.length ? reviews.slice(0, 4).map((item, index) => <p key={item.id || `review-${index}`}>{item.brandName} · {item.productionName}</p>) : <Empty text="Nothing awaiting review." />}</Section>
-      <Section title="Renderer availability">{providers.filter((item) => item.mode).map((item) => <p key={`${item.mode}-${item.capability}`}>{item.mode} · {item.provider} <Badge value={item.availability} /></p>)}</Section>
+      <Section title="Provider availability">{providers.slice(0, 7).map((item, index) => <p key={item.id || `${item.provider}-${index}`}>{item.displayName || item.provider} <Badge value={item.availability} /></p>)}</Section>
     </div>
   </>}</State></Page>;
 }
@@ -52,6 +52,7 @@ export function NewProduction({ onCreated = () => {} }) {
   const catalog = useLoad(() => Promise.all([api('/api/brands'), api('/api/providers')]).then(([brands, providers]) => ({ brands, providers })));
   const [requestId] = useState(commandId);
   const [form, setForm] = useState({ requestId, brandId: '', renderMode: 'FAST', title: '', objective: 'ENGAGEMENT',
+    provider: '', model: '', profile: '',
     platform: 'Instagram Reels', targetDurationSeconds: 15, aspectRatio: '9:16', hook: '', coreMessage: '', creativeBrief: '', cta: '',
     voiceover: '', sceneIdeas: '', visualDirection: '', captionsEnabled: true, musicEnabled: false,
     audience: '', campaign: '', additionalInstructions: '' });
@@ -88,16 +89,43 @@ export function NewProduction({ onCreated = () => {} }) {
     <p className="page-note">Choose a brand and renderer, describe the creative, then preflight. Preflight never starts production.</p>
     {error ? <div className="error-panel">{error}</div> : null}
     <State state={catalog}>{({ brands, providers }) => {
-      const fastReady = providers.some((item) => item.capability === 'FAST RENDERER' && item.configured);
-      const qualityReady = providers.some((item) => item.capability === 'VIDEO' && item.provider === 'Replicate' && item.configured)
-        && providers.some((item) => item.capability === 'SPEECH' && item.configured);
+      const catalogProviders = providers.filter((item) => item.id && Array.isArray(item.models));
+      const fastReady = providers.some((item) => (item.id === 'moneyprinterturbo' || item.capability === 'FAST RENDERER') && item.configured);
+      const speechReady = catalogProviders.length ? providers.some((item) => item.id === 'openai' && item.configured)
+        : providers.some((item) => item.capability === 'SPEECH' && item.configured);
+      const qualityProviders = catalogProviders.filter((item) => item.configured
+        && item.models.some((model) => model.capabilities?.includes('TEXT_TO_VIDEO') && model.selectable !== false));
+      const qualityReady = catalogProviders.length ? qualityProviders.length > 0 && speechReady
+        : providers.some((item) => item.capability === 'VIDEO' && item.provider === 'Replicate' && item.configured) && speechReady;
+      const selectedProvider = catalogProviders.find((item) => item.id === form.provider);
+      const selectedModels = (selectedProvider?.models || []).filter((model) => model.capabilities?.includes('TEXT_TO_VIDEO'));
+      const selectedModel = selectedModels.find((model) => model.modelId === form.model);
+      const selectedProfiles = Object.keys(selectedModel?.profiles || {});
+      const selectQuality = () => {
+        const route = qualityProviders[0]; const model = route?.models.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
+        setForm((current) => ({ ...current, renderMode: 'QUALITY', captionsEnabled: false,
+          provider: current.provider || route?.id || '', model: current.model || model?.modelId || '',
+          profile: current.profile || Object.keys(model?.profiles || {})[0] || '' })); setPreflight(null);
+      };
       return <form className="production-form" onSubmit={prepare}>
         <Section title="1 · Production route">
           <label>Brand<select aria-label="Brand" required value={form.brandId} onChange={(event) => change('brandId', event.target.value)}><option value="">Choose a canonical brand</option>{brands.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <div className="mode-grid">
             <ModeCard mode="FAST" selected={form.renderMode === 'FAST'} available={fastReady} onSelect={() => change('renderMode', 'FAST')} description="Best for high-volume, stock/template-based social creative." unavailable="MoneyPrinterTurbo is not configured" />
-            <ModeCard mode="QUALITY" selected={form.renderMode === 'QUALITY'} available={qualityReady} onSelect={() => { change('renderMode', 'QUALITY'); change('captionsEnabled', false); }} description="AI-generated visual production for premium creative and more visual control." unavailable="Replicate video or OpenAI speech is not configured" />
+            <ModeCard mode="QUALITY" selected={form.renderMode === 'QUALITY'} available={qualityReady} onSelect={selectQuality} description="AI-generated visual production with an explicit provider, model, and profile." unavailable="No configured production video route or speech provider" />
           </div>
+          {form.renderMode === 'QUALITY' && catalogProviders.length ? <div className="form-grid routing-fields">
+            <label>Provider<select aria-label="Provider" required value={form.provider} onChange={(event) => {
+              const route = catalogProviders.find((item) => item.id === event.target.value);
+              const model = route?.models.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
+              setForm((current) => ({ ...current, provider: event.target.value, model: model?.modelId || '', profile: Object.keys(model?.profiles || {})[0] || '' })); setPreflight(null);
+            }}><option value="">Choose provider</option>{qualityProviders.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label>
+            <label>Model<select aria-label="Model" required value={form.model} onChange={(event) => {
+              const model = selectedModels.find((item) => item.modelId === event.target.value);
+              setForm((current) => ({ ...current, model: event.target.value, profile: Object.keys(model?.profiles || {})[0] || '' })); setPreflight(null);
+            }}><option value="">Choose model</option>{selectedModels.filter((item) => item.selectable !== false).map((item) => <option key={item.modelId} value={item.modelId}>{item.displayName}</option>)}</select></label>
+            <label>Profile<select aria-label="Profile" required value={form.profile} onChange={(event) => change('profile', event.target.value)}><option value="">Choose profile</option>{selectedProfiles.map((name) => <option key={name}>{name}</option>)}</select></label>
+          </div> : null}
           {brand ? <div className="brand-context"><strong>{brand.name} Brand Brain</strong><span>{brand.positioning || brand.mission || 'No Brand Brain context recorded. Operator brief remains authoritative.'}</span></div> : null}
         </Section>
         <Section title="2 · Creative brief"><div className="form-grid">
@@ -131,7 +159,7 @@ function ModeCard({ mode, selected, available, onSelect, description, unavailabl
 
 function Preflight({ plan, onStart, busy }) {
   return <section className="preflight"><span className="eyebrow">PREFLIGHT READY · PROVIDER EXECUTIONS 0</span><h2>Ready to start</h2><div className="plan-grid">
-    <KeyValue label="Brand" value={plan.brand} /><KeyValue label="Production" value={plan.production} /><KeyValue label="Mode / renderer" value={`${plan.renderMode} · ${plan.renderer}`} /><KeyValue label="Provider / model" value={[plan.provider, plan.model].filter(Boolean).join(' · ')} /><KeyValue label="Resolution / quality" value={[plan.resolution, plan.qualityMode].filter(Boolean).join(' · ')} /><KeyValue label="Prompt optimization" value={plan.promptOptimization == null ? 'N/A' : plan.promptOptimization ? 'ENABLED' : 'DISABLED'} /><KeyValue label="Platform" value={plan.targetPlatform} /><KeyValue label="Master" value={`${plan.targetDurationSeconds} sec · ${plan.aspectRatio}`} /><KeyValue label="Expected generations" value={`${plan.expectedVideoGenerations} video · ${plan.expectedAudioGenerations} audio`} /><KeyValue label="External executions" value={String(plan.expectedExternalExecutions)} /><KeyValue label="Estimated cost" value={plan.estimatedCost ?? 'UNKNOWN'} /><KeyValue label="Renderer" value={plan.rendererStatus} /><KeyValue label="Schema" value={plan.schemaStatus} /><KeyValue label="Human approval" value={plan.humanApprovalRequired ? 'REQUIRED' : 'NO'} /><KeyValue label="Auto publish" value="NO" />
+    <KeyValue label="Brand" value={plan.brand} /><KeyValue label="Production" value={plan.production} /><KeyValue label="Mode / renderer" value={`${plan.renderMode} · ${plan.renderer}`} /><KeyValue label="Provider / model" value={[plan.provider, plan.vendor, plan.model].filter(Boolean).join(' · ')} /><KeyValue label="Profile / capability" value={[plan.profile, plan.capability].filter(Boolean).join(' · ')} /><KeyValue label="Resolution / quality" value={[plan.resolution, plan.qualityMode].filter(Boolean).join(' · ')} /><KeyValue label="Configuration" value={plan.configurationStatus} /><KeyValue label="Prompt optimization" value={plan.promptOptimization == null ? 'N/A' : plan.promptOptimization ? 'ENABLED' : 'DISABLED'} /><KeyValue label="Platform" value={plan.targetPlatform} /><KeyValue label="Master" value={`${plan.targetDurationSeconds} sec · ${plan.aspectRatio}`} /><KeyValue label="Expected generations" value={`${plan.expectedVideoGenerations} video · ${plan.expectedAudioGenerations} audio`} /><KeyValue label="External executions" value={String(plan.expectedExternalExecutions)} /><KeyValue label="Estimated cost" value={plan.estimatedCost ?? 'UNKNOWN'} /><KeyValue label="Renderer" value={plan.rendererStatus} /><KeyValue label="Schema" value={plan.schemaStatus} /><KeyValue label="Human approval" value={plan.humanApprovalRequired ? 'REQUIRED' : 'NO'} /><KeyValue label="Auto publish" value="NO" />
   </div><p className="boundary">Starting may cross an external cost boundary. Approval of the final master will not publish it.</p><button className="start" type="button" disabled={busy} onClick={onStart}>{busy ? 'STARTING…' : 'START PRODUCTION'}</button></section>;
 }
 
@@ -195,9 +223,27 @@ export function ReviewQueue() {
   return <Page title="Review Queue" eyebrow="EXACT IMMUTABLE MASTER"><p className="page-note">Approval applies only to the exact master shown. APPROVE never publishes.</p>{error ? <div className="error-panel">{error}</div> : null}<State state={state}>{(items) => items.length ? <div className="review-grid">{items.map((item) => <article className="review-card" key={item.id}><video controls preload="metadata" src={artifactUrl({ ...item, sourceId: item.id, version: item.artifactVersion })} /><div className="review-body"><div className="detail-head"><div><span className="eyebrow">{item.brandName}</span><h2>{item.productionName}</h2></div><Badge value="AWAITING_HUMAN_APPROVAL" /></div><code>{item.artifactId} · v{item.artifactVersion}</code><div className="review-copy"><KeyValue label="Hook" value={item.reviewPayload?.hook} /><KeyValue label="CTA" value={item.reviewPayload?.cta} /><KeyValue label="Duration" value={item.reviewPayload?.durationMs ? `${item.reviewPayload.durationMs / 1000}s` : null} /><KeyValue label="Quality" value={`${item.validationEvidence?.status || item.validationStatus} · ${item.validationEvidence?.score ?? 'n/a'}`} /><KeyValue label="Mode" value={item.renderMode} /><KeyValue label="Renderer" value={`${item.renderer} · ${item.rendererStatus}`} /><KeyValue label="Publication" value={item.publicationStatus || 'NOT TRIGGERED'} /><KeyValue label="Master media" value={`${item.reviewPayload?.width || '?'}×${item.reviewPayload?.height || '?'} · ${item.reviewPayload?.videoCodec || 'video n/a'} / ${item.reviewPayload?.audioCodec || 'audio n/a'}`} /></div><Collection title="Generated assets" items={item.generatedAssets} render={(asset) => `${asset.kind} · ${asset.assetId} · ${asset.provider || 'provider n/a'} / ${asset.model || 'model n/a'}${asset.durationMs ? ` · ${asset.durationMs / 1000}s` : ''}`} /><details><summary>Validation & provenance</summary><pre>{JSON.stringify({ checks: item.reviewPayload?.technicalValidation, provenance: item.provenance, assets: item.generatedAssets }, null, 2)}</pre></details><div className="actions"><button className="approve" disabled={busy === item.id} onClick={() => decide(item, 'approve')}>APPROVE</button><button className="reject" disabled={busy === item.id} onClick={() => decide(item, 'reject')}>REJECT</button><button className="regenerate" disabled={busy === item.id || item.commandAvailable === false} title={item.commandAvailable === false ? 'Regeneration is available for V2.7 operator productions only' : 'Create a new immutable production'} onClick={() => regenerate(item)}>REGENERATE</button></div></div></article>)}</div> : <Empty text="No validated masters are awaiting human review." />}</State></Page>;
 }
 
-function Providers() {
-  const state = useLoad(() => api('/api/providers'));
-  return <Page title="Providers / Renderers" eyebrow="OBSERVATIONAL · NO GENERATION PROBES"><Section title="Capability routing"><State state={state}>{(items) => <div className="provider-grid">{items.map((item) => <article className="provider" key={`${item.capability}-${item.provider}`}><span className="eyebrow">{item.mode || item.capability}</span><h2>{item.provider}</h2><code>{item.model || 'No configured model'}</code><div><Badge value={item.availability} /> {item.route ? <span className="route">{item.route}</span> : null}</div>{item.publication ? <small>{item.publication}</small> : null}</article>)}</div>}</State></Section></Page>;
+export function Providers() {
+  const [revision, setRevision] = useState(0);
+  const state = useLoad(() => Promise.all([api('/api/providers'), api('/api/brands')]).then(([providers, brands]) => ({ providers, brands })), [revision]);
+  const [form, setForm] = useState({ brandId: '', provider: 'fal', modelId: '', displayName: '', preset: 'VIDEO_STANDARD' });
+  const [message, setMessage] = useState(null);
+  async function addModel(event) {
+    event.preventDefault(); setMessage(null);
+    try { await api('/api/provider-models', { method: 'POST', body: JSON.stringify(form) }); setMessage('Model registered as EXPERIMENTAL. Explicit enablement is required before paid use.'); setRevision((value) => value + 1); }
+    catch (error) { setMessage(error.message); }
+  }
+  return <Page title="Providers / Models" eyebrow="CATALOG · NO GENERATION PROBES"><State state={state}>{({ providers, brands }) => <>
+    <Section title="Provider catalog"><div className="provider-grid">{providers.map((item, index) => <article className="provider" key={item.id || `${item.capability}-${index}`}><span className="eyebrow">{item.type || item.mode || item.capability}</span><h2>{item.displayName || item.provider}</h2><div><Badge value={item.availability} /> <Badge value={item.credentialStatus || (item.configured ? 'CONFIGURED' : 'NOT_CONFIGURED')} /></div>{item.models ? <><small>{item.modelCount} registered models</small><p>{item.capabilities.join(' · ') || 'No capabilities'}</p><details><summary>Models</summary>{item.models.map((model) => <p key={model.modelId}><strong>{model.displayName}</strong><br/><code>{model.vendor} / {model.modelId}</code><br/>{Object.keys(model.profiles || {}).join(' · ')} {model.experimental ? <Badge value="EXPERIMENTAL" /> : null}</p>)}</details></> : <code>{item.model || 'No configured model'}</code>}</article>)}</div></Section>
+    <Section title="Add compatible aggregator model"><form className="form-grid" onSubmit={addModel}>
+      <label>Brand workspace<select aria-label="Model workspace brand" required value={form.brandId} onChange={(event) => setForm({ ...form, brandId: event.target.value })}><option value="">Choose brand scope</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></label>
+      <label>Provider<select aria-label="Model provider" value={form.provider} onChange={(event) => setForm({ ...form, provider: event.target.value })}><option value="fal">fal.ai</option><option value="replicate">Replicate</option></select></label>
+      <Field label="Model ID" name="modelId" value={form.modelId} change={(name, value) => setForm({ ...form, [name]: value })} required />
+      <label>Preset<select aria-label="Model preset" value={form.preset} onChange={(event) => setForm({ ...form, preset: event.target.value })}><option>VIDEO_STANDARD</option><option>VIDEO_T2V_I2V</option></select></label>
+      <Field label="Display name" name="displayName" value={form.displayName} change={(name, value) => setForm({ ...form, [name]: value })} />
+      <button className="primary" type="submit">ADD MODEL</button>{message ? <div className="notice">{message}</div> : null}
+    </form></Section>
+  </>}</State></Page>;
 }
 
 function Field({ label, name, value, change, required: isRequired = false }) { return <label>{label}<input aria-label={label} name={name} value={value} required={isRequired} onChange={(event) => change(name, event.target.value)} /></label>; }

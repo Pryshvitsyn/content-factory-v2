@@ -44,4 +44,33 @@ function resolveQualityVideoProfile(env = process.env) {
   return Object.freeze(profile);
 }
 
-module.exports = { LEGACY_FAST_MODEL, QualityProfileError, resolveQualityVideoProfile };
+function qualityProfileFromSelection(selection) {
+  if (!selection?.provider || !selection.model || !selection.profile) {
+    throw new QualityProfileError('QUALITY_PROFILE_INVALID', 'Resolved provider, model, and profile are required');
+  }
+  const settings = selection.resolvedSettings || {};
+  const profile = {
+    name: selection.profile,
+    provider: selection.provider,
+    vendor: selection.vendor || null,
+    model: selection.model,
+    modelVersion: selection.modelVersion || null,
+    capability: selection.capability || 'TEXT_TO_VIDEO',
+    adapterFamily: selection.adapterFamily,
+    resolution: settings.resolution || '720p',
+    numFrames: Number(settings.numFrames || 121),
+    framesPerSecond: Number(settings.framesPerSecond || 24),
+    goFast: settings.goFast === true,
+    optimizePrompt: settings.promptOptimization ?? settings.optimizePrompt ?? true,
+    interpolateOutput: settings.interpolateOutput ?? false,
+    sampleShift: Number(settings.sampleShift || 12),
+    seedStrategy: settings.seedStrategy || 'per-shot-deterministic',
+    resolvedSettings: Object.freeze({ ...settings }),
+  };
+  if (!Number.isInteger(profile.numFrames) || !Number.isInteger(profile.framesPerSecond)) {
+    throw new QualityProfileError('QUALITY_PROFILE_INVALID', 'Resolved frame settings must be integers');
+  }
+  return Object.freeze(profile);
+}
+
+module.exports = { LEGACY_FAST_MODEL, QualityProfileError, resolveQualityVideoProfile, qualityProfileFromSelection };

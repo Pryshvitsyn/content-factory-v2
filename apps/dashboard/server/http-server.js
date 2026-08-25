@@ -78,7 +78,12 @@ function createControlServer({ service, logger = console } = {}) {
         const body = await readJson(request);
         return json(response, 200, await service.decide({ reviewItemId: segments[2], brandId: body.brandId, decision: segments[3], reason: body.reason }));
       }
-      if (request.method === 'GET' && url.pathname === '/api/providers') return json(response, 200, service.providers);
+      if (request.method === 'GET' && url.pathname === '/api/providers') {
+        return json(response, 200, typeof service.listProviders === 'function' ? await service.listProviders() : service.providers);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/provider-models') {
+        return json(response, 201, await service.addProviderModel(await readJson(request)));
+      }
       if (request.method === 'GET' && segments[0] === 'api' && segments[1] === 'artifacts' && segments[3] === 'versions' && segments[5] === 'content' && segments.length === 6) {
         const content = await service.artifactContent({ sourceId: url.searchParams.get('sourceId'), artifactId: segments[2], version: segments[4], brandId: url.searchParams.get('brandId') });
         response.writeHead(200, { 'Content-Type': content.contentType, 'Content-Length': content.bytes.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });

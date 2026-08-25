@@ -85,6 +85,11 @@ function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
   const profile = {
     provider: renderMode === 'FAST' ? 'fast-render-plan' : video.provider || 'replicate',
     model: renderMode === 'FAST' ? null : video.model || DEFAULT_VIDEO_MODEL,
+    vendor: renderMode === 'FAST' ? null : optionalText(video.vendor),
+    modelVersion: renderMode === 'FAST' ? null : optionalText(video.model_version),
+    profileName: renderMode === 'FAST' ? null : optionalText(video.profile) || 'STANDARD',
+    capability: renderMode === 'FAST' ? 'FAST_RENDER' : optionalText(video.capability) || 'TEXT_TO_VIDEO',
+    resolvedSettings: renderMode === 'FAST' ? {} : { ...(video.resolved_settings || {}) },
     prompt: text('shot.video.prompt', video.prompt),
     resolution: video.resolution || '480p',
     aspectRatio: video.aspect_ratio || aspectRatio,
@@ -96,12 +101,12 @@ function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
     optimizePrompt: video.optimize_prompt,
     interpolateOutput: video.interpolate_output,
   };
-  if (renderMode === 'QUALITY' && profile.provider !== 'replicate') throw new ProductionInputError('shot.video.provider must currently be replicate');
+  if (renderMode === 'QUALITY' && !KEY_PATTERN.test(profile.provider)) throw new ProductionInputError('shot.video.provider is invalid');
   if (!Number.isInteger(profile.numFrames) || !Number.isInteger(profile.framesPerSecond)) {
     throw new ProductionInputError('shot.video frame settings must be integers');
   }
   if (typeof profile.goFast !== 'boolean') throw new ProductionInputError('shot.video.go_fast must be a boolean');
-  if (renderMode === 'QUALITY') buildWanInput(profile);
+  if (renderMode === 'QUALITY' && profile.provider === 'replicate' && profile.model === DEFAULT_VIDEO_MODEL) buildWanInput(profile);
   return Object.freeze(profile);
 }
 
@@ -229,6 +234,13 @@ function buildProductionInput(raw = {}) {
           role: 'primary_visual',
           provider: profile.provider,
           model: profile.model,
+          vendor: profile.vendor,
+          model_version: profile.modelVersion,
+          profile: profile.profileName,
+          capability: profile.capability,
+          provider_selection: { provider: profile.provider, vendor: profile.vendor, model: profile.model,
+            modelVersion: profile.modelVersion, profile: profile.profileName },
+          resolved_settings: profile.resolvedSettings,
           prompt: continuityPrompt,
           resolution: profile.resolution,
           aspect_ratio: profile.aspectRatio,

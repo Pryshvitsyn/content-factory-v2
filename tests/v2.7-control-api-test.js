@@ -21,6 +21,7 @@ async function main() {
     async regenerateProduction(body) { calls.push(['regenerate', body]); return { productionId: 'new-production', requiresExplicitStart: true }; },
     async preflightShotRegeneration(body) { calls.push(['shot-preflight', body]); return { preflightId: 'shot-fingerprint', expectedProviderCalls: 1, providerCalls: 0 }; },
     async regenerateShot(body) { calls.push(['shot-regenerate', body]); return { regenerationId: 'shot-revision', accepted: true, publicationTriggered: false }; },
+    async addProviderModel(body) { calls.push(['add-model', body]); return { id: 'catalog-model', provider: body.provider, modelId: body.modelId }; },
   };
   const server = createControlServer({ service, logger: { error() {} } });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -48,7 +49,9 @@ async function main() {
       preflightId: 'shot-fingerprint', confirmation: true,
     });
     assert.equal(shotRegenerated.status, 202); assert.equal(shotRegenerated.payload.publicationTriggered, false);
-    assert.deepEqual(calls.map(([name]) => name), ['preflight','create','start','retry','regenerate','shot-preflight','shot-regenerate']);
+    const added = await post(base, '/api/provider-models', { brandId: BRAND_ID, provider: 'fal', modelId: 'acme/video', preset: 'VIDEO_STANDARD' });
+    assert.equal(added.status, 201); assert.equal(added.payload.modelId, 'acme/video');
+    assert.deepEqual(calls.map(([name]) => name), ['preflight','create','start','retry','regenerate','shot-preflight','shot-regenerate','add-model']);
     console.log('V2.7 Control API production command routes passed (zero provider calls).');
   } finally { await new Promise((resolve) => server.close(resolve)); }
 }

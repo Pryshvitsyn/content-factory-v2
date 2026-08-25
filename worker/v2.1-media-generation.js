@@ -1,5 +1,7 @@
 'use strict';
 
+const { fromAsset } = require('../src/v2.8/canonical-media-request');
+
 const CAPABILITIES = Object.freeze({
   image: 'image-generation',
   video: 'video-generation',
@@ -80,6 +82,10 @@ async function generateMediaAsset({ providerGateway, asset, productionId, brandI
 
   const capability = capabilityForAssetKind(asset.kind);
   const requirements = asset.generation_requirements || {};
+  // Certified V2.1 assets may intentionally rely on registry routing and have no
+  // persisted provider/model. V2.8 inputs are explicit and receive the canonical
+  // contract; legacy inputs keep their original request shape unchanged.
+  const canonicalRequest = requirements.provider && requirements.model ? fromAsset(asset) : null;
   const response = await providerGateway.generate({
     capability,
     routeKey: `media:${asset.kind}`,
@@ -87,6 +93,7 @@ async function generateMediaAsset({ providerGateway, asset, productionId, brandI
     model: requirements.model,
     idempotencyKey: `${brandId ? `${brandId}:` : ''}${productionId}:media:${asset.asset_id}`,
     ...(onProviderRequest ? { onProviderRequest } : {}),
+    ...(canonicalRequest ? { canonicalRequest } : {}),
     prompt: JSON.stringify({
       asset_id: asset.asset_id,
       kind: asset.kind,
