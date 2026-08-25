@@ -3,6 +3,7 @@
 const { DEFAULT_MODEL: NVIDIA_TEXT_MODEL } = require('../../../src/providers/nvidia-adapter');
 const { DEFAULT_IMAGE_MODEL, DEFAULT_SPEECH_MODEL } = require('../../../src/providers/openai-media-provider');
 const { DEFAULT_MODEL: REPLICATE_VIDEO_MODEL } = require('../../../src/providers/replicate-wan-video-adapter');
+const { resolveQualityVideoProfile } = require('../../../src/v2.7/quality-video-profile');
 
 function status(configured) {
   return configured ? 'CONFIGURED_NOT_PROBED' : 'UNAVAILABLE';
@@ -11,6 +12,8 @@ function status(configured) {
 function describeProviders(env = process.env) {
   const nvidia = Boolean(env.NVIDIA_API_KEY);
   const replicate = Boolean(env.REPLICATE_API_TOKEN);
+  let qualityProfile = null; let qualityProfileError = null;
+  try { qualityProfile = resolveQualityVideoProfile(env); } catch (error) { qualityProfileError = error; }
   const openai = Boolean(env.OPENAI_API_KEY);
   const preferredVideo = env.VIDEO_PROVIDER || 'nvidia';
   const mptConfigured = env.MPT_ENABLED === 'true' && Boolean(env.MPT_BASE_URL)
@@ -22,8 +25,13 @@ function describeProviders(env = process.env) {
       publication: 'AUTO_PUBLISH_DISABLED' },
     { capability: 'TEXT / REASONING', provider: 'NVIDIA', model: env.NVIDIA_MODEL || NVIDIA_TEXT_MODEL,
       enabled: true, configured: nvidia, availability: status(nvidia), route: 'primary' },
-    { mode: 'QUALITY', capability: 'VIDEO', provider: 'Replicate', model: env.REPLICATE_VIDEO_MODEL || REPLICATE_VIDEO_MODEL,
-      enabled: replicate, configured: replicate, availability: status(replicate), route: preferredVideo === 'replicate' ? 'primary' : 'alternative' },
+    { mode: 'QUALITY', capability: 'VIDEO', provider: 'Replicate',
+      model: qualityProfile?.model || env.QUALITY_VIDEO_MODEL || null,
+      enabled: replicate, configured: replicate && Boolean(qualityProfile),
+      availability: status(replicate && Boolean(qualityProfile)), route: preferredVideo === 'replicate' ? 'primary' : 'alternative',
+      profile: qualityProfile?.name || 'production', resolution: qualityProfile?.resolution || null,
+      qualityMode: qualityProfile ? (qualityProfile.goFast ? 'FAST' : 'QUALITY') : null,
+      configurationError: qualityProfileError?.code || null, legacyFallbackModel: REPLICATE_VIDEO_MODEL },
     { capability: 'VIDEO', provider: 'NVIDIA', model: env.NVIDIA_VIDEO_MODEL || 'nvidia/cosmos3-nano',
       enabled: true, configured: nvidia, availability: status(nvidia), route: preferredVideo === 'nvidia' ? 'primary' : 'alternative' },
     { capability: 'IMAGE', provider: openai ? 'OpenAI' : 'Unavailable', model: openai ? env.OPENAI_IMAGE_MODEL || DEFAULT_IMAGE_MODEL : null,

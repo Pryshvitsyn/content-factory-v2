@@ -9,6 +9,7 @@ on:
       - "feat/v2.4-controlled-live-production-test"
       - "feat/v2.5-real-content-production"
       - "feat/v2.6-fast-renderer-moneyprinterturbo"
+      - "feat/v2.7.1-quality-production-pass"
       - "release/**"
       - "develop/**"
     paths:
@@ -19,6 +20,7 @@ on:
       - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
       - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
       - "docs/V2.6-FAST-RENDERING.md"
+      - "docs/V2.7.1-QUALITY-PRODUCTION.md"
       - "deploy/moneyprinterturbo/**"
       - "config/live-production.example.json"
       - "config/productions/**"
@@ -42,6 +44,7 @@ on:
       - "docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md"
       - "docs/V2.5-REAL-CONTENT-PRODUCTION.md"
       - "docs/V2.6-FAST-RENDERING.md"
+      - "docs/V2.7.1-QUALITY-PRODUCTION.md"
       - "deploy/moneyprinterturbo/**"
       - "config/live-production.example.json"
       - "config/productions/**"
@@ -197,6 +200,9 @@ jobs:
           node --check tests/v2.6-fast-renderer-test.js
           node --check tests/v2.6-postgres-integration-test.js
           node --check src/v2.7/operator-production-input.js
+          node --check src/v2.7/creative-director-planner.js
+          node --check src/v2.7/quality-video-profile.js
+          node --check src/v2.7/shot-regeneration.js
           node --check src/v2.7/production-command-service.js
           node --check src/v2.7/production-runtime.js
           node --check tests/v2.7-production-command-test.js
@@ -410,6 +416,7 @@ jobs:
           test -s migrations/20260823_v2_4_canonical_production_ownership.sql
           test -s migrations/20260823_v2_5_durable_media_executions.sql
           test -s migrations/20260824_v2_6_fast_render_executions.sql
+          test -s migrations/20260824_v2_7_1_shot_regenerations.sql
           test -s deploy/moneyprinterturbo/docker-compose.yml
         timeout-minutes: 2
       - name: Check required project files

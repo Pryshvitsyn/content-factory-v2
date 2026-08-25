@@ -89,7 +89,9 @@ class ControlService {
     if (!item) throw new ControlError(404, 'PRODUCTION_NOT_FOUND', 'Production not found in brand scope');
     const execution = typeof this.repository.executionSafety === 'function'
       ? await this.repository.executionSafety(item.id) : { ambiguousExecutions: 0, actualProviderCalls: 0 };
-    return { ...item, operationalStatus: operationalStatus(item), progress: progressFor(item),
+    const shotRegenerations = typeof this.repository.listShotRegenerations === 'function'
+      ? await this.repository.listShotRegenerations(item.id, item.brandId) : [];
+    return { ...item, operationalStatus: operationalStatus(item), progress: progressFor(item), shotRegenerations,
       actualProviderCalls: execution.actualProviderCalls, ambiguousExecutions: execution.ambiguousExecutions,
       autoPublish: false };
   }
@@ -148,6 +150,17 @@ class ControlService {
   async regenerateProduction({ productionId, brandId, requestId, reason }) {
     return this.requireCommands().regenerate({ productionId: requiredUuid('productionId', productionId),
       brandId: requiredUuid('brandId', brandId), requestId: requiredUuid('requestId', requestId), reason });
+  }
+
+  async preflightShotRegeneration({ productionId, brandId, shotId, requestId, instruction }) {
+    return this.requireCommands().preflightShotRegeneration({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId), shotId, requestId: requiredUuid('requestId', requestId), instruction });
+  }
+
+  async regenerateShot({ productionId, brandId, shotId, requestId, instruction, preflightId, confirmation }) {
+    return this.requireCommands().regenerateShot({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId), shotId, requestId: requiredUuid('requestId', requestId),
+      instruction, preflightId, confirmation });
   }
 
   async artifactContent({ sourceId, artifactId, version, brandId }) {

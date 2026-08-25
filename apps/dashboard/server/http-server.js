@@ -49,6 +49,13 @@ function createControlServer({ service, logger = console } = {}) {
         return json(response, 201, await service.createProduction(await readJson(request)));
       }
       if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
+        && segments[3] === 'shots' && segments.length === 6 && ['preflight','regenerate'].includes(segments[5])) {
+        const body = await readJson(request);
+        const args = { productionId: segments[2], shotId: segments[4], ...body };
+        if (segments[5] === 'preflight') return json(response, 200, await service.preflightShotRegeneration(args));
+        return json(response, 202, await service.regenerateShot(args));
+      }
+      if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
         && segments.length === 4 && ['start','retry','regenerate'].includes(segments[3])) {
         const body = await readJson(request);
         if (segments[3] === 'start') return json(response, 202, await service.startProduction({ productionId: segments[2], ...body }));

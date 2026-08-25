@@ -92,6 +92,9 @@ function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
     framesPerSecond: Number(video.frames_per_second ?? 16),
     goFast: video.go_fast ?? true,
     seed: video.seed,
+    sampleShift: Number(video.sample_shift ?? 12),
+    optimizePrompt: video.optimize_prompt,
+    interpolateOutput: video.interpolate_output,
   };
   if (renderMode === 'QUALITY' && profile.provider !== 'replicate') throw new ProductionInputError('shot.video.provider must currently be replicate');
   if (!Number.isInteger(profile.numFrames) || !Number.isInteger(profile.framesPerSecond)) {
@@ -232,6 +235,9 @@ function buildProductionInput(raw = {}) {
           num_frames: profile.numFrames,
           frames_per_second: profile.framesPerSecond,
           go_fast: profile.goFast,
+          sample_shift: profile.sampleShift,
+          ...(profile.optimizePrompt !== undefined ? { optimize_prompt: profile.optimizePrompt } : {}),
+          ...(profile.interpolateOutput !== undefined ? { interpolate_output: profile.interpolateOutput } : {}),
           ...(profile.seed !== undefined ? { seed: profile.seed } : {}),
           temporal: { startMs: 0, endMs: generationDurationMs, durationMs: generationDurationMs },
           target_clip_duration_ms: Math.round(durationSeconds * 1000),
@@ -307,6 +313,8 @@ function buildProductionInput(raw = {}) {
     shotPlan,
     assetPlan,
     profile: videoAssets[0].generation_requirements,
+    creativePlan: raw.creative_plan ? structuredClone(raw.creative_plan) : null,
+    qualityVideoProfile: raw.quality_video_profile ? structuredClone(raw.quality_video_profile) : null,
   };
   if (isV26) {
     normalized.renderMode = renderMode;

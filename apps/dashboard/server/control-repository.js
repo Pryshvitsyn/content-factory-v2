@@ -247,6 +247,78 @@ class ControlRepository {
     return result.rows;
   }
 
+  async listShotRegenerations(productionId, brandId) {
+    const exists = await this.db.query("SELECT to_regclass('v2_7.shot_regenerations') IS NOT NULL AS available");
+    if (!exists.rows[0]?.available) return [];
+    const result = await this.db.query(`/* dashboard:list-shot-regenerations */
+      SELECT sr.id, sr.request_id AS "requestId", sr.shot_id AS "shotId",
+        sr.source_asset_id AS "sourceAssetId", sr.replacement_asset_id AS "replacementAssetId",
+        sr.revision_no AS "revisionNo", sr.status, sr.expected_provider_calls AS "expectedProviderCalls",
+        sr.provider, sr.model, sr.resolution, sr.result, sr.error, sr.created_at AS "createdAt"
+      FROM v2_7.shot_regenerations sr JOIN v2_1.productions p ON p.id=sr.production_id
+      WHERE sr.production_id=$1 AND p.brand_id=$2 ORDER BY sr.created_at DESC`, [productionId, brandId]);
+    return result.rows;
+  }
+
+  async latestShotRevision(productionId, brandId) {
+    const result = await this.db.query(`/* dashboard:latest-shot-revision */
+      SELECT sr.*, sr.canonical_raw_input AS "canonicalRawInput"
+      FROM v2_7.shot_regenerations sr JOIN v2_1.productions p ON p.id=sr.production_id
+      WHERE sr.production_id=$1 AND p.brand_id=$2 AND sr.status='SUCCEEDED'
+      ORDER BY sr.completed_at DESC LIMIT 1`, [productionId, brandId]);
+    return result.rows[0] || null;
+  }
+
+  async nextShotRevision(productionId, shotId) {
+    const result = await this.db.query(`SELECT coalesce(max(revision_no),0)::int + 1 AS revision
+      FROM v2_7.shot_regenerations WHERE production_id=$1 AND shot_id=$2`, [productionId, shotId]);
+    return result.rows[0].revision;
+  }
+
+  async getShotRegenerationByRequest(productionId, requestId) {
+    const result = await this.db.query(`SELECT *, input_fingerprint AS "inputFingerprint" FROM v2_7.shot_regenerations
+      WHERE production_id=$1 AND request_id=$2`, [productionId, requestId]);
+    return result.rows[0] || null;
+  }
+
+  async ensureShotRegeneration(record) {
+    let result;
+    try { result = await this.db.query(`/* dashboard:ensure-shot-regeneration */
+      INSERT INTO v2_7.shot_regenerations(workspace_id,brand_id,production_id,request_id,shot_id,
+        source_asset_id,replacement_asset_id,revision_no,status,input_fingerprint,canonical_raw_input,
+        instruction,provider,model,resolution)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PREPARED',$9,$10::jsonb,$11,$12,$13,$14)
+      ON CONFLICT(production_id,request_id) DO UPDATE SET updated_at=now()
+      RETURNING *, canonical_raw_input AS "canonicalRawInput", replacement_asset_id AS "replacementAssetId",
+        source_asset_id AS "sourceAssetId", revision_no AS "revisionNo"`,
+    [record.workspaceId, record.brandId, record.productionId, record.requestId, record.shotId,
+      record.sourceAssetId, record.replacementAssetId, record.revisionNo, record.inputFingerprint,
+      JSON.stringify(record.canonicalRawInput), record.instruction, record.provider, record.model, record.resolution]); }
+    catch (error) {
+      if (error.code === '23505') throw Object.assign(new Error('Another shot regeneration is active for this production'), { code: 'SHOT_REGENERATION_ACTIVE' });
+      throw error;
+    }
+    const row = result.rows[0];
+    if (row.input_fingerprint !== record.inputFingerprint) throw Object.assign(new Error('requestId belongs to different shot regeneration input'), { code: 'SHOT_REGENERATION_CONFLICT' });
+    return row;
+  }
+
+  async claimShotRegeneration(id, workerId) {
+    const result = await this.db.query(`UPDATE v2_7.shot_regenerations SET status='RUNNING',worker_id=$2,
+      started_at=coalesce(started_at,now()),updated_at=now() WHERE id=$1 AND status IN ('PREPARED','RETRYING') RETURNING *`, [id, workerId]);
+    return result.rows[0] || null;
+  }
+
+  async completeShotRegeneration(id, result) {
+    await this.db.query(`UPDATE v2_7.shot_regenerations SET status='SUCCEEDED',result=$2::jsonb,error='{}'::jsonb,
+      worker_id=NULL,completed_at=now(),updated_at=now() WHERE id=$1 AND status='RUNNING'`, [id, JSON.stringify(result)]);
+  }
+
+  async failShotRegeneration(id, error) {
+    await this.db.query(`UPDATE v2_7.shot_regenerations SET status='RETRYING',error=$2::jsonb,
+      worker_id=NULL,updated_at=now() WHERE id=$1 AND status='RUNNING'`, [id, JSON.stringify({ code: error.code || 'SHOT_REGENERATION_FAILED', message: error.message })]);
+  }
+
   async resolveArtifact({ sourceId, artifactId, version, brandId }) {
     const master = await this.db.query(`/* dashboard:resolve-master-content */
       SELECT ri.master_storage_key AS "storageKey", ri.content_type AS "contentType"

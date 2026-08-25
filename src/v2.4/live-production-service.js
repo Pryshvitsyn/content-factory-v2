@@ -246,6 +246,23 @@ class LiveProductionService {
       plan: this.summary({ brand, input: scopedInput, config, existing, laneState }) };
   }
 
+  async prepareRevision({ input, config, productionId }) {
+    await this.db.query('/* v2.7.1:revision-database-health */ SELECT 1');
+    await this.storageValidator(this.storageRoot);
+    const schemaReport = await this.schemaInspector(this.db);
+    assertSchemaCompatible(schemaReport);
+    const brand = await this.inspectBrand(input.brandId);
+    const ownership = await this.db.query(`/* v2.7.1:revision-ownership */
+      SELECT id AS "productionId",status AS "productionStatus" FROM v2_1.productions
+      WHERE id=$1 AND workspace_id=$2 AND brand_id=$3`, [productionId, brand.workspaceId, brand.id]);
+    if (!ownership.rows[0]) throw new LiveProductionError('LIVE_PRODUCTION_NOT_FOUND', 'Production not found in canonical brand/workspace scope');
+    const scopedInput = { ...input, workspaceId: brand.workspaceId };
+    const existing = { ...ownership.rows[0], jobStatus: 'RUNNING' };
+    const laneState = await this.rendererRouter.preflight({ input: scopedInput, brand, existing, config });
+    const plan = this.summary({ brand, input: scopedInput, config, existing, laneState });
+    return { brand, input: scopedInput, existing, laneState, schemaReport, plan };
+  }
+
   async findCachedVideo({ input, productionId }) {
     if (typeof this.artifactService.getVersionByIdempotency !== 'function') return null;
     const asset = input.assetPlan.assets[0];
