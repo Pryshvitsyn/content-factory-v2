@@ -4,6 +4,8 @@ const { assertPaidCredentials, resolveV25Configuration } = require('../v2.5/conf
 const { buildProductionInput, stableFingerprint } = require('../v2.5/production-input');
 const { createProductionRuntime } = require('./production-runtime');
 const { buildOperatorProductionInput } = require('./operator-production-input');
+const { resolveQualityVideoProfile } = require('./quality-video-profile');
+const { buildShotRevision } = require('./shot-regeneration');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ProductionCommandError extends Error {
@@ -32,7 +34,8 @@ function defaultSchedule(task, logger) {
 class ProductionCommandService {
   constructor({ repository, storage, env = process.env, actor = 'local-operator', logger = console,
     runtimeFactory = createProductionRuntime, configResolver = resolveV25Configuration,
-    credentialCheck = assertPaidCredentials, scheduler = defaultSchedule, providers = [] } = {}) {
+    credentialCheck = assertPaidCredentials, scheduler = defaultSchedule, providers = [],
+    qualityProfileResolver = resolveQualityVideoProfile } = {}) {
     if (!repository || !storage) throw new Error('repository and storage are required');
     this.repository = repository;
     this.storage = storage;
@@ -44,6 +47,7 @@ class ProductionCommandService {
     this.credentialCheck = credentialCheck;
     this.scheduler = scheduler;
     this.providers = providers;
+    this.qualityProfileResolver = qualityProfileResolver;
   }
 
   assertCapability(input) {
@@ -58,6 +62,11 @@ class ProductionCommandService {
     if (!configured('VIDEO', 'replicate')) {
       throw new ProductionCommandError(409, 'QUALITY_RENDERER_UNAVAILABLE', 'QUALITY is unavailable: Replicate video is not configured');
     }
+    const video = this.providers.find((item) => item.capability === 'VIDEO'
+      && String(item.provider).toLowerCase() === input.qualityVideoProfile?.provider);
+    if (video?.model && video.model !== input.qualityVideoProfile?.model) {
+      throw new ProductionCommandError(409, 'QUALITY_MODEL_UNAVAILABLE', 'Requested QUALITY model is not the configured adapter model; no downgrade was applied');
+    }
     if (input.voiceover?.enabled && !this.providers.some((item) => item.capability === 'SPEECH' && item.configured === true)) {
       throw new ProductionCommandError(409, 'QUALITY_AUDIO_UNAVAILABLE', 'QUALITY is unavailable: speech generation is not configured');
     }
@@ -70,6 +79,7 @@ class ProductionCommandService {
       RENDER_MODE: input.renderMode,
       VIDEO_PROVIDER: 'replicate',
       AUDIO_PROVIDER: 'openai-media',
+      ...(input.qualityVideoProfile ? { REPLICATE_VIDEO_MODEL: input.qualityVideoProfile.model } : {}),
       FAST_RENDERER: input.renderMode === 'FAST' ? input.fastRender.renderer : this.env.FAST_RENDERER,
       ...(forceDryRun ? { LIVE_PAID_GENERATION: 'false' } : {}),
     };
@@ -92,9 +102,13 @@ class ProductionCommandService {
       throw new ProductionCommandError(404, 'BRAND_NOT_FOUND', 'Active brand not found in canonical workspace scope');
     }
     let built;
-    try { built = buildOperatorProductionInput(request, brand, { productionKey }); }
+    try {
+      const qualityProfile = String(request.renderMode || '').toUpperCase() === 'QUALITY'
+        ? this.qualityProfileResolver(this.env) : null;
+      built = buildOperatorProductionInput(request, brand, { productionKey, qualityProfile });
+    }
     catch (error) {
-      if (error.code === 'V27_INPUT_INVALID' || error.code === 'V25_INPUT_INVALID') {
+      if (['V27_INPUT_INVALID','V25_INPUT_INVALID','QUALITY_PROFILE_INVALID','QUALITY_MODEL_REQUIRED','QUALITY_CAPABILITY_UNAVAILABLE'].includes(error.code)) {
         throw new ProductionCommandError(400, error.code, error.message, error.details);
       }
       throw error;
@@ -124,6 +138,10 @@ class ProductionCommandService {
       renderer: plan.renderer,
       provider: plan.provider,
       model: plan.model,
+      qualityProfile: command.input.qualityVideoProfile,
+      resolution: command.input.qualityVideoProfile?.resolution || null,
+      qualityMode: command.input.qualityVideoProfile?.goFast === false ? 'QUALITY' : 'FAST',
+      promptOptimization: command.input.qualityVideoProfile?.optimizePrompt ?? null,
       targetPlatform: command.input.targetPlatform,
       targetDurationSeconds: plan.targetDurationSeconds,
       aspectRatio: plan.aspectRatio,
@@ -238,6 +256,113 @@ class ProductionCommandService {
       productionKey: command.input.productionKey, status: rows.production.status, jobStatus: rows.job.status,
       regenerationOf: source.id, reused: rows.reused === true, requiresExplicitStart: true,
       publicationTriggered: false });
+  }
+
+  async prepareShotRegeneration({ productionId, brandId, shotId, requestId, instruction = null }) {
+    const source = await this.stored(productionId, brandId);
+    if (source.renderMode !== 'QUALITY') throw new ProductionCommandError(409, 'SHOT_REGENERATION_UNAVAILABLE', 'Per-shot regeneration is available for QUALITY productions only');
+    if (['RUNNING','QUEUED'].includes(source.jobStatus)) throw new ProductionCommandError(409, 'SHOT_REGENERATION_UNAVAILABLE', `Shot regeneration is unavailable while the durable job is ${source.jobStatus}`);
+    const safety = await this.repository.executionSafety(source.id);
+    if (safety.ambiguousExecutions > 0) throw new ProductionCommandError(409, 'EXECUTION_NEEDS_RECONCILIATION', 'Shot regeneration requires reconciliation before another provider execution');
+    if (instruction !== null && (typeof instruction !== 'string' || instruction.trim().length > 2400)) {
+      throw new ProductionCommandError(400, 'V27_INPUT_INVALID', 'Shot regeneration instruction must be a string up to 2400 characters');
+    }
+    const latest = await this.repository.latestShotRevision(productionId, brandId);
+    const raw = latest?.canonicalRawInput || source.jobPayload.canonicalRawInput;
+    const revisionNo = await this.repository.nextShotRevision(productionId, shotId);
+    let revision;
+    try { revision = buildShotRevision(raw, { shotId, requestId, instruction: instruction?.trim() || null, revisionNo }); }
+    catch (error) {
+      if (error.code === 'SHOT_NOT_FOUND') throw new ProductionCommandError(404, error.code, error.message);
+      throw error;
+    }
+    this.assertCapability(revision.input);
+    const runtime = this.runtime(revision.input, { forceDryRun: true });
+    if (typeof runtime.service.prepareRevision !== 'function') throw new ProductionCommandError(500, 'SHOT_REVISION_RUNTIME_UNAVAILABLE', 'Runtime does not support immutable shot revisions');
+    const prepared = await runtime.service.prepareRevision({ input: revision.input, config: runtime.config, productionId });
+    const expectedVideos = prepared.plan.expectedVideoGenerations || 0;
+    const expectedAudio = prepared.plan.expectedAudioGenerations || 0;
+    if (expectedVideos !== 1 || expectedAudio !== 0 || prepared.plan.expectedPaidProviderCalls !== 1) {
+      throw new ProductionCommandError(409, 'SHOT_REGENERATION_PLAN_INVALID', 'Per-shot preflight must reuse existing media and generate exactly one video asset');
+    }
+    return { source, revision, prepared };
+  }
+
+  async preflightShotRegeneration(args) {
+    const command = await this.prepareShotRegeneration(args);
+    return Object.freeze({ preflightId: command.revision.input.fingerprint, productionId: args.productionId,
+      shotId: args.shotId, sourceAssetId: command.revision.sourceAssetId,
+      replacementAssetId: command.revision.replacementAssetId, revisionNo: command.revision.revisionNo,
+      expectedVideoGenerations: 1, expectedAudioGenerations: 0, expectedProviderCalls: 1,
+      provider: command.prepared.plan.provider, model: command.prepared.plan.model,
+      resolution: command.prepared.plan.resolution, estimatedCost: null, costStatus: 'UNKNOWN',
+      humanApprovalRequired: true, autoPublish: false, providerCalls: 0 });
+  }
+
+  async regenerateShot(args) {
+    if (args.confirmation !== true) throw new ProductionCommandError(400, 'SHOT_REGENERATION_CONFIRMATION_REQUIRED', 'Explicit per-shot cost confirmation is required');
+    const prior = typeof this.repository.getShotRegenerationByRequest === 'function'
+      ? await this.repository.getShotRegenerationByRequest(args.productionId, args.requestId) : null;
+    if (prior) {
+      if (prior.inputFingerprint !== args.preflightId && prior.input_fingerprint !== args.preflightId) {
+        throw new ProductionCommandError(409, 'SHOT_REGENERATION_CONFLICT', 'requestId belongs to a different per-shot input');
+      }
+      if (['SUCCEEDED','RUNNING'].includes(prior.status)) return Object.freeze({
+        regenerationId: prior.id, status: prior.status, reused: true,
+        publicationTriggered: false, humanApprovalRequired: true });
+      const raw = prior.canonicalRawInput || prior.canonical_raw_input;
+      if (!raw) throw new ProductionCommandError(500, 'SHOT_REGENERATION_STATE_INVALID', 'Persisted shot regeneration is missing canonical input');
+      return this.scheduleShotExecution({ record: prior, input: operatorInputFromRaw(raw), args, reused: true });
+    }
+    const command = await this.prepareShotRegeneration(args);
+    if (!args.preflightId || args.preflightId !== command.revision.input.fingerprint) {
+      throw new ProductionCommandError(409, 'PREFLIGHT_STALE', 'Run per-shot preflight for the exact current instruction before regeneration');
+    }
+    let record;
+    try { record = await this.repository.ensureShotRegeneration({ workspaceId: command.prepared.brand.workspaceId,
+      brandId: args.brandId, productionId: args.productionId, requestId: args.requestId, shotId: args.shotId,
+      sourceAssetId: command.revision.sourceAssetId, replacementAssetId: command.revision.replacementAssetId,
+      revisionNo: command.revision.revisionNo, inputFingerprint: command.revision.input.fingerprint,
+      canonicalRawInput: command.revision.raw, instruction: args.instruction?.trim() || null,
+      provider: command.prepared.plan.provider, model: command.prepared.plan.model,
+      resolution: command.prepared.plan.resolution }); }
+    catch (error) {
+      if (error.code === 'SHOT_REGENERATION_ACTIVE') throw new ProductionCommandError(409, error.code, error.message);
+      throw error;
+    }
+    if (record.status === 'SUCCEEDED' || record.status === 'RUNNING') return Object.freeze({
+      regenerationId: record.id, status: record.status, reused: true, publicationTriggered: false });
+    return this.scheduleShotExecution({ record, input: command.revision.input, args, reused: false,
+      revision: command.revision });
+  }
+
+  scheduleShotExecution({ record, input, args, reused, revision = null }) {
+    const runtime = this.runtime(input);
+    this.scheduler(async () => {
+      const claimed = await this.repository.claimShotRegeneration(record.id, runtime.config.workerId);
+      if (!claimed) return;
+      try {
+        const prepared = await runtime.service.prepareRevision({ input,
+          config: runtime.config, productionId: args.productionId });
+        const master = await runtime.rendererRouter.render({ productionId: args.productionId,
+          workspaceId: prepared.input.workspaceId, brandId: args.brandId, workerId: runtime.config.workerId,
+          input: prepared.input, script: prepared.input.script, shotPlan: prepared.input.shotPlan,
+          assetPlan: prepared.input.assetPlan,
+          qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.voiceover?.enabled === true } });
+        await this.repository.completeShotRegeneration(record.id, { replacementAssetId: revision?.replacementAssetId
+          || record.replacementAssetId || record.replacement_asset_id,
+          masterArtifact: master.master?.artifact || null, quality: master.quality || null,
+          publicationTriggered: false, humanApprovalRequired: true });
+      } catch (error) {
+        await this.repository.failShotRegeneration(record.id, error);
+        throw error;
+      }
+    }, this.logger);
+    return Object.freeze({ regenerationId: record.id, productionId: args.productionId, shotId: args.shotId,
+      replacementAssetId: revision?.replacementAssetId || record.replacementAssetId || record.replacement_asset_id,
+      revisionNo: revision?.revisionNo || record.revisionNo || record.revision_no,
+      status: record.status, accepted: true, reused, expectedProviderCalls: 1, publicationTriggered: false,
+      humanApprovalRequired: true });
   }
 }
 

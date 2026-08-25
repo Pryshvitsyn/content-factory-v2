@@ -36,6 +36,7 @@ const db = new Pool(process.env.DATABASE_URL ? { connectionString: process.env.D
 async function migration(name) { await db.query(await fs.readFile(path.resolve('migrations', name), 'utf8')); }
 
 async function bootstrap() {
+  await db.query('DROP SCHEMA IF EXISTS v2_7 CASCADE');
   await db.query('DROP SCHEMA IF EXISTS v2_6 CASCADE');
   await db.query('DROP SCHEMA IF EXISTS v2_5 CASCADE');
   await db.query('DROP SCHEMA IF EXISTS v2_3 CASCADE');
@@ -54,6 +55,7 @@ async function bootstrap() {
   await migration('20260823_v2_4_canonical_production_ownership.sql');
   await migration('20260823_v2_5_durable_media_executions.sql');
   await migration('20260824_v2_6_fast_render_executions.sql');
+  await migration('20260824_v2_7_1_shot_regenerations.sql');
   await db.query("INSERT INTO public.workspaces(id,name) VALUES($1,'V2.7 disposable workspace')", [WORKSPACE_ID]);
   await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status,mission,positioning)
     VALUES($1,$2,'Attune','attune','ACTIVE','Help people understand each other','Emotionally intelligent attention')`,
@@ -173,6 +175,7 @@ async function main() {
     assert.equal(externalProviderCalls, 0);
     console.log('V2.7 disposable PostgreSQL operator-console E2E passed (fixture renderer, provider calls 0).');
   } finally {
+    await db.query('DROP SCHEMA IF EXISTS v2_7 CASCADE').catch(() => {});
     await db.query('DROP SCHEMA IF EXISTS v2_6 CASCADE').catch(() => {});
     await db.query('DROP SCHEMA IF EXISTS v2_5 CASCADE').catch(() => {});
     await db.query('DROP SCHEMA IF EXISTS v2_3 CASCADE').catch(() => {});

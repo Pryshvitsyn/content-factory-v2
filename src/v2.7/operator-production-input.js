@@ -1,7 +1,8 @@
 'use strict';
 
-const crypto = require('node:crypto');
 const { buildProductionInput, stableFingerprint } = require('../v2.5/production-input');
+const { planCreative } = require('./creative-director-planner');
+const { LEGACY_FAST_MODEL } = require('./quality-video-profile');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OBJECTIVES = new Set(['ORGANIC_REACH','ENGAGEMENT','TRAFFIC','LEAD_GENERATION','APP_INSTALL','PURCHASE','BOOKING','SEO_AUTHORITY','RETENTION','EXPERIMENT']);
@@ -43,8 +44,6 @@ function compactBrandContext(brand = {}) {
   return values.join(' | ').slice(0, 1200) || null;
 }
 
-function shotCount(duration) { return Math.max(1, Math.ceil(duration / 5)); }
-
 function sceneCopy({ index, count, hook, coreMessage, cta }) {
   if (count === 1) return `${hook} ${coreMessage} ${cta}`;
   if (index === 0) return hook;
@@ -52,7 +51,7 @@ function sceneCopy({ index, count, hook, coreMessage, cta }) {
   return coreMessage;
 }
 
-function buildRawInput(request, brand, { productionKey = null } = {}) {
+function buildRawInput(request, brand, { productionKey = null, qualityProfile = null } = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new OperatorInputError('request must be an object');
   const brandId = required('brandId', request.brandId, 64);
   if (!UUID_PATTERN.test(brandId) || brand?.id !== brandId) throw new OperatorInputError('brandId is not a canonical selected brand');
@@ -60,6 +59,9 @@ function buildRawInput(request, brand, { productionKey = null } = {}) {
   if (!UUID_PATTERN.test(requestId)) throw new OperatorInputError('requestId must be a UUID idempotency key');
   const mode = required('renderMode', request.renderMode, 16).toUpperCase();
   if (!MODES.has(mode)) throw new OperatorInputError('renderMode must be FAST or QUALITY');
+  if (mode === 'QUALITY' && !qualityProfile) {
+    throw new OperatorInputError('QUALITY production requires an explicit resolved quality video profile');
+  }
   const objective = required('objective', request.objective, 64).toUpperCase();
   if (!OBJECTIVES.has(objective)) throw new OperatorInputError('objective is not canonical');
   const title = required('title', request.title, 240);
@@ -75,50 +77,41 @@ function buildRawInput(request, brand, { productionKey = null } = {}) {
   const creativeBrief = required('creativeBrief', request.creativeBrief || request.coreMessage, 4000);
   const cta = required('cta', request.cta, 800);
   const voiceoverText = optional(request.voiceover, 2400) || `${hook} ${coreMessage} ${cta}`;
-  const sceneIdeas = (optional(request.sceneIdeas, 2400) || '').split(/\n|;/).map((item) => item.trim()).filter(Boolean);
   const visualDirection = optional(request.visualDirection, 2400)
     || 'Believable human behavior, cinematic naturalism, restrained camera, no app UI, no glossy stock-ad look.';
   const audience = optional(request.audience, 800);
   const campaign = optional(request.campaign, 800);
   const instructions = optional(request.additionalInstructions, 2400);
   const brandContext = compactBrandContext(brand);
-  const count = shotCount(duration);
-  const segmentDuration = duration / count;
-  const seed = Number.parseInt(crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 8), 16) % 2147483647;
-  const scenes = Array.from({ length: count }, (_, index) => {
+  const profile = qualityProfile || { name: 'legacy-fast-test', provider: 'replicate', model: LEGACY_FAST_MODEL,
+    resolution: '480p', numFrames: 81, framesPerSecond: 16, goFast: true,
+    optimizePrompt: false, interpolateOutput: false, sampleShift: 12, seedStrategy: 'per-shot-deterministic' };
+  const creativePlan = planCreative({ request: { ...request, creativeBrief }, brand, qualityProfile: profile });
+  const count = creativePlan.shots.length;
+  const scenes = creativePlan.shots.map((planned, index) => {
     const number = index + 1;
-    const visual = sceneIdeas[index] || sceneIdeas.at(-1)
-      || `${creativeBrief} — visual beat ${number} of ${count}.`;
     const copy = sceneCopy({ index, count, hook, coreMessage, cta });
-    const prompt = [
-      `Operator creative brief: ${creativeBrief}`,
-      `Visual beat ${number}: ${visual}`,
-      `Core message: ${coreMessage}`,
-      `Visual direction: ${visualDirection}`,
-      audience && `Audience context: ${audience}`,
-      campaign && `Campaign context: ${campaign}`,
-      brandContext && `Brand Brain reference context (operator brief has priority): ${brandContext}`,
-      instructions && `Additional operator instructions: ${instructions}`,
-      'Vertical social video. Believable behavior. No app UI, no credentials, no phone close-up, no generated text, no automatic publication.',
-    ].filter(Boolean).join('\n');
     return {
       scene_id: `operator-scene-${number}`,
-      duration_seconds: segmentDuration,
-      location: optional(request.location, 400) || 'Location defined by the operator creative brief',
-      visual,
-      emotional_intent: optional(request.emotionalIntent, 800) || 'Natural, specific, emotionally credible behavior.',
+      duration_seconds: planned.durationSeconds,
+      location: planned.environment,
+      visual: planned.description,
+      emotional_intent: planned.emotionalIntent,
       dialogue_or_voiceover: copy,
       shots: [{
-        shot_id: `operator-shot-${number}`,
-        asset_id: `operator-video-${number}`,
-        duration_seconds: segmentDuration,
-        framing: optional(request.framing, 400) || 'vertical cinematic medium shot',
-        camera: optional(request.camera, 400) || 'restrained observational camera',
-        subject: optional(request.subject, 800) || `Subjects described in the creative brief: ${creativeBrief}`,
-        action: visual,
-        continuity: `Maintain the operator's visual direction across beat ${number}.`,
-        video: { prompt, resolution: '480p', aspect_ratio: aspectRatio, num_frames: 81,
-          frames_per_second: 16, go_fast: true, seed },
+        shot_id: planned.shotId,
+        asset_id: planned.assetId,
+        duration_seconds: planned.durationSeconds,
+        framing: planned.framing,
+        camera: planned.camera,
+        subject: planned.subject,
+        action: planned.action,
+        continuity: `Use continuity identity ${planned.continuityIdentity}.`,
+        video: { provider: profile.provider, model: profile.model, prompt: planned.generationPrompt,
+          resolution: profile.resolution, aspect_ratio: aspectRatio, num_frames: profile.numFrames,
+          frames_per_second: profile.framesPerSecond, go_fast: profile.goFast,
+          optimize_prompt: profile.optimizePrompt, interpolate_output: profile.interpolateOutput,
+          sample_shift: profile.sampleShift, ...(planned.seed === undefined ? {} : { seed: planned.seed }) },
       }],
     };
   });
@@ -136,8 +129,11 @@ function buildRawInput(request, brand, { productionKey = null } = {}) {
     aspect_ratio: aspectRatio,
     hook,
     core_message: coreMessage,
-    creative_concept: [creativeBrief, brandContext && `Brand context: ${brandContext}`].filter(Boolean).join('\n'),
+    creative_concept: [mode === 'QUALITY' ? `Narrative arc: ${hook} → ${coreMessage} → ${cta}` : creativeBrief,
+      brandContext && `Brand context: ${brandContext}`].filter(Boolean).join('\n'),
     cta,
+    creative_plan: creativePlan,
+    quality_video_profile: mode === 'QUALITY' ? profile : null,
     scenes,
     voiceover: { enabled: true, asset_id: 'voiceover-main',
       ...(mode === 'QUALITY' ? { provider: 'openai-media', model: 'gpt-4o-mini-tts', voice: 'alloy' }

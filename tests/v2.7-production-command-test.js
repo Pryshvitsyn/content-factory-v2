@@ -2,6 +2,8 @@
 
 const assert = require('node:assert/strict');
 const { ProductionCommandService } = require('../src/v2.7/production-command-service');
+const { buildOperatorProductionInput } = require('../src/v2.7/operator-production-input');
+const { resolveQualityVideoProfile } = require('../src/v2.7/quality-video-profile');
 const { operationalStatus, progressFor } = require('../apps/dashboard/server/control-service');
 
 const BRAND_ID = '11111111-1111-4111-8111-111111111111';
@@ -27,6 +29,8 @@ async function main() {
   let providerInvocations = 0;
   let next = 0;
   let ambiguousExecutions = 0;
+  const shotRegenerations = new Map();
+  const generatedShotAssets = new Set();
   const repository = {
     db: {},
     getBrand: async (id) => id === BRAND_ID ? brand : null,
@@ -35,8 +39,32 @@ async function main() {
       return item && item.brandId === scopedBrand ? item : null;
     },
     executionSafety: async () => ({ ambiguousExecutions, actualProviderCalls: providerInvocations }),
+    latestShotRevision: async () => [...shotRegenerations.values()].filter((item) => item.status === 'SUCCEEDED').at(-1) || null,
+    nextShotRevision: async (_productionId, shotId) => [...shotRegenerations.values()].filter((item) => item.shotId === shotId).length + 1,
+    getShotRegenerationByRequest: async (_productionId, requestId) => shotRegenerations.get(requestId) || null,
+    ensureShotRegeneration: async (record) => {
+      const prior = shotRegenerations.get(record.requestId);
+      if (prior) return prior;
+      const item = { ...record, inputFingerprint: record.inputFingerprint,
+        id: `shot-regen-${shotRegenerations.size + 1}`, status: 'PREPARED' };
+      shotRegenerations.set(record.requestId, item); return item;
+    },
+    claimShotRegeneration: async (id) => {
+      const item = [...shotRegenerations.values()].find((value) => value.id === id);
+      if (!item || !['PREPARED','RETRYING'].includes(item.status)) return null;
+      item.status = 'RUNNING'; return item;
+    },
+    completeShotRegeneration: async (id, result) => {
+      const item = [...shotRegenerations.values()].find((value) => value.id === id);
+      item.status = 'SUCCEEDED'; item.result = result; item.canonicalRawInput = item.canonicalRawInput;
+    },
+    failShotRegeneration: async (id, error) => {
+      const item = [...shotRegenerations.values()].find((value) => value.id === id);
+      item.status = 'RETRYING'; item.error = error;
+    },
   };
-  const runtimeFactory = ({ config }) => ({ service: {
+  const runtimeFactory = ({ config }) => {
+    const serviceApi = {
     async prepare({ input }) {
       return { input: { ...input, workspaceId: brand.workspaceId }, plan: {
         brand: `${brand.name} (${brand.id})`, targetDurationSeconds: input.targetDurationSeconds,
@@ -57,7 +85,7 @@ async function main() {
       if (existing) return { production: existing, job: { id: existing.jobId, status: existing.jobStatus }, reused: true };
       next += 1;
       const id = `00000000-0000-4000-8000-${String(next).padStart(12, '0')}`;
-      const item = { id, brandId: input.brandId, status: 'DRAFT', jobId: `job-${next}`, jobStatus: 'QUEUED',
+      const item = { id, brandId: input.brandId, renderMode: input.renderMode, status: 'DRAFT', jobId: `job-${next}`, jobStatus: 'QUEUED',
         metadata: { source: command.source }, jobPayload: { operatorRequestId: command.requestId,
           canonicalRawInput: command.canonicalRawInput, canonicalRequest: command.canonicalRequest },
         regenerationOf: command.regenerationOf || null };
@@ -70,16 +98,52 @@ async function main() {
       if (item) { item.status = 'COMPLETED'; item.jobStatus = 'COMPLETED'; reviews.push({ productionId: item.id, decision: null, artifactVersion: 1 }); }
       return { publicationTriggered: false };
     },
-  }, config });
+    async prepareRevision({ input, productionId }) {
+      return { brand, input: { ...input, workspaceId: brand.workspaceId }, existing: { productionId }, plan: {
+        provider: input.qualityVideoProfile.provider, model: input.qualityVideoProfile.model,
+        resolution: input.qualityVideoProfile.resolution, expectedVideoGenerations: 1,
+        expectedAudioGenerations: 0, expectedPaidProviderCalls: 1,
+      } };
+    },
+    };
+    return { service: serviceApi, rendererRouter: { async render({ assetPlan }) {
+      const replacement = assetPlan.assets.find((asset) => asset.asset_id.includes('-rev-'))?.asset_id;
+      if (replacement && !generatedShotAssets.has(replacement)) { providerInvocations += 1; generatedShotAssets.add(replacement); }
+      return { master: { artifact: { artifactId: 'production:master', version: 2, storageKey: 'master-v2.mp4' } },
+        quality: { status: 'PASS', readyForHumanReview: true } };
+    } }, config };
+  };
   const configResolver = (env, input) => ({ live: env.LIVE_PAID_GENERATION === 'true', renderMode: input.renderMode,
     provider: input.renderMode === 'QUALITY' ? 'replicate' : 'moneyprinterturbo', model: 'test',
     storageRoot: '/tmp/v27-test', workerId: 'v27-test', fastRenderer: { renderer: 'moneyprinterturbo' } });
   const providers = [
     { capability: 'FAST RENDERER', provider: 'MoneyPrinterTurbo', configured: true },
-    { capability: 'VIDEO', provider: 'Replicate', configured: true },
+    { capability: 'VIDEO', provider: 'Replicate', model: 'test-owner/quality-video', configured: true },
     { capability: 'SPEECH', provider: 'OpenAI', configured: true },
   ];
-  const service = new ProductionCommandService({ repository, storage: {}, env: { LIVE_PAID_GENERATION: 'true' },
+  const productionProfile = resolveQualityVideoProfile({ QUALITY_VIDEO_MODEL: 'test-owner/quality-video' });
+  const plannedA = buildOperatorProductionInput(operatorRequest(), brand, { qualityProfile: productionProfile });
+  const plannedB = buildOperatorProductionInput(operatorRequest(), brand, { qualityProfile: productionProfile });
+  assert.deepEqual(plannedA.input.creativePlan, plannedB.input.creativePlan, 'creative planning must be deterministic');
+  assert.equal(plannedA.input.creativePlan.brandBrain.status, 'AVAILABLE');
+  assert.equal(plannedA.input.creativePlan.operatorBriefAuthoritative, true);
+  assert.equal(plannedA.input.creativePlan.shots.length, 2);
+  assert.notEqual(plannedA.input.creativePlan.shots[0].purpose, plannedA.input.creativePlan.shots[1].purpose);
+  assert.ok(plannedA.input.creativePlan.shots.every((shot) => shot.generationPrompt
+    && shot.negativeGuidance.length && shot.continuityIdentity));
+  assert.ok(plannedA.input.assetPlan.assets.filter((asset) => asset.kind === 'video')
+    .every((asset) => !asset.generation_requirements.prompt.includes(operatorRequest().creativeBrief)),
+  'the full operator brief must not be mechanically repeated in every provider prompt');
+  assert.equal(plannedA.input.profile.resolution, '720p');
+  assert.equal(plannedA.input.profile.go_fast, false);
+  assert.equal(plannedA.input.profile.optimize_prompt, true);
+  const emptyBrain = buildOperatorProductionInput(operatorRequest(), { ...brand, mission: null, positioning: null },
+    { qualityProfile: productionProfile });
+  assert.equal(emptyBrain.input.creativePlan.brandBrain.status, 'EMPTY_OPERATOR_ONLY');
+  assert.match(emptyBrain.input.creativePlan.shots[0].generationPrompt, /Brand Brain is empty/);
+  assert.throws(() => resolveQualityVideoProfile({}), (error) => error.code === 'QUALITY_MODEL_REQUIRED');
+  const qualityEnv = { LIVE_PAID_GENERATION: 'true', QUALITY_VIDEO_MODEL: 'test-owner/quality-video' };
+  const service = new ProductionCommandService({ repository, storage: {}, env: qualityEnv,
     providers, runtimeFactory, configResolver, credentialCheck() {}, scheduler: (task) => task(),
     logger: { error() {} } });
 
@@ -100,7 +164,7 @@ async function main() {
     (error) => error.code === 'BRAND_NOT_FOUND');
   await assert.rejects(() => service.preflight(operatorRequest({ renderMode: 'MAGIC' })),
     (error) => error.code === 'V27_INPUT_INVALID');
-  const unavailable = new ProductionCommandService({ repository, storage: {}, env: { LIVE_PAID_GENERATION: 'true' },
+  const unavailable = new ProductionCommandService({ repository, storage: {}, env: qualityEnv,
     providers: providers.filter((item) => item.capability !== 'FAST RENDERER'), runtimeFactory, configResolver,
     credentialCheck() {}, scheduler: (task) => task() });
   await assert.rejects(() => unavailable.preflight(operatorRequest({ renderMode: 'FAST' })),
@@ -160,6 +224,34 @@ async function main() {
     requestId: '55555555-5555-4555-8555-555555555555', reason: 'Stronger opening.' });
   assert.equal(regeneratedAgain.productionId, regenerated.productionId, 'double-click regeneration must be idempotent');
   assert.equal(providerInvocations, 7, 'regenerate must not start or publish');
+
+  const shotRequestId = '66666666-6666-4666-8666-666666666666';
+  const shotPlan = await service.preflightShotRegeneration({ productionId: created.productionId,
+    brandId: BRAND_ID, shotId: 'operator-shot-1', requestId: shotRequestId, instruction: 'Keep the pause quieter.' });
+  assert.equal(shotPlan.expectedVideoGenerations, 1); assert.equal(shotPlan.expectedAudioGenerations, 0);
+  assert.equal(shotPlan.expectedProviderCalls, 1); assert.equal(shotPlan.providerCalls, 0);
+  assert.equal(providerInvocations, 7, 'shot preflight must make zero provider calls');
+  await service.regenerateShot({ productionId: created.productionId, brandId: BRAND_ID,
+    shotId: 'operator-shot-1', requestId: shotRequestId, instruction: 'Keep the pause quieter.',
+    preflightId: shotPlan.preflightId, confirmation: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(providerInvocations, 8, 'shot regeneration executes exactly one mocked video provider call');
+  const shotRecord = shotRegenerations.get(shotRequestId);
+  assert.equal(shotRecord.status, 'SUCCEEDED');
+  assert.notEqual(shotRecord.sourceAssetId, shotRecord.replacementAssetId);
+  assert.equal(shotRecord.result.publicationTriggered, false);
+  assert.deepEqual(reviews, priorReviews, 'shot regeneration preserves prior decisions');
+  await service.regenerateShot({ productionId: created.productionId, brandId: BRAND_ID,
+    shotId: 'operator-shot-1', requestId: shotRequestId, instruction: 'Keep the pause quieter.',
+    preflightId: shotPlan.preflightId, confirmation: true });
+  assert.equal(providerInvocations, 8, 'same shot requestId is idempotent');
+  shotRecord.status = 'RETRYING';
+  await service.regenerateShot({ productionId: created.productionId, brandId: BRAND_ID,
+    shotId: 'operator-shot-1', requestId: shotRequestId, instruction: 'Keep the pause quieter.',
+    preflightId: shotPlan.preflightId, confirmation: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(providerInvocations, 8, 'technical retry reuses the same durable replacement asset');
+  assert.equal(shotRecord.status, 'SUCCEEDED');
 
   console.log('V2.7 ProductionCommandService preflight/create/start/retry/regenerate contract passed (mock provider calls only).');
 }

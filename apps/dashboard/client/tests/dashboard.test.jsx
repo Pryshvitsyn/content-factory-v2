@@ -117,9 +117,16 @@ describe('V2.7 operator console', () => {
       if (url === '/api/productions/preflight') return response({ preflightId: 'fp', brand: 'Attune', production: 'Human moment', renderMode: 'FAST', renderer: 'moneyprinterturbo', targetPlatform: 'Reels', targetDurationSeconds: 10, aspectRatio: '9:16', expectedVideoGenerations: 0, expectedAudioGenerations: 0, expectedExternalExecutions: 1, estimatedCost: null, rendererStatus: 'READY', schemaStatus: 'READY', humanApprovalRequired: true });
       if (url === '/api/productions') return response({ productionId: '22222222-2222-4222-8222-222222222222', brandId, jobStatus: 'QUEUED' });
       if (url.includes('/start')) return response({ accepted: true });
+      if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
+      if (url === `/api/productions/22222222-2222-4222-8222-222222222222?brandId=${brandId}`) {
+        return response({ id: '22222222-2222-4222-8222-222222222222', brandId, brandName: 'Attune',
+          title: 'Human moment', renderMode: 'FAST', renderer: 'moneyprinterturbo', status: 'RUNNING',
+          jobStatus: 'RUNNING', operationalStatus: 'RUNNING', progress: [], actualProviderCalls: 0,
+          ambiguousExecutions: 0, jobError: {}, shotRegenerations: [] });
+      }
       throw new Error(`Unexpected ${url}`);
     });
-    render(<NewProduction onCreated={onCreated} />);
+    const view = render(<NewProduction onCreated={onCreated} />);
     fireEvent.change(await screen.findByLabelText('Brand'), { target: { value: brandId } });
     for (const [label, value] of [['Production title','Human moment'],['Hook','Notice first'],['Core message','Attention creates understanding'],['Creative brief','A believable couple pauses'],['CTA','Tune in']]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -132,8 +139,16 @@ describe('V2.7 operator console', () => {
     const start = screen.getByRole('button', { name: 'START PRODUCTION' });
     expect(start).toBeTruthy(); fireEvent.click(start);
     await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({
+      id: '22222222-2222-4222-8222-222222222222', brandId,
+    }));
     expect(paths.some(([path]) => path === '/api/productions')).toBe(true);
     expect(paths.some(([path]) => path.endsWith('/start'))).toBe(true);
+    const canonical = onCreated.mock.calls[0][0];
+    expect(canonical.id).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+    view.rerender(<ProductionDetail production={canonical} />);
+    expect(await screen.findByRole('heading', { name: 'Human moment' })).toBeTruthy();
+    expect(paths.filter(([path]) => path === `/api/productions/${canonical.id}?brandId=${brandId}`).length).toBeGreaterThanOrEqual(2);
   });
 
   it('renders durable progress and keeps Retry distinct from Regenerate', async () => {
@@ -184,5 +199,30 @@ describe('V2.7 operator console', () => {
     expect(await screen.findByText('RUNNING')).toBeTruthy(); first.unmount(); status = 'COMPLETED';
     render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
     expect(await screen.findByText('COMPLETED')).toBeTruthy();
+  });
+
+  it('preflights one immutable shot revision before explicit cost confirmation', async () => {
+    const calls = [];
+    vi.spyOn(window, 'prompt').mockReturnValue('Quieter pause');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fetch.mockImplementation((url, options = {}) => {
+      calls.push([url, options.method || 'GET', options.body]);
+      if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
+      if (url.endsWith('/preflight')) return response({ preflightId: 'shot-fp', provider: 'replicate',
+        model: 'quality/test', resolution: '720p', estimatedCost: null, providerCalls: 0 });
+      if (url.endsWith('/regenerate')) return response({ accepted: true, publicationTriggered: false });
+      return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Quality creative',
+        renderMode: 'QUALITY', renderer: 'v2.5-quality', status: 'COMPLETED', jobStatus: 'COMPLETED',
+        operationalStatus: 'AWAITING_REVIEW', canonicalRequest: {}, progress: [], actualProviderCalls: 3,
+        ambiguousExecutions: 0, jobError: {}, shotRegenerations: [], jobPayload: { canonicalRawInput: {
+          creative_plan: { shots: [{ shotId: 'operator-shot-1', assetId: 'operator-video-1',
+            purpose: 'Create ambiguity', durationSeconds: 5 }] },
+        } } });
+    });
+    render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'REGENERATE THIS SHOT' }));
+    await waitFor(() => expect(calls.some(([url]) => url.endsWith('/shots/operator-shot-1/preflight'))).toBe(true));
+    await waitFor(() => expect(calls.some(([url, method, body]) => url.endsWith('/shots/operator-shot-1/regenerate')
+      && method === 'POST' && JSON.parse(body).confirmation === true)).toBe(true));
   });
 });

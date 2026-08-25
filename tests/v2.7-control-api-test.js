@@ -19,6 +19,8 @@ async function main() {
     async startProduction(body) { calls.push(['start', body]); return { productionId: PRODUCTION_ID, accepted: true }; },
     async retryProduction(body) { calls.push(['retry', body]); return { productionId: PRODUCTION_ID, accepted: true }; },
     async regenerateProduction(body) { calls.push(['regenerate', body]); return { productionId: 'new-production', requiresExplicitStart: true }; },
+    async preflightShotRegeneration(body) { calls.push(['shot-preflight', body]); return { preflightId: 'shot-fingerprint', expectedProviderCalls: 1, providerCalls: 0 }; },
+    async regenerateShot(body) { calls.push(['shot-regenerate', body]); return { regenerationId: 'shot-revision', accepted: true, publicationTriggered: false }; },
   };
   const server = createControlServer({ service, logger: { error() {} } });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -37,7 +39,16 @@ async function main() {
       brandId: BRAND_ID, requestId: '33333333-3333-4333-8333-333333333333', reason: 'Stronger hook',
     });
     assert.equal(regenerated.status, 201); assert.equal(regenerated.payload.requiresExplicitStart, true);
-    assert.deepEqual(calls.map(([name]) => name), ['preflight','create','start','retry','regenerate']);
+    const shotPreflight = await post(base, `/api/productions/${PRODUCTION_ID}/shots/operator-shot-1/preflight`, {
+      brandId: BRAND_ID, requestId: '44444444-4444-4444-8444-444444444444', instruction: 'Quieter pause',
+    });
+    assert.equal(shotPreflight.status, 200); assert.equal(shotPreflight.payload.providerCalls, 0);
+    const shotRegenerated = await post(base, `/api/productions/${PRODUCTION_ID}/shots/operator-shot-1/regenerate`, {
+      brandId: BRAND_ID, requestId: '44444444-4444-4444-8444-444444444444', instruction: 'Quieter pause',
+      preflightId: 'shot-fingerprint', confirmation: true,
+    });
+    assert.equal(shotRegenerated.status, 202); assert.equal(shotRegenerated.payload.publicationTriggered, false);
+    assert.deepEqual(calls.map(([name]) => name), ['preflight','create','start','retry','regenerate','shot-preflight','shot-regenerate']);
     console.log('V2.7 Control API production command routes passed (zero provider calls).');
   } finally { await new Promise((resolve) => server.close(resolve)); }
 }
