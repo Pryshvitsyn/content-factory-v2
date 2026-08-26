@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const { buildWanInput, DEFAULT_MODEL: DEFAULT_VIDEO_MODEL } = require('../providers/replicate-wan-video-adapter');
 const { DEFAULT_SPEECH_MODEL } = require('../providers/openai-media-provider');
 const { validateStructuredConsistency } = require('../../worker/v2.1-production-orchestrator');
+const { SPOKEN_COPY_CONTRACT_VERSION, semanticCopyEqual } = require('../v2.8.1/spoken-copy-contract');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
@@ -269,8 +270,9 @@ function buildProductionInput(raw = {}) {
   const voiceover = object('voiceover', raw.voiceover);
   if (typeof voiceover.enabled !== 'boolean') throw new ProductionInputError('voiceover.enabled must be a boolean');
   const assets = [...videoAssets];
+  let voiceText = null;
   if (voiceover.enabled) {
-    const voiceText = text('voiceover.text', voiceover.text);
+    voiceText = text('voiceover.text', voiceover.text);
     const voiceAssetId = text('voiceover.asset_id', voiceover.asset_id || 'voiceover-main');
     const voiceProvider = voiceover.provider || 'openai-media';
     const voiceModel = voiceover.model || DEFAULT_SPEECH_MODEL;
@@ -293,7 +295,26 @@ function buildProductionInput(raw = {}) {
     shots.forEach((shot) => shot.required_assets.push(voiceAssetId));
   }
 
-  const script = { brand_id: brandId, title, hook, core_message: coreMessage, cta, scenes: scriptScenes };
+  const approvedSpokenCopy = optionalText(raw.approved_spoken_copy)
+    || voiceText
+    || scriptScenes.map((scene) => scene.dialogue_or_voiceover).filter(Boolean).join(' ')
+    || [hook, coreMessage, cta].join(' ');
+  if (voiceText && !semanticCopyEqual(approvedSpokenCopy, voiceText)) {
+    throw new ProductionInputError('approved_spoken_copy must semantically equal authoritative voiceover.text');
+  }
+  const rawSpokenPolicy = raw.spoken_copy_policy === undefined ? {} : object('spoken_copy_policy', raw.spoken_copy_policy);
+  if (rawSpokenPolicy.strict_approved_copy !== undefined && typeof rawSpokenPolicy.strict_approved_copy !== 'boolean') {
+    throw new ProductionInputError('spoken_copy_policy.strict_approved_copy must be a boolean');
+  }
+  const spokenCopyPolicy = Object.freeze({
+    contractVersion: optionalText(rawSpokenPolicy.contract_version) || SPOKEN_COPY_CONTRACT_VERSION,
+    source: optionalText(rawSpokenPolicy.source) || (voiceText ? 'voiceover_asset_compatibility' : 'scene_dialogue_compatibility'),
+    strictApprovedCopy: rawSpokenPolicy.strict_approved_copy !== false,
+  });
+  const script = { brand_id: brandId, title, hook, core_message: coreMessage, cta,
+    approved_spoken_copy: approvedSpokenCopy,
+    spoken_copy_policy: { contract_version: spokenCopyPolicy.contractVersion, source: spokenCopyPolicy.source,
+      strict_approved_copy: spokenCopyPolicy.strictApprovedCopy }, scenes: scriptScenes };
   const shotPlan = { brand_id: brandId, shots, continuity };
   const assetPlan = { brand_id: brandId, assets };
   validateStructuredConsistency('SCRIPT', script, []);
@@ -315,6 +336,8 @@ function buildProductionInput(raw = {}) {
     coreMessage,
     creativeConcept,
     cta,
+    approvedSpokenCopy,
+    spokenCopyPolicy,
     continuity,
     visualStyle,
     audioIntent,
@@ -333,7 +356,16 @@ function buildProductionInput(raw = {}) {
     normalized.renderer = renderMode === 'FAST' ? fastRender.renderer : 'v2.5-quality';
     normalized.fastRender = fastRender;
   }
-  const fingerprint = stableFingerprint(normalized);
+  const hasVersionedSpokenCopyContract = raw.approved_spoken_copy !== undefined || raw.spoken_copy_policy !== undefined;
+  const fingerprintSource = hasVersionedSpokenCopyContract ? normalized : (() => {
+    const legacy = { ...normalized, script: { ...normalized.script } };
+    delete legacy.approvedSpokenCopy;
+    delete legacy.spokenCopyPolicy;
+    delete legacy.script.approved_spoken_copy;
+    delete legacy.script.spoken_copy_policy;
+    return legacy;
+  })();
+  const fingerprint = stableFingerprint(fingerprintSource);
   return Object.freeze({
     ...normalized,
     ...(!isV26 ? { renderMode: 'QUALITY', renderer: 'v2.5-quality', fastRender: null } : {}),

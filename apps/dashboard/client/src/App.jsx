@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api, artifactUrl, decideReview } from './api';
 
 const NAV = ['Overview', 'New Production', 'Productions', 'Review Queue', 'Brands', 'Providers / Renderers'];
-const TERMINAL = new Set(['APPROVED','REJECTED','FAILED','COMPLETED','CANCELLED']);
+const TERMINAL = new Set(['APPROVED','REJECTED','FAILED','VALIDATION_FAILED','COMPLETED','CANCELLED']);
 
 function commandId() { return globalThis.crypto?.randomUUID?.() || '11111111-1111-4111-8111-111111111111'; }
 
@@ -41,7 +41,7 @@ function Overview({ navigate }) {
     <div className="overview-actions"><button className="primary" onClick={() => navigate('New Production')}>NEW PRODUCTION</button></div>
     <div className="overview-grid">
       <Section title="Recent productions">{productions.length ? productions.slice(0, 6).map((item, index) => <button className="row-button" key={item.id || `recent-${index}`} onClick={() => navigate('Productions', item)}><span><strong>{item.title || item.name}</strong><small>{item.brandName} · {formatDate(item.createdAt)}</small></span><Badge value={item.operationalStatus || item.status} /></button>) : <Empty text="No productions yet." />}</Section>
-      <Section title="Needs attention">{productions.filter((item) => ['FAILED','FAILED_RETRYABLE'].includes(item.operationalStatus)).length ? productions.filter((item) => ['FAILED','FAILED_RETRYABLE'].includes(item.operationalStatus)).slice(0, 5).map((item) => <p key={item.id}>{item.title} · <Badge value={item.operationalStatus} /></p>) : <Empty text="No failed productions." />}</Section>
+      <Section title="Needs attention">{productions.filter((item) => ['FAILED','FAILED_RETRYABLE','VALIDATION_FAILED'].includes(item.operationalStatus)).length ? productions.filter((item) => ['FAILED','FAILED_RETRYABLE','VALIDATION_FAILED'].includes(item.operationalStatus)).slice(0, 5).map((item) => <p key={item.id}>{item.title} · <Badge value={item.operationalStatus} /></p>) : <Empty text="No failed productions." />}</Section>
       <Section title="Review queue">{reviews.length ? reviews.slice(0, 4).map((item, index) => <p key={item.id || `review-${index}`}>{item.brandName} · {item.productionName}</p>) : <Empty text="Nothing awaiting review." />}</Section>
       <Section title="Provider availability">{providers.slice(0, 7).map((item, index) => <p key={item.id || `${item.provider}-${index}`}>{item.displayName || item.provider} <Badge value={item.availability} /></p>)}</Section>
     </div>
@@ -73,7 +73,7 @@ export function NewProduction({ onCreated = () => {} }) {
   async function prepare(event) {
     event.preventDefault(); setBusy('preflight'); setError(null); setPreflight(null);
     try { setPreflight(await api('/api/productions/preflight', { method: 'POST', body: JSON.stringify(form) })); }
-    catch (failure) { setError(failure.message); } finally { setBusy(null); }
+    catch (failure) { setError(failure); } finally { setBusy(null); }
   }
   async function start() {
     setBusy('start'); setError(null);
@@ -82,12 +82,12 @@ export function NewProduction({ onCreated = () => {} }) {
       await api(`/api/productions/${created.productionId}/start`, { method: 'POST', body: JSON.stringify({ brandId: form.brandId, confirmation: true }) });
       const canonical = await api(`/api/productions/${created.productionId}?brandId=${form.brandId}`);
       onCreated(canonical);
-    } catch (failure) { setError(failure.message); } finally { setBusy(null); }
+    } catch (failure) { setError(failure); } finally { setBusy(null); }
   }
 
   return <Page title="New Production" eyebrow="SIMPLE MODE · CANONICAL INPUT">
     <p className="page-note">Choose a brand and renderer, describe the creative, then preflight. Preflight never starts production.</p>
-    {error ? <div className="error-panel">{error}</div> : null}
+    {error ? <div className="error-panel"><strong>{error.code || 'PREFLIGHT_FAILED'}</strong><p>{error.message || String(error)}</p><ValidationDetails evidence={error.details?.validation} /></div> : null}
     <State state={catalog}>{({ brands, providers }) => {
       const catalogProviders = providers.filter((item) => item.id && Array.isArray(item.models));
       const fastReady = providers.some((item) => (item.id === 'moneyprinterturbo' || item.capability === 'FAST RENDERER') && item.configured);
@@ -202,8 +202,8 @@ export function ProductionDetail({ production, onBack = () => {} }) {
     } catch (error) { setMessage(error.message); } finally { setAction(null); }
   }
   return <State state={state}>{({ item, stages, artifacts }) => <><button className="back" onClick={onBack}>← All productions</button><div className="detail-head"><div><span className="eyebrow">{item.brandName}</span><h2>{item.title || item.name}</h2><code>{item.id}</code></div><Badge value={item.operationalStatus} /></div><p className="page-note">{item.renderMode} · {item.renderer} · Publication: NOT TRIGGERED</p>{message ? <div className="notice">{message}</div> : null}
-    <Section title="Progress"><div className="progress-line">{item.progress.map((stage) => <article key={stage.key}><span>{stage.status === 'COMPLETED' ? '✓' : stage.status === 'RUNNING' ? '●' : stage.status === 'FAILED' ? '!' : '—'}</span><strong>{stage.label}</strong><Badge value={stage.status} /></article>)}</div></Section>
-    <div className="detail-columns"><Section title="Creative input"><pre className="canonical">{JSON.stringify(item.jobPayload?.canonicalRawInput || item.canonicalRequest || {}, null, 2)}</pre></Section><Section title="Validation & cost"><KeyValue label="Validation" value={item.validationStatus} /><KeyValue label="Actual external requests" value={String(item.actualProviderCalls ?? 0)} /><KeyValue label="Known cost" value="UNKNOWN" /><KeyValue label="Human review" value={item.reviewState} /><KeyValue label="Auto publish" value="NO" />{item.validationEvidence || item.reviewPayload?.technicalValidation ? <details><summary>Technical validation</summary><pre>{JSON.stringify(item.validationEvidence || item.reviewPayload.technicalValidation, null, 2)}</pre></details> : null}</Section></div>
+    <Section title="Progress"><div className="progress-line">{item.progress.map((stage) => <article key={stage.key}><span>{stage.status === 'COMPLETED' ? '✓' : stage.status === 'RUNNING' ? '●' : ['FAILED','BLOCKED'].includes(stage.status) ? '!' : '—'}</span><strong>{stage.label}</strong><Badge value={stage.status} /></article>)}</div></Section>
+    <div className="detail-columns"><Section title="Creative input"><pre className="canonical">{JSON.stringify(item.jobPayload?.canonicalRawInput || item.canonicalRequest || {}, null, 2)}</pre></Section><Section title="Validation & cost"><KeyValue label="Validation" value={item.validationStatus} /><KeyValue label="Actual external requests" value={String(item.actualProviderCalls ?? 0)} /><KeyValue label="Known cost" value="UNKNOWN" /><KeyValue label="Human review" value={item.reviewState} /><KeyValue label="Auto publish" value="NO" /><ValidationDetails evidence={item.validationEvidence || item.reviewPayload?.technicalValidation} /></Section></div>
     <Section title="Master & generated assets"><div className="artifact-grid">{artifacts.length ? artifacts.map((artifact) => <ArtifactCard artifact={artifact} key={`${artifact.sourceId}-${artifact.artifactId}`} />) : <Empty text="No safely scoped artifacts yet." />}</div></Section>
     {item.renderMode === 'QUALITY' ? <Section title="Creative plan & shot revisions"><div className="collection">{(item.jobPayload?.canonicalRawInput?.creative_plan?.shots || []).map((shot) => <article className="row-button" key={shot.shotId}><span><strong>{shot.shotId} · {shot.purpose}</strong><small>{shot.durationSeconds}s · {shot.assetId}</small></span><button className="regenerate" disabled={action || ['RUNNING','QUEUED'].includes(item.jobStatus) || item.ambiguousExecutions > 0} onClick={() => regenerateShot(item, shot)}>REGENERATE THIS SHOT</button></article>)}{item.shotRegenerations?.length ? <Collection title="Immutable revision history" items={item.shotRegenerations} render={(entry) => `${entry.shotId} · revision ${entry.revisionNo} · ${entry.replacementAssetId} · ${entry.status}`} /> : null}</div></Section> : null}
     <Section title="Engine detail"><div className="pipeline">{stages.map((stage) => <article className="stage" key={stage.stage}><span>{String(stage.sequence).padStart(2, '0')}</span><strong>{stage.stage}</strong><Badge value={stage.status || 'NOT_STARTED'} /><small>Attempt {stage.attempt || '—'} · {stage.provider || 'provider n/a'} / {stage.model || 'model n/a'}</small>{Object.keys(stage.error || {}).length ? <pre>{JSON.stringify(stage.error, null, 2)}</pre> : null}</article>)}</div></Section>
@@ -214,6 +214,15 @@ export function ProductionDetail({ production, onBack = () => {} }) {
 function ArtifactCard({ artifact }) {
   const url = artifactUrl(artifact); const media = artifact.contentType?.startsWith('video/') ? <video controls preload="metadata" src={url} /> : artifact.contentType?.startsWith('image/') ? <img src={url} alt={artifact.artifactId} /> : artifact.contentType?.startsWith('audio/') ? <audio controls preload="metadata" src={url} /> : null;
   return <article className="artifact-card">{media}<strong>{artifact.type}</strong><code>{artifact.artifactId}</code><small>v{artifact.version} · {formatDate(artifact.createdAt)}</small><Badge value={artifact.reviewState || artifact.validationStatus} /><small>{artifact.provenance?.provider || artifact.provenance?.renderer || 'provider n/a'} / {artifact.provenance?.model || 'model n/a'}</small></article>;
+}
+
+function ValidationDetails({ evidence }) {
+  if (!evidence) return null;
+  const checks = Array.isArray(evidence.checks) ? evidence.checks : Array.isArray(evidence) ? evidence : [];
+  return <details open={evidence.status === 'FAIL'}><summary>Structured validation details</summary>
+    <div className="validation-summary"><KeyValue label="Status / score" value={`${evidence.status || 'RECORDED'} · ${evidence.score ?? 'n/a'}`} /><KeyValue label="Class" value={evidence.validationClass} /><KeyValue label="Timestamp" value={formatDate(evidence.timestamp)} /><KeyValue label="Master artifact" value={evidence.masterArtifact?.id} /></div>
+    {checks.map((check) => <article className="validation-check" key={check.code}><div><code>{check.code}</code><Badge value={check.status} /></div><p>{check.message}</p><small>Actual: {JSON.stringify(check.details?.actual ?? check.details?.actualMs ?? null)}</small><small>Expected: {JSON.stringify(check.details?.expected ?? check.details?.expectedMs ?? null)}</small></article>)}
+  </details>;
 }
 
 export function ReviewQueue() {

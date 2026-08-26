@@ -172,6 +172,34 @@ describe('V2.7 operator console', () => {
     await waitFor(() => expect(calls.some(([url]) => url.endsWith('/regenerate'))).toBe(true));
   });
 
+  it('shows post-render validation failure as completed generation/assembly with review blocked', async () => {
+    fetch.mockImplementation((url) => {
+      if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
+      return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Validation failure',
+        renderMode: 'QUALITY', renderer: 'v2.5-quality', status: 'RUNNING', jobStatus: 'RETRYING',
+        operationalStatus: 'VALIDATION_FAILED', validationStatus: 'FAIL', reviewState: 'BLOCKED',
+        progress: [
+          { key: 'planning', label: 'Planning', status: 'COMPLETED' },
+          { key: 'generation', label: 'Provider Generation', status: 'COMPLETED' },
+          { key: 'assembly', label: 'Master Assembly', status: 'COMPLETED' },
+          { key: 'validation', label: 'Validation', status: 'FAILED' },
+          { key: 'review', label: 'Human Review', status: 'BLOCKED' },
+        ], actualProviderCalls: 3, ambiguousExecutions: 0, shotRegenerations: [], jobError: {
+          code: 'LIVE_MASTER_VALIDATION_FAILED', message: 'Master failed required quality validation' },
+        validationEvidence: { status: 'FAIL', score: 0.929, validationClass: 'POST_RENDER',
+          timestamp: '2026-08-26T00:00:00.000Z', masterArtifact: { id: `production:${review.productionId}:master` },
+          checks: [{ code: 'voice_copy_integrity', status: 'FAIL', message: 'Planned speech text mismatch.',
+            details: { actual: 'hook core cta', expected: 'hook cta' } }] } });
+    });
+    render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    expect(await screen.findByText('Provider Generation')).toBeTruthy();
+    expect(screen.getByText('Master Assembly')).toBeTruthy();
+    expect(screen.getByText('Human Review')).toBeTruthy();
+    expect(screen.getByText('voice_copy_integrity')).toBeTruthy();
+    expect(screen.getByText(/Actual: "hook core cta"/)).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+  });
+
   it('can explicitly start a prepared immutable regeneration from production detail', async () => {
     const calls = [];
     fetch.mockImplementation((url, options = {}) => {

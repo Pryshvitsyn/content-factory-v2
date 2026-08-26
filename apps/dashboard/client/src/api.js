@@ -4,7 +4,12 @@ export async function api(path, options = {}) {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(payload?.error?.message || `Request failed: ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || `Request failed: ${response.status}`);
+    error.code = payload?.error?.code || 'REQUEST_FAILED';
+    error.details = payload?.error?.details || null;
+    throw error;
+  }
   return payload;
 }
 

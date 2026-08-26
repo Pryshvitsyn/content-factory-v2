@@ -29,6 +29,7 @@ function operationalStatus(item) {
   if (item.reviewState === 'APPROVED') return 'APPROVED';
   if (item.reviewState === 'REJECTED') return 'REJECTED';
   if (item.reviewState === 'AWAITING_HUMAN_APPROVAL') return 'AWAITING_REVIEW';
+  if (item.validationStatus === 'FAIL') return 'VALIDATION_FAILED';
   if (item.jobStatus === 'RETRYING') return 'FAILED_RETRYABLE';
   if (item.jobStatus === 'DEAD_LETTER') return 'FAILED';
   if (item.jobStatus === 'RUNNING') return 'RUNNING';
@@ -38,16 +39,21 @@ function operationalStatus(item) {
 
 function progressFor(item) {
   const state = operationalStatus(item);
-  const terminalFailure = ['FAILED','FAILED_RETRYABLE','CANCELLED'].includes(state);
+  const terminalFailure = ['FAILED','FAILED_RETRYABLE','VALIDATION_FAILED','CANCELLED'].includes(state);
+  const validationReached = Boolean(item.validationStatus);
+  const masterIdentity = item.validationEvidence?.masterArtifact || item.jobResult?.masterArtifact || null;
+  const providerCompleted = validationReached || Boolean(masterIdentity) || item.jobStatus === 'COMPLETED';
   return [
-    { key: 'input', label: 'Input', status: item.canonicalRequest ? 'COMPLETED' : 'PENDING' },
     { key: 'planning', label: 'Planning', status: item.jobId ? 'COMPLETED' : 'PENDING' },
-    { key: 'rendering', label: 'Rendering', status: item.jobStatus === 'RUNNING' ? 'RUNNING'
-      : item.jobStatus === 'COMPLETED' ? 'COMPLETED' : terminalFailure ? 'FAILED' : 'PENDING' },
+    { key: 'generation', label: 'Provider Generation', status: providerCompleted ? 'COMPLETED'
+      : item.jobStatus === 'RUNNING' ? 'RUNNING' : terminalFailure ? 'FAILED' : 'PENDING' },
+    { key: 'assembly', label: 'Master Assembly', status: masterIdentity ? 'COMPLETED'
+      : item.jobStatus === 'RUNNING' && providerCompleted ? 'RUNNING' : terminalFailure ? 'FAILED' : 'PENDING' },
     { key: 'validation', label: 'Validation', status: item.validationStatus === 'PASS' ? 'COMPLETED'
       : item.validationStatus ? 'FAILED' : 'PENDING' },
-    { key: 'review', label: 'Review', status: ['APPROVED','REJECTED'].includes(item.reviewState) ? 'COMPLETED'
-      : item.reviewState === 'AWAITING_HUMAN_APPROVAL' ? 'RUNNING' : 'PENDING' },
+    { key: 'review', label: 'Human Review', status: ['APPROVED','REJECTED'].includes(item.reviewState) ? 'COMPLETED'
+      : item.reviewState === 'AWAITING_HUMAN_APPROVAL' ? 'RUNNING'
+        : item.reviewState === 'BLOCKED' || item.validationStatus === 'FAIL' ? 'BLOCKED' : 'PENDING' },
   ];
 }
 

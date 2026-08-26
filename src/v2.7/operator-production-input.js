@@ -3,6 +3,7 @@
 const { buildProductionInput, stableFingerprint } = require('../v2.5/production-input');
 const { planCreative } = require('./creative-director-planner');
 const { LEGACY_FAST_MODEL } = require('./quality-video-profile');
+const { createSpokenCopyPlan } = require('../v2.8.1/spoken-copy-contract');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OBJECTIVES = new Set(['ORGANIC_REACH','ENGAGEMENT','TRAFFIC','LEAD_GENERATION','APP_INSTALL','PURCHASE','BOOKING','SEO_AUTHORITY','RETENTION','EXPERIMENT']);
@@ -44,13 +45,6 @@ function compactBrandContext(brand = {}) {
   return values.join(' | ').slice(0, 1200) || null;
 }
 
-function sceneCopy({ index, count, hook, coreMessage, cta }) {
-  if (count === 1) return `${hook} ${coreMessage} ${cta}`;
-  if (index === 0) return hook;
-  if (index === count - 1) return cta;
-  return coreMessage;
-}
-
 function buildRawInput(request, brand, { productionKey = null, qualityProfile = null } = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new OperatorInputError('request must be an object');
   const brandId = required('brandId', request.brandId, 64);
@@ -76,7 +70,7 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
   const coreMessage = required('coreMessage', request.coreMessage || request.creativeBrief, 4000);
   const creativeBrief = required('creativeBrief', request.creativeBrief || request.coreMessage, 4000);
   const cta = required('cta', request.cta, 800);
-  const voiceoverText = optional(request.voiceover, 2400) || `${hook} ${coreMessage} ${cta}`;
+  const explicitVoiceover = optional(request.voiceover, 2400);
   const visualDirection = optional(request.visualDirection, 2400)
     || 'Believable human behavior, cinematic naturalism, restrained camera, no app UI, no glossy stock-ad look.';
   const audience = optional(request.audience, 800);
@@ -88,16 +82,16 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
     optimizePrompt: false, interpolateOutput: false, sampleShift: 12, seedStrategy: 'per-shot-deterministic' };
   const creativePlan = planCreative({ request: { ...request, creativeBrief }, brand, qualityProfile: profile });
   const count = creativePlan.shots.length;
+  const spokenCopy = createSpokenCopyPlan({ hook, coreMessage, cta, explicitVoiceover, sceneCount: count });
   const scenes = creativePlan.shots.map((planned, index) => {
     const number = index + 1;
-    const copy = sceneCopy({ index, count, hook, coreMessage, cta });
     return {
       scene_id: `operator-scene-${number}`,
       duration_seconds: planned.durationSeconds,
       location: planned.environment,
       visual: planned.description,
       emotional_intent: planned.emotionalIntent,
-      dialogue_or_voiceover: copy,
+      dialogue_or_voiceover: spokenCopy.sceneSpokenCopy[index],
       shots: [{
         shot_id: planned.shotId,
         asset_id: planned.assetId,
@@ -131,6 +125,12 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
     aspect_ratio: aspectRatio,
     hook,
     core_message: coreMessage,
+    approved_spoken_copy: spokenCopy.approvedSpokenCopy,
+    spoken_copy_policy: {
+      contract_version: spokenCopy.contractVersion,
+      source: spokenCopy.source,
+      strict_approved_copy: spokenCopy.strictApprovedCopy,
+    },
     creative_concept: [mode === 'QUALITY' ? `Narrative arc: ${hook} → ${coreMessage} → ${cta}` : creativeBrief,
       brandContext && `Brand context: ${brandContext}`].filter(Boolean).join('\n'),
     cta,
@@ -145,7 +145,7 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
         : { voice: optional(request.voice, 120) || 'en-US-AvaNeural-Female' }),
       language: optional(request.language, 24) || 'en',
       instructions: optional(request.voiceoverInstructions, 1000) || 'Warm, clear, natural delivery. Speech intelligibility has priority.',
-      text: voiceoverText },
+      text: spokenCopy.approvedSpokenCopy },
     continuity: {
       characters: ['Characters and human details explicitly described in the operator brief'],
       locations: ['Location and layout explicitly described in the operator brief'],
