@@ -43,14 +43,25 @@ function progressFor(item) {
   const validationReached = Boolean(item.validationStatus);
   const masterIdentity = item.validationEvidence?.masterArtifact || item.jobResult?.masterArtifact || null;
   const providerCompleted = validationReached || Boolean(masterIdentity) || item.jobStatus === 'COMPLETED';
+  const lifecycle = item.qualityLifecycle || item.validationEvidence?.lifecycle
+    || item.jobError?.details?.quality?.lifecycle || item.jobError?.validation?.lifecycle || {};
+  const stage = (value, fallback = 'PENDING') => value === 'PASS' ? 'COMPLETED'
+    : value === 'WARN' ? 'WARN' : value === 'FAIL' ? 'FAILED'
+      : value === 'AWAITING' ? 'RUNNING' : value === 'BLOCKED' ? 'BLOCKED'
+        : value === 'NOT_STARTED' ? 'PENDING' : fallback;
   return [
-    { key: 'planning', label: 'Planning', status: item.jobId ? 'COMPLETED' : 'PENDING' },
-    { key: 'generation', label: 'Provider Generation', status: providerCompleted ? 'COMPLETED'
-      : item.jobStatus === 'RUNNING' ? 'RUNNING' : terminalFailure ? 'FAILED' : 'PENDING' },
-    { key: 'assembly', label: 'Master Assembly', status: masterIdentity ? 'COMPLETED'
-      : item.jobStatus === 'RUNNING' && providerCompleted ? 'RUNNING' : terminalFailure ? 'FAILED' : 'PENDING' },
-    { key: 'validation', label: 'Validation', status: item.validationStatus === 'PASS' ? 'COMPLETED'
-      : item.validationStatus ? 'FAILED' : 'PENDING' },
+    { key: 'pre-execution', label: 'Pre-Execution', status: stage(lifecycle.preExecution, item.jobId ? 'COMPLETED' : 'PENDING') },
+    { key: 'generation', label: 'Provider Generation', status: stage(lifecycle.providerGeneration, providerCompleted ? 'COMPLETED'
+      : item.jobStatus === 'RUNNING' ? 'RUNNING' : terminalFailure ? 'FAILED' : 'PENDING') },
+    { key: 'source-technical', label: 'Source Technical', status: stage(lifecycle.sourceTechnical) },
+    { key: 'source-visual', label: 'Source Visual', status: stage(lifecycle.sourceVisual) },
+    { key: 'temporal-quality', label: 'Temporal Quality', status: stage(lifecycle.temporalQuality) },
+    { key: 'creative-compliance', label: 'Creative Compliance', status: stage(lifecycle.creativeCompliance) },
+    { key: 'assembly', label: 'Master Assembly', status: stage(lifecycle.masterAssembly, masterIdentity ? 'COMPLETED'
+      : lifecycle.sourceVisual === 'FAIL' ? 'BLOCKED' : item.jobStatus === 'RUNNING' && providerCompleted ? 'RUNNING' : terminalFailure ? 'FAILED' : 'PENDING') },
+    { key: 'master-technical', label: 'Master Technical', status: stage(lifecycle.masterTechnical) },
+    { key: 'final-quality', label: 'Final Quality', status: stage(lifecycle.finalQuality,
+      item.validationStatus === 'PASS' ? 'COMPLETED' : item.validationStatus === 'WARN' ? 'WARN' : item.validationStatus ? 'FAILED' : 'PENDING') },
     { key: 'review', label: 'Human Review', status: ['APPROVED','REJECTED'].includes(item.reviewState) ? 'COMPLETED'
       : item.reviewState === 'AWAITING_HUMAN_APPROVAL' ? 'RUNNING'
         : item.reviewState === 'BLOCKED' || item.validationStatus === 'FAIL' ? 'BLOCKED' : 'PENDING' },

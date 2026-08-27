@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { canonicalGuidance, canonicalNegativeIntent } = require('../v2.9/negative-intent');
 
 function clean(value) { return typeof value === 'string' && value.trim() ? value.trim() : null; }
 function hash(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
@@ -44,6 +45,7 @@ function planCreative({ request, brand, qualityProfile }) {
     props: 'Keep established props and spatial relationships consistent.',
     referenceMedia: [], imageToVideo: { requested: false, referenceAssetIds: [], capabilityRequired: false },
   });
+  const negativeIntent = canonicalNegativeIntent();
   const negative = ['app UI', 'phone close-up', 'glossy stock-ad look', 'exaggerated emotional acting', 'generated text', 'melodrama'];
   const shots = Array.from({ length: count }, (_, index) => {
     const isLast = index === count - 1;
@@ -60,7 +62,8 @@ function planCreative({ request, brand, qualityProfile }) {
       `Continuity identity ${continuity.identity}: preserve appearance, wardrobe, environment, practical lighting, and props across shots.`,
       brain.status === 'AVAILABLE' ? `Brand Brain factual context: ${brain.facts.map((fact) => `${fact.key}=${fact.value}`).join('; ')}. Operator brief remains authoritative.` : 'Brand Brain is empty; use only operator-supplied creative facts.',
       clean(request.additionalInstructions) && `Operator constraints: ${clean(request.additionalInstructions)}`,
-      `Avoid: ${negative.join(', ')}.`,
+      `Canonical negative intent: ${canonicalGuidance(negativeIntent)}`,
+      `Additional creative exclusions: ${negative.join(', ')}.`,
     ].filter(Boolean).join('\n');
     return Object.freeze({
       shotId: `operator-shot-${index + 1}`, assetId: `operator-video-${index + 1}`,
@@ -70,12 +73,13 @@ function planCreative({ request, brand, qualityProfile }) {
       lensComposition: 'Natural perspective, layered depth, vertical 9:16 composition', lighting,
       style: clean(request.visualDirection) || 'Cinematic naturalism; specific, restrained human behavior',
       continuityIdentity: continuity.identity, generationPrompt: prompt, negativeGuidance: negative,
+      negativeIntent,
       seed: deterministicSeed(request.requestId, index, qualityProfile?.seedStrategy || 'per-shot-deterministic'),
     });
   });
   return Object.freeze({
     schemaVersion: 1, planner: 'v2.7.1-deterministic-creative-director', operatorBriefAuthoritative: true,
-    brandBrain: brain, continuity, shots,
+    brandBrain: brain, continuity, negativeIntent, shots,
   });
 }
 

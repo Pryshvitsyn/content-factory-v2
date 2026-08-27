@@ -14,6 +14,8 @@ const { MasterProductionOrchestrator } = require('../../worker/v2.1-master-produ
 const { DurableFastRenderer, PostgresFastRenderRepository } = require('../v2.6/durable-fast-renderer');
 const { MoneyPrinterTurboAdapter } = require('../v2.6/moneyprinterturbo-adapter');
 const { QualityRendererLane, RendererRouter } = require('../v2.6/renderer-router');
+const { VisualQualityEvaluator } = require('../v2.9/visual-quality-evaluator');
+const { DisabledSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator');
 
 function planOnlyAdapter(provider, capability, model) {
   return Object.freeze({
@@ -50,7 +52,7 @@ function unavailableQualityLane() {
 }
 
 function createProductionRuntime({ db, storage, config, env = process.env, logger = console,
-  reviewService = null, mediaInspector = null, adapterFactory = null } = {}) {
+  reviewService = null, mediaInspector = null, adapterFactory = null, visualQualityEvaluator = null } = {}) {
   if (!db || !storage || !config) throw new Error('db, storage, and config are required');
   const artifactService = new ArtifactService({ storage });
   const reviews = reviewService || new ControlReviewService({ db });
@@ -65,10 +67,14 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     mediaRepository = new PostgresMediaExecutionRepository({ db });
     const mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
       artifactService, mediaInspector: inspector, assetRepository: new PostgresAssetRepository() });
+    const evaluator = visualQualityEvaluator || new VisualQualityEvaluator({
+      semanticAdapter: new DisabledSemanticVisualEvaluatorAdapter(),
+    });
     masterOrchestrator = new MasterProductionOrchestrator({ providerGateway: gateway, artifactService,
       renderer: new FfmpegMasterRenderer(), reviewService: reviews, mediaExecutor,
-      masterProbeValidator: validateMasterProbe });
-    qualityLane = new QualityRendererLane({ masterOrchestrator, mediaExecutionRepository: mediaRepository });
+      masterProbeValidator: validateMasterProbe, sourceQualityEvaluator: evaluator, finalQualityEvaluator: evaluator });
+    qualityLane = new QualityRendererLane({ masterOrchestrator, mediaExecutionRepository: mediaRepository,
+      qualityEvaluator: evaluator });
   } else {
     qualityLane = unavailableQualityLane();
     const adapter = adapterFactory ? adapterFactory(config.fastRenderer)

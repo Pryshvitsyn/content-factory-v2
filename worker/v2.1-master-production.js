@@ -6,6 +6,8 @@ const { generateMediaAsset } = require('./v2.1-media-generation');
 const { buildTimeline, assembleMedia } = require('./v2.1-timeline-assembly');
 const { containsSemanticSegment, normalizeSpokenCopy, semanticCopyEqual,
   semanticSegmentsEqual } = require('../src/v2.8.1/spoken-copy-contract');
+const { combineResults, qualityCheck, qualityResult: structuredQualityResult, REASON_CODES } = require('../src/v2.9/quality-contract');
+const { AudioQualityEvaluator, EditorialQualityEvaluator, buildProductionQuality } = require('../src/v2.9/audio-editorial-quality');
 
 const FINAL_MASTER_DELIVERY_PROFILE = Object.freeze({
   width: 1080,
@@ -49,6 +51,42 @@ function canonicalFingerprint(value) {
     return input;
   };
   return crypto.createHash('sha256').update(JSON.stringify(sort(value))).digest('hex');
+}
+
+function jsonSafe(value) {
+  return JSON.parse(JSON.stringify(value, (key, item) => (
+    Buffer.isBuffer(item) || key === 'jpeg' || key === 'gray' ? undefined : item
+  )));
+}
+
+async function persistVisualQualityEvidence({ artifactService, brandId, productionId, assetId,
+  sourceArtifact, evaluation, evaluationClass = 'source' } = {}) {
+  const sampledFrames = [];
+  for (let index = 0; index < (evaluation.sampledFrames || []).length; index += 1) {
+    const frame = evaluation.sampledFrames[index];
+    const frameArtifact = await artifactService.createVersion({
+      artifactId: `brand:${brandId}:asset:${assetId}:quality:${evaluationClass}:frame:${index + 1}`,
+      type: 'binary', content: frame.jpeg,
+      idempotencyKey: `${sourceArtifact?.contentHash || assetId}:${evaluationClass}:${frame.timestampMs}:${frame.analysisHash}`,
+      provider: 'ffmpeg', model: 'v2.9-deterministic-frame-sampler', validationStatus: 'quality_evidence',
+    });
+    sampledFrames.push(Object.freeze({ ratio: frame.ratio, timestampMs: frame.timestampMs,
+      analysisHash: frame.analysisHash, artifactId: frameArtifact.artifactId,
+      artifactVersion: frameArtifact.version, storageKey: frameArtifact.storageKey,
+      contentHash: frameArtifact.contentHash, contentType: 'image/jpeg' }));
+  }
+  const sanitized = { ...jsonSafe(evaluation), sampledFrames };
+  const evidenceArtifact = await artifactService.createVersion({
+    artifactId: `brand:${brandId}:asset:${assetId}:quality:${evaluationClass}:evaluation`, type: 'text',
+    content: JSON.stringify({ schemaVersion: '2.9', brandId, productionId, assetId,
+      sourceArtifact: sourceArtifact ? { artifactId: sourceArtifact.artifactId, version: sourceArtifact.version,
+        storageKey: sourceArtifact.storageKey, contentHash: sourceArtifact.contentHash } : null,
+      evaluation: sanitized }),
+    idempotencyKey: `${sourceArtifact?.contentHash || assetId}:${evaluationClass}:${canonicalFingerprint(sanitized)}`,
+    provider: 'content-factory-quality', model: 'v2.9', validationStatus: 'quality_evidence',
+  });
+  return Object.freeze({ ...sanitized, evidenceArtifact: Object.freeze({ artifactId: evidenceArtifact.artifactId,
+    version: evidenceArtifact.version, storageKey: evidenceArtifact.storageKey, contentHash: evidenceArtifact.contentHash }) });
 }
 
 function contentTypeForKind(kind) {
@@ -261,7 +299,9 @@ function validateMasterQuality({ productionId = 'validation', script, shotPlan, 
 }
 
 class MasterProductionOrchestrator {
-  constructor({ providerGateway, artifactService, renderer, reviewService = null, mediaExecutor = null, masterProbeValidator = null } = {}) {
+  constructor({ providerGateway, artifactService, renderer, reviewService = null, mediaExecutor = null,
+    masterProbeValidator = null, sourceQualityEvaluator = null, finalQualityEvaluator = null,
+    audioQualityEvaluator = new AudioQualityEvaluator(), editorialQualityEvaluator = new EditorialQualityEvaluator() } = {}) {
     requireValue('providerGateway', providerGateway);
     requireValue('artifactService', artifactService);
     requireValue('renderer', renderer);
@@ -271,6 +311,10 @@ class MasterProductionOrchestrator {
     this.reviewService = reviewService;
     this.mediaExecutor = mediaExecutor;
     this.masterProbeValidator = masterProbeValidator;
+    this.sourceQualityEvaluator = sourceQualityEvaluator;
+    this.finalQualityEvaluator = finalQualityEvaluator || sourceQualityEvaluator;
+    this.audioQualityEvaluator = audioQualityEvaluator;
+    this.editorialQualityEvaluator = editorialQualityEvaluator;
   }
 
   async build({ productionId, workspaceId = null, brandId, workerId, script, shotPlan, assetPlan, resolvedMedia = [], qualityPolicy = {} } = {}) {
@@ -289,6 +333,9 @@ class MasterProductionOrchestrator {
     const timeline = buildMasterTimeline({ productionId, script, shotPlan, assetPlan, fps: settings.fps });
     const reusable = new Map(resolvedMedia.map((media) => [String(media.assetId), media]));
     const mediaResults = [];
+    const sourceEvaluations = [];
+    const rawSourceEvaluations = [];
+    const qualityTier = String(assetPlan.assets.find((asset) => asset.kind === 'video')?.generation_requirements?.profile || 'STANDARD').toUpperCase();
     for (const asset of assetPlan.assets) {
       if (!['image', 'video', 'voice', 'audio'].includes(asset.kind)) continue;
       let media = reusable.get(String(asset.asset_id));
@@ -387,7 +434,92 @@ class MasterProductionOrchestrator {
           media = Object.freeze({ ...media, brandId, artifact, provenanceArtifact });
         }
       }
+      if (asset.kind === 'video' && this.sourceQualityEvaluator) {
+        let evaluation;
+        try {
+          evaluation = await this.sourceQualityEvaluator.evaluate({ media, creativePlan: qualityPolicy.creativePlan || null,
+            negativeIntent: asset.generation_requirements?.negative_intent || null,
+            expectedAspectRatio: asset.generation_requirements?.aspect_ratio || '9:16', intendedContentType: 'cinematic',
+            qualityTier, provider: media.provider, model: media.model,
+            generationSettings: asset.generation_requirements?.resolved_settings || {}, motionExpected: true,
+            evaluationClass: 'SOURCE' });
+        } catch (cause) {
+          evaluation = structuredQualityResult({ qualityClass: 'SOURCE_VISUAL_GATE', tier: qualityTier, checks: [qualityCheck({
+            code: cause.code || REASON_CODES.FRAME_CORRUPTION, status: 'FAIL', qualityClass: 'SOURCE_VISUAL',
+            reason: `Source frame analysis failed: ${cause.message}`,
+          })], metadata: { evaluatorVersion: 'v2.9', provider: media.provider, model: media.model } });
+        }
+        rawSourceEvaluations.push(Object.freeze({ assetId: asset.asset_id, shotIds: asset.required_for_shots,
+          provider: media.provider, model: media.model, evaluation }));
+        const persisted = await persistVisualQualityEvidence({ artifactService: this.artifactService, brandId, productionId,
+          assetId: asset.asset_id, sourceArtifact: media.artifact, evaluation, evaluationClass: 'source' });
+        sourceEvaluations.push(Object.freeze({ assetId: asset.asset_id, shotIds: asset.required_for_shots,
+          provider: media.provider, model: media.model, profile: qualityTier,
+          seed: asset.generation_requirements?.seed ?? null,
+          canonicalPrompt: asset.generation_requirements?.prompt || null,
+          providerTranslatedPrompt: media.provenance?.providerTranslatedPrompt || media.provenance?.input?.prompt || null,
+          sourceProbe: media.mediaProbe || null,
+          generationSettings: asset.generation_requirements?.resolved_settings || {}, ...persisted }));
+        if (persisted.status === 'FAIL') {
+          const sourceQuality = Object.freeze({ ...combineResults({ qualityClass: 'SOURCE_QUALITY', tier: qualityTier,
+            results: sourceEvaluations }), shots: Object.freeze(sourceEvaluations),
+            deterministicVisual: persisted.deterministicVisual || null, temporal: persisted.temporal || null,
+            semantic: persisted.semantic || null });
+          const quality = buildProductionQuality({ tier: qualityTier, preExecution: preExecutionValidation,
+            sourceQuality });
+          const error = new Error(`Source visual quality failed for ${asset.asset_id}; master assembly was blocked`);
+          error.code = 'SOURCE_QUALITY_VALIDATION_FAILED';
+          error.details = { quality, sourceQuality, providerExecutions: sourceEvaluations.length,
+            paidRegenerationTriggered: false, nextAction: 'REGENERATE_SHOT' };
+          throw error;
+        }
+      }
       mediaResults.push(media);
+    }
+
+    let continuityQuality = null;
+    if (this.sourceQualityEvaluator?.evaluateContinuity) {
+      try {
+        continuityQuality = await this.sourceQualityEvaluator.evaluateContinuity({ shotEvaluations: rawSourceEvaluations,
+          creativePlan: qualityPolicy.creativePlan || null, qualityTier });
+      } catch (cause) {
+        continuityQuality = structuredQualityResult({ qualityClass: 'CONTINUITY_QUALITY', tier: qualityTier,
+          checks: [qualityCheck({ code: REASON_CODES.CONTINUITY_FAILURE, status: 'FAIL', qualityClass: 'CONTINUITY_QUALITY',
+            reason: `Cross-shot continuity evaluation failed: ${cause.message}`, hardFailure: false })],
+          metadata: { evaluatorVersion: 'v2.9' } });
+      }
+    }
+    const sourceQuality = this.sourceQualityEvaluator
+      ? Object.freeze({ ...combineResults({ qualityClass: 'SOURCE_QUALITY', tier: qualityTier,
+        results: [...sourceEvaluations, continuityQuality].filter(Boolean) }),
+        shots: Object.freeze(sourceEvaluations),
+        deterministicVisual: combineResults({ qualityClass: 'SOURCE_VISUAL', tier: qualityTier,
+          results: sourceEvaluations.map((item) => item.deterministicVisual).filter(Boolean) }),
+        temporal: combineResults({ qualityClass: 'TEMPORAL_QUALITY', tier: qualityTier,
+          results: sourceEvaluations.map((item) => item.temporal).filter(Boolean) }),
+        semantic: combineResults({ qualityClass: 'CREATIVE_COMPLIANCE', tier: qualityTier,
+          results: sourceEvaluations.map((item) => item.semantic).filter(Boolean) }),
+        continuity: continuityQuality })
+      : null;
+    if (sourceQuality?.status === 'FAIL') {
+      const quality = buildProductionQuality({ tier: qualityTier, preExecution: preExecutionValidation, sourceQuality });
+      const error = new Error('Source semantic or continuity quality failed; master assembly was blocked');
+      error.code = 'SOURCE_QUALITY_VALIDATION_FAILED';
+      error.details = { quality, sourceQuality, providerExecutions: sourceEvaluations.length,
+        paidRegenerationTriggered: false, nextAction: 'REGENERATE_SHOT' };
+      throw error;
+    }
+    const audioQuality = this.audioQualityEvaluator?.evaluate({ mediaResults, expectedDurationMs: timeline.durationMs,
+      speechExpected: settings.requireVoiceForSpokenCopy, qualityTier }) || null;
+    const editorialQuality = this.editorialQualityEvaluator?.evaluate({ timeline, shotPlan, script, qualityTier }) || null;
+    if (audioQuality?.status === 'FAIL' || editorialQuality?.status === 'FAIL') {
+      const quality = buildProductionQuality({ tier: qualityTier, preExecution: preExecutionValidation,
+        sourceQuality, audioQuality, editorialQuality });
+      const error = new Error('Source audio or editorial quality failed; master assembly was blocked');
+      error.code = 'SOURCE_EDITORIAL_QUALITY_FAILED';
+      error.details = { quality, sourceQuality, audioQuality, editorialQuality,
+        paidRegenerationTriggered: false, nextAction: 'REVISE_OR_REGENERATE' };
+      throw error;
     }
 
     const assembly = assembleMedia({ timeline, mediaResults });
@@ -401,7 +533,27 @@ class MasterProductionOrchestrator {
       requireAudio: true,
     }) : null;
     const postRenderValidation = validatePostRenderQuality({ timeline, probe: rendered.probe, policy: settings });
-    const quality = combineQuality(preExecutionValidation, postRenderValidation);
+    let finalEvaluation = null;
+    if (this.finalQualityEvaluator) {
+      const masterMedia = { bytes: rendered.output, contentType: rendered.contentType,
+        mediaProbe: rendered.probe, provider: 'ffmpeg', model: 'master' };
+      try {
+        finalEvaluation = await this.finalQualityEvaluator.evaluate({ media: masterMedia,
+          creativePlan: qualityPolicy.creativePlan || null, expectedAspectRatio: '9:16', intendedContentType: 'final-master',
+          qualityTier, provider: 'ffmpeg', model: 'master', generationSettings: rendered.provenance?.profile || {},
+          motionExpected: true, evaluationClass: 'FINAL' });
+      } catch (cause) {
+        finalEvaluation = structuredQualityResult({ qualityClass: 'FINAL_VISUAL_GATE', tier: qualityTier, checks: [qualityCheck({
+          code: cause.code || REASON_CODES.FRAME_CORRUPTION, status: 'FAIL', qualityClass: 'FINAL_QUALITY',
+          reason: `Final-master frame analysis failed: ${cause.message}`,
+        })], metadata: { evaluatorVersion: 'v2.9', provider: 'ffmpeg', model: 'master' } });
+      }
+    }
+    const provisionalFinalQuality = finalEvaluation ? jsonSafe(finalEvaluation) : null;
+    const provisionalQuality = this.sourceQualityEvaluator
+      ? buildProductionQuality({ tier: qualityTier, preExecution: preExecutionValidation, sourceQuality,
+        audioQuality, editorialQuality, masterTechnical: postRenderValidation, finalQuality: provisionalFinalQuality })
+      : combineQuality(preExecutionValidation, postRenderValidation);
     const fingerprint = canonicalFingerprint({ brandId, productionId, script, shotPlan, assetPlan, settings });
     const artifact = await this.artifactService.createVersion({
       artifactId: `production:${productionId}:master`,
@@ -410,8 +562,15 @@ class MasterProductionOrchestrator {
       idempotencyKey: `${brandId}:${productionId}:master:${fingerprint}`,
       provider: rendered.provenance?.renderer || 'ffmpeg',
       model: rendered.provenance?.profile ? JSON.stringify(rendered.provenance.profile) : null,
-      validationStatus: quality.status === 'PASS' ? 'awaiting_human_approval' : 'failed',
+      validationStatus: provisionalQuality.status === 'FAIL' ? 'failed' : 'awaiting_human_approval',
     });
+    const finalQuality = finalEvaluation ? await persistVisualQualityEvidence({ artifactService: this.artifactService,
+      brandId, productionId, assetId: `master-${productionId}`, sourceArtifact: artifact,
+      evaluation: finalEvaluation, evaluationClass: 'final' }) : null;
+    const quality = this.sourceQualityEvaluator
+      ? buildProductionQuality({ tier: qualityTier, preExecution: preExecutionValidation, sourceQuality,
+        audioQuality, editorialQuality, masterTechnical: postRenderValidation, finalQuality })
+      : provisionalQuality;
 
     const result = Object.freeze({
       productionId,
@@ -450,4 +609,5 @@ module.exports = {
   validateMasterQuality,
   validatePostRenderQuality,
   validatePreExecutionQuality,
+  persistVisualQualityEvidence,
 };

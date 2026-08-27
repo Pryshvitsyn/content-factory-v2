@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "reportClass": "IMMUTABLE_HISTORICAL_FORENSIC_AUDIT",
+  "productionId": "87738973-ae73-4963-8bb0-721a903c879c",
+  "generatedAt": "2026-08-26T21:06:11.456Z",
+  "providerCalls": 0,
+  "historicalArtifactsMutated": false,
+  "artifacts": {
+    "sourceVideo": {
+      "artifactId": "brand:a03def76-bd3d-4c8e-b00a-ec77616c5191:asset:operator-video-1",
+      "contentHash": "b73e1e4219991f0c57e4d00954ad3d56ef4907461e4c2be3248605d8656d45e0",
+      "probe": {
+        "width": 480,
+        "height": 832,
+        "fps": 16,
+        "durationSeconds": 5.0625,
+        "videoCodec": "h264",
+        "pixelFormat": "yuv420p",
+        "hasAudio": false,
+        "audioCodec": null,
+        "audioSampleRate": 0,
+        "sizeBytes": 282173
+      },
+      "samples": [
+        {
+          "ratio": 0.02,
+          "timestampSeconds": 0.101,
+          "path": "docs/forensics/v2.9-87738973/frames/source-01-2pct.jpg"
+        },
+        {
+          "ratio": 0.1,
+          "timestampSeconds": 0.506,
+          "path": "docs/forensics/v2.9-87738973/frames/source-02-10pct.jpg"
+        },
+        {
+          "ratio": 0.3,
+          "timestampSeconds": 1.519,
+          "path": "docs/forensics/v2.9-87738973/frames/source-03-30pct.jpg"
+        },
+        {
+          "ratio": 0.5,
+          "timestampSeconds": 2.531,
+          "path": "docs/forensics/v2.9-87738973/frames/source-04-50pct.jpg"
+        },
+        {
+          "ratio": 0.7,
+          "timestampSeconds": 3.544,
+          "path": "docs/forensics/v2.9-87738973/frames/source-05-70pct.jpg"
+        },
+        {
+          "ratio": 0.9,
+          "timestampSeconds": 4.556,
+          "path": "docs/forensics/v2.9-87738973/frames/source-06-90pct.jpg"
+        },
+        {
+          "ratio": 0.98,
+          "timestampSeconds": 4.961,
+          "path": "docs/forensics/v2.9-87738973/frames/source-07-98pct.jpg"
+        }
+      ]
+    },
+    "speech": {
+      "artifactId": "brand:a03def76-bd3d-4c8e-b00a-ec77616c5191:asset:voiceover-main",
+      "contentHash": "a893ecdbd970a6b42570caa067c7bb41d5414d20af135ec3908a8af5b9f95201",
+      "probe": {
+        "width": 0,
+        "height": 0,
+        "fps": 0,
+        "durationSeconds": 7.656,
+        "videoCodec": null,
+        "pixelFormat": null,
+        "hasAudio": true,
+        "audioCodec": "mp3",
+        "audioSampleRate": 24000,
+        "sizeBytes": 122496
+      }
+    },
+    "finalMaster": {
+      "artifactId": "production:87738973-ae73-4963-8bb0-721a903c879c:master",
+      "contentHash": "04b1e31eb1d8f2a334880613a56b8e6f25b78368e5511d5ff8c1091e91317191",
+      "probe": {
+        "width": 1080,
+        "height": 1920,
+        "fps": 30,
+        "durationSeconds": 5,
+        "videoCodec": "h264",
+        "pixelFormat": "yuv420p",
+        "hasAudio": true,
+        "audioCodec": "aac",
+        "audioSampleRate": 24000,
+        "sizeBytes": 2326146
+      },
+      "samples": [
+        {
+          "ratio": 0.02,
+          "timestampSeconds": 0.1,
+          "path": "docs/forensics/v2.9-87738973/frames/master-01-2pct.jpg"
+        },
+        {
+          "ratio": 0.1,
+          "timestampSeconds": 0.5,
+          "path": "docs/forensics/v2.9-87738973/frames/master-02-10pct.jpg"
+        },
+        {
+          "ratio": 0.3,
+          "timestampSeconds": 1.5,
+          "path": "docs/forensics/v2.9-87738973/frames/master-03-30pct.jpg"
+        },
+        {
+          "ratio": 0.5,
+          "timestampSeconds": 2.5,
+          "path": "docs/forensics/v2.9-87738973/frames/master-04-50pct.jpg"
+        },
+        {
+          "ratio": 0.7,
+          "timestampSeconds": 3.5,
+          "path": "docs/forensics/v2.9-87738973/frames/master-05-70pct.jpg"
+        },
+        {
+          "ratio": 0.9,
+          "timestampSeconds": 4.5,
+          "path": "docs/forensics/v2.9-87738973/frames/master-06-90pct.jpg"
+        },
+        {
+          "ratio": 0.98,
+          "timestampSeconds": 4.9,
+          "path": "docs/forensics/v2.9-87738973/frames/master-07-98pct.jpg"
+        }
+      ]
+    }
+  },
+  "transformAudit": {
+    "renderer": "ffmpeg",
+    "expectedOperations": [
+      "scale/crop source visual to 1080x1920",
+      "resample to 30 fps",
+      "mux external speech as AAC"
+    ],
+    "layoutCompositionOperationPresent": false,
+    "conclusionCode": "SOURCE_VISUAL_DEFECT_PRESERVED_IN_MASTER",
+    "conclusion": "The multi-panel/triptych composition is already visible in the immutable provider source samples. The final master preserves that composition while scaling/cropping and adding audio; FFmpeg did not introduce the layout."
+  }
+}

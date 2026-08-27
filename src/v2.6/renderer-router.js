@@ -9,10 +9,11 @@ class RendererRoutingError extends Error {
 }
 
 class QualityRendererLane {
-  constructor({ masterOrchestrator, mediaExecutionRepository } = {}) {
+  constructor({ masterOrchestrator, mediaExecutionRepository, qualityEvaluator = null } = {}) {
     if (!masterOrchestrator || typeof masterOrchestrator.build !== 'function') throw new Error('masterOrchestrator is required');
     this.masterOrchestrator = masterOrchestrator;
     this.mediaExecutionRepository = mediaExecutionRepository;
+    this.qualityEvaluator = qualityEvaluator;
   }
 
   async preflight({ input, brand, existing }) {
@@ -45,6 +46,14 @@ class QualityRendererLane {
     const audio = input.assetPlan.assets.filter((asset) => asset.kind === 'voice' || asset.kind === 'audio');
     const videoProfile = videos[0]?.generation_requirements || input.profile || {};
     const audioProfile = audio[0]?.generation_requirements || {};
+    const semanticAdapter = this.qualityEvaluator?.semanticAdapter || null;
+    const qualityEvaluatorPolicy = !semanticAdapter || semanticAdapter.provider === 'unconfigured'
+      ? 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED' : 'CONFIGURED_BOUNDED';
+    const selectedTier = String(videoProfile.profile || input.profile?.profile || 'STANDARD').toUpperCase();
+    const expectedQualityEvaluatorCalls = semanticAdapter
+      ? (semanticAdapter.estimatedCallsPerEvaluation * (videos.length + 1))
+        + (videos.length > 1 ? semanticAdapter.estimatedContinuityCalls || 0 : 0)
+      : 0;
     return {
       renderMode: 'QUALITY',
       renderer: 'v2.5-quality',
@@ -64,6 +73,15 @@ class QualityRendererLane {
       masterAssemblyMode: videos.length > 1 || audio.length ? 'ffmpeg-multi-track' : 'ffmpeg-single-visual',
       rendererAvailability: laneState.availability,
       dryRunRendererExecutions: 0,
+      expectedQualityEvaluatorCalls,
+      qualityEvaluatorPolicy,
+      expectedExternalExecutionClasses: [
+        ...(pending.some((asset) => asset.kind === 'video') ? ['VIDEO_GENERATION'] : []),
+        ...(pending.some((asset) => asset.kind === 'voice' || asset.kind === 'audio') ? ['SPEECH_GENERATION'] : []),
+        ...(expectedQualityEvaluatorCalls ? ['VISUAL_EVALUATION'] : []),
+      ],
+      readiness: qualityEvaluatorPolicy === 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED' && selectedTier !== 'ECONOMY'
+        ? 'BLOCKED' : 'READY',
     };
   }
 

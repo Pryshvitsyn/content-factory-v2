@@ -1,6 +1,23 @@
 'use strict';
 
 const DECISIONS = Object.freeze({ approve: 'APPROVED', reject: 'REJECTED' });
+const REJECTION_REASON_CODES = Object.freeze(['POOR_COMPOSITION','BAD_FACE','TEXT_ARTIFACT','WRONG_SUBJECT','BAD_MOTION',
+  'WRONG_EMOTION','LOW_REALISM','WEAK_HOOK','WEAK_CTA','BRAND_MISMATCH','OTHER']);
+
+function classifyRejectionReason(reason = '') {
+  const value = String(reason).toLowerCase();
+  if (/composit|panel|triptych|split|collage/.test(value)) return 'POOR_COMPOSITION';
+  if (/face|anatom|hand|finger|limb/.test(value)) return 'BAD_FACE';
+  if (/text|caption|subtitle|logo|watermark|gibberish/.test(value)) return 'TEXT_ARTIFACT';
+  if (/subject|person|people|product/.test(value)) return 'WRONG_SUBJECT';
+  if (/motion|flicker|morph|warp|jump|freeze/.test(value)) return 'BAD_MOTION';
+  if (/emotion|sentiment|tone/.test(value)) return 'WRONG_EMOTION';
+  if (/realism|fake|artificial/.test(value)) return 'LOW_REALISM';
+  if (/hook|opening/.test(value)) return 'WEAK_HOOK';
+  if (/cta|call.to.action|ending/.test(value)) return 'WEAK_CTA';
+  if (/brand|attune/.test(value)) return 'BRAND_MISMATCH';
+  return 'OTHER';
+}
 
 function requireText(name, value) {
   if (typeof value !== 'string' || value.trim() === '') throw new Error(`${name} is required`);
@@ -28,7 +45,7 @@ class ControlReviewService {
     if (!master?.artifact?.artifactId || !master.artifact.storageKey || !master.artifact.contentHash) {
       throw new Error('exact immutable master artifact is required');
     }
-    if (quality?.status !== 'PASS' || quality?.readyForHumanReview !== true || quality?.publicationAllowed !== false) {
+    if (!['PASS','WARN'].includes(quality?.status) || quality?.readyForHumanReview !== true || quality?.publicationAllowed !== false) {
       throw new Error('master is not eligible for human review');
     }
 
@@ -47,6 +64,7 @@ class ControlReviewService {
       renderer: renderContext?.renderer || master.artifact.provenance?.provider || 'ffmpeg',
       rendererStatus: renderContext?.rendererStatus || 'SUCCEEDED',
     };
+    const sourceShots = quality.results?.find((result) => result.qualityClass === 'SOURCE_QUALITY')?.shots || [];
     const assets = mediaResults.map((media) => ({
       assetId: media.assetId,
       kind: media.kind,
@@ -57,6 +75,15 @@ class ControlReviewService {
       contentType: media.contentType || null,
       durationMs: media.mediaProbe?.durationMs || media.temporal?.durationMs || null,
       requestId: media.requestId || media.provenance?.predictionId || null,
+      profile: media.provenance?.profile || media.provenance?.resolvedSettings?.profile || null,
+      sourceProbe: media.mediaProbe || null,
+      quality: sourceShots.find((shot) => shot.assetId === media.assetId) || null,
+      generationLatencyMs: (media.usage?.predict_time ?? media.usage?.predictTime) != null
+        && Number.isFinite(Number(media.usage?.predict_time ?? media.usage?.predictTime))
+        ? Math.round(Number(media.usage?.predict_time ?? media.usage?.predictTime) * 1000) : null,
+      cost: media.usage?.cost != null && Number.isFinite(Number(media.usage.cost))
+        ? { status: 'KNOWN', amount: Number(media.usage.cost) } : { status: 'UNKNOWN', amount: null },
+      usage: media.usage || null,
     }));
 
     const result = await this.db.query(
@@ -133,9 +160,10 @@ class ControlReviewService {
       }
       const inserted = await client.query(
         `/* v2.3:insert-review-decision */
-         INSERT INTO v2_3.master_review_decisions(review_item_id, decision, actor, reason)
-         VALUES ($1,$2,$3,$4) RETURNING *`,
-        [reviewItemId, terminalDecision, actor.trim(), reason?.trim() || null],
+         INSERT INTO v2_3.master_review_decisions(review_item_id, decision, actor, reason, metadata)
+         VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING *`,
+        [reviewItemId, terminalDecision, actor.trim(), reason?.trim() || null,
+          JSON.stringify(decision === 'reject' ? { reasonCode: classifyRejectionReason(reason) } : {})],
       );
       await client.query('COMMIT');
       return { ...inserted.rows[0], idempotent: false };
@@ -148,4 +176,4 @@ class ControlReviewService {
   }
 }
 
-module.exports = { ControlReviewService, DECISIONS, ReviewConflictError };
+module.exports = { ControlReviewService, DECISIONS, REJECTION_REASON_CODES, ReviewConflictError, classifyRejectionReason };

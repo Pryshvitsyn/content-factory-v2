@@ -5,6 +5,7 @@
   "main": "index.js",
   "directories": { "test": "tests" },
   "scripts": {
+    "test:v2.9": "node tests/v2.9-world-class-visual-quality-test.js && node tests/v2.8.1-validation-contract-test.js && node tests/v2.8-universal-provider-test.js && vitest run --config apps/dashboard/client/vite.config.js",
     "test:v2.8.1": "node tests/v2.8.1-validation-contract-test.js && node tests/v2.8-universal-provider-test.js && vitest run --config apps/dashboard/client/vite.config.js",
     "test:v2.8": "node tests/v2.8-universal-provider-test.js && vitest run --config apps/dashboard/client/vite.config.js",
     "test:v2.8:postgres": "node tests/v2.8-postgres-integration-test.js",

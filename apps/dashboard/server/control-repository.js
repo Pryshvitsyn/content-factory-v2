@@ -96,7 +96,7 @@ class ControlRepository {
         COALESCE(p.metadata->>'renderer','v2.5-quality') AS renderer,
         (p.metadata->'canonical_request'->>'targetDurationSeconds')::numeric AS "targetDurationSeconds",
         latest_job.id AS "jobId", latest_job.status AS "jobStatus", latest_job.error AS error,
-        COALESCE(review.validation_status,latest_job.error->'validation'->>'status',
+        COALESCE(review.quality_status,review.validation_status,latest_job.error->'validation'->>'status',
           latest_job.error->'details'->'quality'->>'status') AS "validationStatus",
         current_stage.stage AS "currentStage", current_stage.status AS "currentStageStatus",
         CASE WHEN p.metadata ? 'publication_policy'
@@ -116,7 +116,8 @@ class ControlRepository {
         WHERE j.production_id=p.id ORDER BY sr.updated_at DESC LIMIT 1
       ) current_stage ON true
       LEFT JOIN LATERAL (
-        SELECT ri.id,ri.validation_status FROM v2_3.master_review_items ri WHERE ri.production_id=p.id ORDER BY ri.created_at DESC LIMIT 1
+        SELECT ri.id,ri.validation_status,ri.validation_evidence->>'status' AS quality_status
+        FROM v2_3.master_review_items ri WHERE ri.production_id=p.id ORDER BY ri.created_at DESC LIMIT 1
       ) review ON true
       LEFT JOIN v2_3.master_review_decisions decision ON decision.review_item_id=review.id
       WHERE ($1::uuid IS NULL OR p.brand_id=$1) AND ($2::text IS NULL OR p.status=$2)
@@ -142,8 +143,10 @@ class ControlRepository {
           WHEN review.id IS NOT NULL THEN 'AWAITING_HUMAN_APPROVAL'
           WHEN COALESCE(latest_job.error->'validation'->>'status',latest_job.error->'details'->'quality'->>'status')='FAIL'
             THEN 'BLOCKED' ELSE NULL END AS "reviewState",
-        COALESCE(review.validation_status,latest_job.error->'validation'->>'status',
+        COALESCE(review.quality_status,review.validation_status,latest_job.error->'validation'->>'status',
           latest_job.error->'details'->'quality'->>'status') AS "validationStatus",
+        COALESCE(review.validation_evidence->'lifecycle',latest_job.error->'details'->'quality'->'lifecycle',
+          latest_job.error->'validation'->'lifecycle') AS "qualityLifecycle",
         COALESCE(review.validation_evidence,latest_job.error->'validation',
           CASE WHEN latest_job.error->'details'->'quality' IS NOT NULL THEN
             latest_job.error->'details'->'quality' || jsonb_build_object(
@@ -157,7 +160,7 @@ class ControlRepository {
         SELECT j.* FROM v2_1.jobs j WHERE j.production_id=p.id ORDER BY j.created_at DESC LIMIT 1
       ) latest_job ON true
       LEFT JOIN LATERAL (
-        SELECT ri.id,ri.validation_status,ri.validation_evidence,ri.review_payload FROM v2_3.master_review_items ri
+        SELECT ri.id,ri.validation_status,ri.validation_evidence,ri.validation_evidence->>'status' AS quality_status,ri.review_payload FROM v2_3.master_review_items ri
         WHERE ri.production_id=p.id ORDER BY ri.created_at DESC LIMIT 1
       ) review ON true
       LEFT JOIN v2_3.master_review_decisions decision ON decision.review_item_id=review.id

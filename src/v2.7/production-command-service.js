@@ -189,7 +189,9 @@ class ProductionCommandService {
       vendor: command.input.qualityVideoProfile?.vendor || null,
       capability: command.input.qualityVideoProfile?.capability || (command.input.renderMode === 'FAST' ? 'FAST_RENDER' : null),
       resolvedGenerationSettings: command.input.qualityVideoProfile?.resolvedSettings || null,
-      configurationStatus: command.input.renderMode === 'QUALITY' ? 'CONFIGURED' : plan.rendererAvailability?.availability || 'READY',
+      configurationStatus: plan.readiness === 'BLOCKED'
+        ? 'QUALITY_EVALUATOR_REQUIRED'
+        : command.input.renderMode === 'QUALITY' ? 'CONFIGURED' : plan.rendererAvailability?.availability || 'READY',
       resolution: command.input.qualityVideoProfile?.resolution || null,
       qualityMode: command.input.qualityVideoProfile?.goFast === false ? 'QUALITY' : 'FAST',
       promptOptimization: command.input.qualityVideoProfile?.optimizePrompt ?? null,
@@ -201,7 +203,10 @@ class ProductionCommandService {
       expectedProviderCalls: plan.expectedPaidProviderCalls || 0,
       expectedRendererJobs: plan.expectedRendererJobs || 0,
       expectedExternalExecutions: plan.expectedExternalServiceCalls
-        ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedRendererJobs || 0)),
+        ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedRendererJobs || 0) + (plan.expectedQualityEvaluatorCalls || 0)),
+      expectedQualityEvaluatorCalls: plan.expectedQualityEvaluatorCalls || 0,
+      qualityEvaluatorPolicy: plan.qualityEvaluatorPolicy || (command.input.renderMode === 'QUALITY' ? 'NOT_CONFIGURED' : 'NOT_APPLICABLE'),
+      expectedExternalExecutionClasses: plan.expectedExternalExecutionClasses || [],
       estimatedCost: plan.estimatedCost ?? null,
       costStatus: plan.costStatus || (plan.estimatedCost == null ? 'UNKNOWN' : 'KNOWN'),
       costNote: plan.costNote,
@@ -222,6 +227,10 @@ class ProductionCommandService {
     const command = await this.prepareCommand(request);
     if (!preflightId || preflightId !== command.input.fingerprint) {
       throw new ProductionCommandError(409, 'PREFLIGHT_STALE', 'Run preflight for the exact current production request before creating it');
+    }
+    if (command.prepared.plan.readiness === 'BLOCKED') {
+      throw new ProductionCommandError(409, 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED',
+        'STANDARD and PREMIUM production require a configured semantic visual evaluator before any paid generation');
     }
     const rows = await command.runtime.service.createDraft({ input: command.input, config: command.runtime.config,
       command: { source: 'v2.7-operator-console', requestId: request.requestId, actor: this.actor,

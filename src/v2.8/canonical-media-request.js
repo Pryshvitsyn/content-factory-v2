@@ -1,6 +1,7 @@
 'use strict';
 
 const { CAPABILITIES, normalizeCapability } = require('./capabilities');
+const { DEFAULT_NEGATIVE_INTENT, translateProviderPrompt } = require('../v2.9/negative-intent');
 
 class CanonicalMediaRequestError extends Error {
   constructor(code, message, details = null) {
@@ -47,7 +48,9 @@ function createCanonicalMediaRequest(raw = {}) {
     throw new CanonicalMediaRequestError('CANONICAL_SEED_INVALID', 'seed must be a non-negative integer');
   }
   return Object.freeze({
-    schemaVersion: '2.8', capability, prompt,
+    schemaVersion: '2.8', capability, prompt, canonicalPrompt: prompt,
+    providerPrompt: typeof raw.providerPrompt === 'string' && raw.providerPrompt.trim() ? raw.providerPrompt.trim() : prompt,
+    negativeIntent: Object.freeze(structuredClone(raw.negativeIntent || DEFAULT_NEGATIVE_INTENT)),
     negativePrompt: typeof raw.negativePrompt === 'string' ? raw.negativePrompt.trim() : '',
     durationSeconds, aspectRatio: raw.aspectRatio || null, resolution: raw.resolution || null,
     references: refs, audio: Object.freeze({ requested: raw.audio?.requested === true }),
@@ -68,15 +71,20 @@ function fromAsset(asset) {
   else if (refs.reference_videos?.length || refs.referenceVideos?.length) capability = CAPABILITIES.VIDEO_TO_VIDEO;
   else if (refs.character_images?.length || refs.style_images?.length || refs.characterImages?.length || refs.styleImages?.length) capability = CAPABILITIES.REFERENCE_TO_VIDEO;
   else if (refs.first_frame || refs.last_frame || refs.firstFrame || refs.lastFrame) capability = CAPABILITIES.IMAGE_TO_VIDEO;
+  const prompt = requirements.prompt || asset?.description;
+  const selection = requirements.provider_selection || { provider: requirements.provider,
+    vendor: requirements.vendor, model: requirements.model, modelVersion: requirements.model_version,
+    profile: requirements.profile || 'STANDARD' };
+  const translated = translateProviderPrompt({ canonicalPrompt: prompt,
+    negativeIntent: requirements.negative_intent || DEFAULT_NEGATIVE_INTENT,
+    provider: selection.provider, model: selection.model });
   return createCanonicalMediaRequest({
-    capability, prompt: requirements.prompt || asset?.description,
+    capability, prompt, providerPrompt: translated.providerPrompt, negativeIntent: translated.negativeIntent,
     negativePrompt: requirements.negative_prompt, durationSeconds: (requirements.target_clip_duration_ms || 0) / 1000 || null,
     aspectRatio: requirements.aspect_ratio, resolution: requirements.resolution, references: refs,
     audio: { requested: requirements.generate_audio === true }, camera: requirements.camera,
     continuity: requirements.continuity, seed: requirements.seed,
-    providerSelection: requirements.provider_selection || { provider: requirements.provider,
-      vendor: requirements.vendor, model: requirements.model, modelVersion: requirements.model_version,
-      profile: requirements.profile || 'STANDARD' },
+    providerSelection: selection,
     resolvedSettings: requirements.resolved_settings || requirements,
   });
 }
