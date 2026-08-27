@@ -61,8 +61,19 @@ function buildProductionQuality({ tier, preExecution, sourceQuality, audioQualit
   const creativeStatuses = [sourceQuality?.semantic?.status, sourceQuality?.continuity?.status].filter(Boolean);
   const creativeStatus = creativeStatuses.includes('FAIL') ? 'FAIL' : creativeStatuses.includes('WARN') ? 'WARN'
     : creativeStatuses.length ? 'PASS' : 'NOT_STARTED';
+  const sourceSemanticCalls = (sourceQuality?.shots || []).reduce((sum, shot) => (
+    sum + Number(shot.semantic?.metadata?.externalCalls || 0)), 0);
+  const continuityCalls = Number(sourceQuality?.continuity?.metadata?.externalCalls || 0);
+  const finalSemanticCalls = Number(finalQuality?.semantic?.metadata?.externalCalls || 0);
+  const externalCallAccounting = Object.freeze({
+    semanticVisualEvaluations: sourceSemanticCalls + finalSemanticCalls,
+    sourceSemanticEvaluations: sourceSemanticCalls,
+    finalSemanticEvaluations: finalSemanticCalls,
+    continuityEvaluations: continuityCalls,
+    totalEvaluatorCalls: sourceSemanticCalls + finalSemanticCalls + continuityCalls,
+  });
   const combined = combineResults({ qualityClass: 'FINAL_MASTER_QUALITY', tier, results,
-    metadata: { humanApprovalRequired: true, autoPublish: false } });
+    metadata: { humanApprovalRequired: true, autoPublish: false, externalCallAccounting } });
   return Object.freeze({ ...combined,
     readyForHumanReview: combined.status !== 'FAIL' && Boolean(masterTechnical) && Boolean(finalQuality),
     publicationAllowed: false,

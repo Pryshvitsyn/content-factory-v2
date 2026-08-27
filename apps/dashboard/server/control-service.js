@@ -68,6 +68,18 @@ function progressFor(item) {
   ];
 }
 
+function evaluatorAccounting(item) {
+  const quality = item.validationEvidence || item.jobError?.details?.quality || item.jobResult?.quality || null;
+  const accounting = quality?.metadata?.externalCallAccounting || {};
+  return Object.freeze({
+    actualSemanticEvaluations: Number(accounting.semanticVisualEvaluations || 0),
+    actualSourceSemanticEvaluations: Number(accounting.sourceSemanticEvaluations || 0),
+    actualFinalSemanticEvaluations: Number(accounting.finalSemanticEvaluations || 0),
+    actualContinuityEvaluations: Number(accounting.continuityEvaluations || 0),
+    actualEvaluatorCalls: Number(accounting.totalEvaluatorCalls || 0),
+  });
+}
+
 class ControlService {
   constructor({ repository, reviewService, commandService = null, storage, providers, providerCatalog = null, actor = 'local-operator' } = {}) {
     if (!repository) throw new Error('repository is required');
@@ -85,7 +97,11 @@ class ControlService {
   async health() { return { status: 'ok', database: await this.repository.health() }; }
   async overview() { return this.repository.overview(); }
   async listBrands() { return this.repository.listBrands(); }
-  async listProviders() { return this.providerCatalog ? this.providerCatalog.snapshot() : this.providers; }
+  async listProviders() {
+    if (!this.providerCatalog) return this.providers;
+    const catalog = await this.providerCatalog.snapshot();
+    return [...catalog, ...this.providers.filter((item) => item.capability === 'SEMANTIC VISUAL QA')];
+  }
 
   async addProviderModel({ brandId, provider, modelId, displayName, preset }) {
     if (!this.providerCatalog) throw new ControlError(503, 'CATALOG_PERSISTENCE_UNAVAILABLE', 'Provider catalog is unavailable');
@@ -118,8 +134,10 @@ class ControlService {
       ? await this.repository.executionSafety(item.id) : { ambiguousExecutions: 0, actualProviderCalls: 0 };
     const shotRegenerations = typeof this.repository.listShotRegenerations === 'function'
       ? await this.repository.listShotRegenerations(item.id, item.brandId) : [];
+    const evaluator = evaluatorAccounting(item);
     return { ...item, operationalStatus: operationalStatus(item), progress: progressFor(item), shotRegenerations,
       actualProviderCalls: execution.actualProviderCalls, ambiguousExecutions: execution.ambiguousExecutions,
+      ...evaluator, actualExternalCalls: execution.actualProviderCalls + evaluator.actualEvaluatorCalls,
       autoPublish: false };
   }
 
@@ -206,4 +224,4 @@ class ControlService {
   }
 }
 
-module.exports = { ControlService, ControlError, UUID_PATTERN, operationalStatus, progressFor };
+module.exports = { ControlService, ControlError, UUID_PATTERN, evaluatorAccounting, operationalStatus, progressFor };

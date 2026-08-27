@@ -48,6 +48,8 @@ function resolveV25Configuration(env = process.env, input = null) {
     storageRoot: required('CONTENT_FACTORY_STORAGE_ROOT', env.CONTENT_FACTORY_STORAGE_ROOT),
     inputFile: required('REAL_PRODUCTION_INPUT', env.REAL_PRODUCTION_INPUT),
     renderMode,
+    semanticVisualQaEnforced: input?.productionNamespace === 'v2.7-operator'
+      || env.SEMANTIC_VISUAL_ENABLED !== undefined,
   };
   if (renderMode === 'FAST') {
     if (!['true', 'false'].includes(env.MPT_ENABLED)) {

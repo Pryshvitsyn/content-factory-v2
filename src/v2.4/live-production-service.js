@@ -221,7 +221,8 @@ class LiveProductionService {
       paidLiveRun: config.live,
       existingState: existing?.jobStatus || null,
       publicationPolicy: input.publicationPolicy || { requiresHumanApproval: true, autoPublish: false },
-      readiness: preExecutionValidation?.status === 'PASS' ? 'READY' : 'NOT_READY',
+      readiness: lanePlan.readiness === 'BLOCKED' ? 'BLOCKED'
+        : preExecutionValidation?.status === 'PASS' ? 'READY' : 'NOT_READY',
       preExecutionValidation,
       finalMasterDeliveryProfile: FINAL_MASTER_DELIVERY_PROFILE,
       dryRunProviderCalls: 0,
@@ -482,6 +483,13 @@ class LiveProductionService {
   async run({ input, config }) {
     const prepared = await this.prepare({ input, config });
     this.logger.info?.('Controlled live production plan', prepared.plan);
+    if (prepared.plan.readiness === 'BLOCKED') {
+      throw new LiveProductionError('SEMANTIC_VISUAL_QA_NOT_CONFIGURED',
+        'Semantic visual evaluation is not configured and authorized for this quality tier; provider execution remains at zero.', {
+          providerExecutions: 0, evaluatorExecutions: 0, evaluatorStatus: prepared.plan.semanticEvaluatorStatus,
+          configurationErrors: prepared.plan.semanticEvaluatorConfigurationErrors || [],
+        });
+    }
     if (!config.live) return { dryRun: true, plan: prepared.plan };
 
     let allowRecoveredRetry = false;
@@ -537,7 +545,8 @@ class LiveProductionService {
           strictApprovedCopy: prepared.input.spokenCopyPolicy?.strictApprovedCopy !== false,
           requireVoiceTimingPlan: prepared.input.schemaVersion >= 2,
           requireProviderCompatibility: prepared.input.schemaVersion >= 2 && prepared.input.renderMode === 'QUALITY',
-          creativePlan: prepared.input.creativePlan || null },
+          creativePlan: prepared.input.creativePlan || null,
+          masterVisualTransforms: prepared.input.captions?.enabled === true },
       });
       const mediaResults = [...new Map(masterResult.assembly.clips.map((clip) => [clip.media.assetId, clip.media])).values()];
       const videoMedia = mediaResults.find((media) => media.kind === 'video' || media.kind === 'image') || mediaResults[0];
