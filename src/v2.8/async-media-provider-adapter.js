@@ -90,7 +90,9 @@ class AsyncMediaProviderAdapter extends UniversalMediaProviderAdapter {
       provenance: Object.freeze({ provider: this.provider, vendor: request.providerSelection.vendor || null,
         model: request.providerSelection.model, modelVersion: request.providerSelection.modelVersion || null,
         profile: request.providerSelection.profile, capability: request.capability,
-        resolvedSettings: request.resolvedSettings, requestId, adapterFamily: this.protocol.adapterFamily }) });
+        resolvedSettings: request.resolvedSettings, canonicalPrompt: request.canonicalPrompt,
+        providerTranslatedPrompt: request.providerPrompt, negativeIntent: request.negativeIntent,
+        requestId, adapterFamily: this.protocol.adapterFamily }) });
   }
   async recover(externalRequestIdOrOptions, options = {}) {
     const requestId = typeof externalRequestIdOrOptions === 'object' ? externalRequestIdOrOptions.requestId : externalRequestIdOrOptions;

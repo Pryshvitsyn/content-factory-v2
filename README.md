@@ -26,6 +26,8 @@ New Production
 
 Approval does not publish. Every Dashboard production requires human approval and has auto publication disabled. A real external production requires restarting the local Dashboard with `LIVE_PAID_GENERATION=true` and the existing provider/renderer configuration; opening the Dashboard alone never starts generation. See [`docs/V2.7-OPERATOR-CONSOLE.md`](docs/V2.7-OPERATOR-CONSOLE.md).
 
+QUALITY production now defaults to STANDARD and uses independent source technical, visual, temporal, creative, final-master, and human-review gates. STANDARD/PREMIUM fail closed before paid generation when semantic visual QA is not configured; ECONOMY remains available as an explicit DRAFT tier. See [`docs/V2.9-WORLD-CLASS-VISUAL-QUALITY.md`](docs/V2.9-WORLD-CLASS-VISUAL-QUALITY.md).
+
 ## Current Status
 
 - **Architecture:** V2

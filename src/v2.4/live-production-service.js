@@ -454,7 +454,9 @@ class LiveProductionService {
   }
 
   async fail({ productionId, jobId, workerId, error, providerBoundaryCrossed, durableAssetRecovery = false }) {
-    const retryableBeforeProvider = providerBoundaryCrossed !== true || durableAssetRecovery;
+    const qualityFailure = ['SOURCE_QUALITY_VALIDATION_FAILED','SOURCE_EDITORIAL_QUALITY_FAILED','LIVE_MASTER_VALIDATION_FAILED']
+      .includes(error.code);
+    const retryableBeforeProvider = !qualityFailure && (providerBoundaryCrossed !== true || durableAssetRecovery);
     const quality = error.details?.quality || error.details?.validation || null;
     const validation = quality ? {
       status: quality.status,
@@ -463,6 +465,7 @@ class LiveProductionService {
       validationClass: quality.validationClass || (error.code === 'LIVE_MASTER_VALIDATION_FAILED' ? 'POST_RENDER' : 'PRE_EXECUTION'),
       timestamp: new Date().toISOString(),
       masterArtifact: error.details?.masterArtifact || null,
+      lifecycle: quality.lifecycle || null,
     } : null;
     await this.db.query(`/* v2.4:fail-live-job */
       UPDATE v2_1.jobs SET status=$5, error=$4::jsonb, worker_id=NULL, lease_expires_at=NULL,
@@ -470,7 +473,7 @@ class LiveProductionService {
       WHERE id=$1 AND production_id=$2 AND worker_id=$3 AND status='RUNNING'`,
     [jobId, productionId, workerId, JSON.stringify({ code: error.code || 'LIVE_PRODUCTION_FAILED', message: error.message,
       details: error.details || null, providerBoundaryCrossed: providerBoundaryCrossed === true,
-      durableAssetRecovery, validation }), retryableBeforeProvider ? 'RETRYING' : 'FAILED']);
+      durableAssetRecovery, paidRegenerationTriggered: false, validation }), retryableBeforeProvider ? 'RETRYING' : 'FAILED']);
     if (!retryableBeforeProvider) {
       await this.db.query(`UPDATE v2_1.productions SET status='FAILED', completed_at=now(), updated_at=now() WHERE id=$1 AND status='RUNNING'`, [productionId]);
     }
@@ -533,12 +536,13 @@ class LiveProductionService {
         qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.schemaVersion >= 2 && prepared.input.voiceover?.enabled === true,
           strictApprovedCopy: prepared.input.spokenCopyPolicy?.strictApprovedCopy !== false,
           requireVoiceTimingPlan: prepared.input.schemaVersion >= 2,
-          requireProviderCompatibility: prepared.input.schemaVersion >= 2 && prepared.input.renderMode === 'QUALITY' },
+          requireProviderCompatibility: prepared.input.schemaVersion >= 2 && prepared.input.renderMode === 'QUALITY',
+          creativePlan: prepared.input.creativePlan || null },
       });
       const mediaResults = [...new Map(masterResult.assembly.clips.map((clip) => [clip.media.assetId, clip.media])).values()];
       const videoMedia = mediaResults.find((media) => media.kind === 'video' || media.kind === 'image') || mediaResults[0];
       const audioMedia = mediaResults.find((media) => media.kind === 'voice' || media.kind === 'audio');
-      if (masterResult.quality.status !== 'PASS' || !masterResult.quality.readyForHumanReview) {
+      if (masterResult.quality.status === 'FAIL' || !masterResult.quality.readyForHumanReview) {
         throw new LiveProductionError('LIVE_MASTER_VALIDATION_FAILED', 'Master failed required quality validation', {
           quality: masterResult.quality,
           inputArtifact: { id: inputArtifact.artifactId, version: inputArtifact.version, storageKey: inputArtifact.storageKey },

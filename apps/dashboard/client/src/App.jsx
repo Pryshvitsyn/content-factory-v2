@@ -5,6 +5,15 @@ const NAV = ['Overview', 'New Production', 'Productions', 'Review Queue', 'Brand
 const TERMINAL = new Set(['APPROVED','REJECTED','FAILED','VALIDATION_FAILED','COMPLETED','CANCELLED']);
 
 function commandId() { return globalThis.crypto?.randomUUID?.() || '11111111-1111-4111-8111-111111111111'; }
+function profileLabel(name) { return name === 'ECONOMY' ? 'ECONOMY / DRAFT' : name; }
+function preferredProfile(model) {
+  const names = Object.keys(model?.profiles || {});
+  return names.includes('STANDARD') ? 'STANDARD' : names.includes('PREMIUM') ? 'PREMIUM' : names[0] || '';
+}
+function sourceQualityFor(item) {
+  return item.validationEvidence?.results?.find((result) => result.qualityClass === 'SOURCE_QUALITY')
+    || item.jobError?.details?.sourceQuality || item.jobError?.details?.quality?.results?.find((result) => result.qualityClass === 'SOURCE_QUALITY') || null;
+}
 
 function useLoad(loader, dependencies = []) {
   const [state, setState] = useState({ loading: true, data: null, error: null });
@@ -105,7 +114,7 @@ export function NewProduction({ onCreated = () => {} }) {
         const route = qualityProviders[0]; const model = route?.models.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
         setForm((current) => ({ ...current, renderMode: 'QUALITY', captionsEnabled: false,
           provider: current.provider || route?.id || '', model: current.model || model?.modelId || '',
-          profile: current.profile || Object.keys(model?.profiles || {})[0] || '' })); setPreflight(null);
+          profile: current.profile || preferredProfile(model) })); setPreflight(null);
       };
       return <form className="production-form" onSubmit={prepare}>
         <Section title="1 · Production route">
@@ -118,14 +127,15 @@ export function NewProduction({ onCreated = () => {} }) {
             <label>Provider<select aria-label="Provider" required value={form.provider} onChange={(event) => {
               const route = catalogProviders.find((item) => item.id === event.target.value);
               const model = route?.models.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
-              setForm((current) => ({ ...current, provider: event.target.value, model: model?.modelId || '', profile: Object.keys(model?.profiles || {})[0] || '' })); setPreflight(null);
+              setForm((current) => ({ ...current, provider: event.target.value, model: model?.modelId || '', profile: preferredProfile(model) })); setPreflight(null);
             }}><option value="">Choose provider</option>{qualityProviders.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label>
             <label>Model<select aria-label="Model" required value={form.model} onChange={(event) => {
               const model = selectedModels.find((item) => item.modelId === event.target.value);
-              setForm((current) => ({ ...current, model: event.target.value, profile: Object.keys(model?.profiles || {})[0] || '' })); setPreflight(null);
+              setForm((current) => ({ ...current, model: event.target.value, profile: preferredProfile(model) })); setPreflight(null);
             }}><option value="">Choose model</option>{selectedModels.filter((item) => item.selectable !== false).map((item) => <option key={item.modelId} value={item.modelId}>{item.displayName}</option>)}</select></label>
-            <label>Profile<select aria-label="Profile" required value={form.profile} onChange={(event) => change('profile', event.target.value)}><option value="">Choose profile</option>{selectedProfiles.map((name) => <option key={name}>{name}</option>)}</select></label>
+            <label>Profile<select aria-label="Profile" required value={form.profile} onChange={(event) => change('profile', event.target.value)}><option value="">Choose profile</option>{selectedProfiles.map((name) => <option key={name} value={name}>{profileLabel(name)}</option>)}</select></label>
           </div> : null}
+          {form.renderMode === 'QUALITY' && form.profile === 'ECONOMY' ? <div className="warning-panel"><strong>Draft-quality source generation</strong><p>ECONOMY is intended for ideation and previews. It does not imply production-grade source fidelity.</p></div> : null}
           {brand ? <div className="brand-context"><strong>{brand.name} Brand Brain</strong><span>{brand.positioning || brand.mission || 'No Brand Brain context recorded. Operator brief remains authoritative.'}</span></div> : null}
         </Section>
         <Section title="2 · Creative brief"><div className="form-grid">
@@ -158,9 +168,10 @@ function ModeCard({ mode, selected, available, onSelect, description, unavailabl
 }
 
 function Preflight({ plan, onStart, busy }) {
-  return <section className="preflight"><span className="eyebrow">PREFLIGHT READY · PROVIDER EXECUTIONS 0</span><h2>Ready to start</h2><div className="plan-grid">
-    <KeyValue label="Brand" value={plan.brand} /><KeyValue label="Production" value={plan.production} /><KeyValue label="Mode / renderer" value={`${plan.renderMode} · ${plan.renderer}`} /><KeyValue label="Provider / model" value={[plan.provider, plan.vendor, plan.model].filter(Boolean).join(' · ')} /><KeyValue label="Profile / capability" value={[plan.profile, plan.capability].filter(Boolean).join(' · ')} /><KeyValue label="Resolution / quality" value={[plan.resolution, plan.qualityMode].filter(Boolean).join(' · ')} /><KeyValue label="Configuration" value={plan.configurationStatus} /><KeyValue label="Prompt optimization" value={plan.promptOptimization == null ? 'N/A' : plan.promptOptimization ? 'ENABLED' : 'DISABLED'} /><KeyValue label="Platform" value={plan.targetPlatform} /><KeyValue label="Master" value={`${plan.targetDurationSeconds} sec · ${plan.aspectRatio}`} /><KeyValue label="Expected generations" value={`${plan.expectedVideoGenerations} video · ${plan.expectedAudioGenerations} audio`} /><KeyValue label="External executions" value={String(plan.expectedExternalExecutions)} /><KeyValue label="Estimated cost" value={plan.estimatedCost ?? 'UNKNOWN'} /><KeyValue label="Renderer" value={plan.rendererStatus} /><KeyValue label="Schema" value={plan.schemaStatus} /><KeyValue label="Human approval" value={plan.humanApprovalRequired ? 'REQUIRED' : 'NO'} /><KeyValue label="Auto publish" value="NO" />
-  </div><p className="boundary">Starting may cross an external cost boundary. Approval of the final master will not publish it.</p><button className="start" type="button" disabled={busy} onClick={onStart}>{busy ? 'STARTING…' : 'START PRODUCTION'}</button></section>;
+  const blocked = plan.readiness === 'BLOCKED';
+  return <section className="preflight"><span className="eyebrow">{blocked ? 'PREFLIGHT BLOCKED · PROVIDER EXECUTIONS 0' : 'PREFLIGHT READY · PROVIDER EXECUTIONS 0'}</span><h2>{blocked ? 'Configuration required' : 'Ready to start'}</h2><div className="plan-grid">
+    <KeyValue label="Brand" value={plan.brand} /><KeyValue label="Production" value={plan.production} /><KeyValue label="Mode / renderer" value={`${plan.renderMode} · ${plan.renderer}`} /><KeyValue label="Provider / model" value={[plan.provider, plan.vendor, plan.model].filter(Boolean).join(' · ')} /><KeyValue label="Profile / capability" value={[profileLabel(plan.profile), plan.capability].filter(Boolean).join(' · ')} /><KeyValue label="Resolution / quality" value={[plan.resolution, plan.qualityMode].filter(Boolean).join(' · ')} /><KeyValue label="Configuration" value={plan.configurationStatus} /><KeyValue label="Prompt optimization" value={plan.promptOptimization == null ? 'N/A' : plan.promptOptimization ? 'ENABLED' : 'DISABLED'} /><KeyValue label="Quality evaluator" value={plan.qualityEvaluatorPolicy} /><KeyValue label="Evaluator calls" value={String(plan.expectedQualityEvaluatorCalls || 0)} /><KeyValue label="External classes" value={(plan.expectedExternalExecutionClasses || []).join(' · ') || 'NONE'} /><KeyValue label="Platform" value={plan.targetPlatform} /><KeyValue label="Master" value={`${plan.targetDurationSeconds} sec · ${plan.aspectRatio}`} /><KeyValue label="Expected generations" value={`${plan.expectedVideoGenerations} video · ${plan.expectedAudioGenerations} audio`} /><KeyValue label="External executions" value={String(plan.expectedExternalExecutions)} /><KeyValue label="Estimated cost" value={plan.estimatedCost ?? 'UNKNOWN'} /><KeyValue label="Renderer" value={plan.rendererStatus} /><KeyValue label="Schema" value={plan.schemaStatus} /><KeyValue label="Human approval" value={plan.humanApprovalRequired ? 'REQUIRED' : 'NO'} /><KeyValue label="Auto publish" value="NO" />
+  </div>{blocked ? <p className="warning"><strong>Production blocked.</strong> Configure semantic visual QA or deliberately select ECONOMY / DRAFT before crossing a paid boundary.</p> : null}<p className="boundary">Starting may cross an external cost boundary. Approval of the final master will not publish it.</p><button className="start" type="button" disabled={busy || blocked} onClick={onStart}>{busy ? 'STARTING…' : blocked ? 'START BLOCKED' : 'START PRODUCTION'}</button></section>;
 }
 
 function Brands() {
@@ -202,10 +213,10 @@ export function ProductionDetail({ production, onBack = () => {} }) {
     } catch (error) { setMessage(error.message); } finally { setAction(null); }
   }
   return <State state={state}>{({ item, stages, artifacts }) => <><button className="back" onClick={onBack}>← All productions</button><div className="detail-head"><div><span className="eyebrow">{item.brandName}</span><h2>{item.title || item.name}</h2><code>{item.id}</code></div><Badge value={item.operationalStatus} /></div><p className="page-note">{item.renderMode} · {item.renderer} · Publication: NOT TRIGGERED</p>{message ? <div className="notice">{message}</div> : null}
-    <Section title="Progress"><div className="progress-line">{item.progress.map((stage) => <article key={stage.key}><span>{stage.status === 'COMPLETED' ? '✓' : stage.status === 'RUNNING' ? '●' : ['FAILED','BLOCKED'].includes(stage.status) ? '!' : '—'}</span><strong>{stage.label}</strong><Badge value={stage.status} /></article>)}</div></Section>
+    <Section title="Quality lifecycle"><div className="progress-line">{item.progress.map((stage) => <article key={stage.key}><span>{stage.status === 'COMPLETED' ? '✓' : stage.status === 'RUNNING' ? '●' : stage.status === 'WARN' ? '△' : ['FAILED','BLOCKED'].includes(stage.status) ? '!' : '—'}</span><strong>{stage.label}</strong><Badge value={stage.status} /></article>)}</div></Section>
     <div className="detail-columns"><Section title="Creative input"><pre className="canonical">{JSON.stringify(item.jobPayload?.canonicalRawInput || item.canonicalRequest || {}, null, 2)}</pre></Section><Section title="Validation & cost"><KeyValue label="Validation" value={item.validationStatus} /><KeyValue label="Actual external requests" value={String(item.actualProviderCalls ?? 0)} /><KeyValue label="Known cost" value="UNKNOWN" /><KeyValue label="Human review" value={item.reviewState} /><KeyValue label="Auto publish" value="NO" /><ValidationDetails evidence={item.validationEvidence || item.reviewPayload?.technicalValidation} /></Section></div>
     <Section title="Master & generated assets"><div className="artifact-grid">{artifacts.length ? artifacts.map((artifact) => <ArtifactCard artifact={artifact} key={`${artifact.sourceId}-${artifact.artifactId}`} />) : <Empty text="No safely scoped artifacts yet." />}</div></Section>
-    {item.renderMode === 'QUALITY' ? <Section title="Creative plan & shot revisions"><div className="collection">{(item.jobPayload?.canonicalRawInput?.creative_plan?.shots || []).map((shot) => <article className="row-button" key={shot.shotId}><span><strong>{shot.shotId} · {shot.purpose}</strong><small>{shot.durationSeconds}s · {shot.assetId}</small></span><button className="regenerate" disabled={action || ['RUNNING','QUEUED'].includes(item.jobStatus) || item.ambiguousExecutions > 0} onClick={() => regenerateShot(item, shot)}>REGENERATE THIS SHOT</button></article>)}{item.shotRegenerations?.length ? <Collection title="Immutable revision history" items={item.shotRegenerations} render={(entry) => `${entry.shotId} · revision ${entry.revisionNo} · ${entry.replacementAssetId} · ${entry.status}`} /> : null}</div></Section> : null}
+    {item.renderMode === 'QUALITY' ? <Section title="Shot inspector"><div className="collection">{(item.jobPayload?.canonicalRawInput?.creative_plan?.shots || []).map((shot) => <ShotInspector key={shot.shotId} shot={shot} evaluation={sourceQualityFor(item)?.shots?.find((entry) => entry.assetId === shot.assetId)} continuity={sourceQualityFor(item)?.continuity} disabled={action || ['RUNNING','QUEUED'].includes(item.jobStatus) || item.ambiguousExecutions > 0} regenerate={() => regenerateShot(item, shot)} />)}{item.shotRegenerations?.length ? <Collection title="Immutable revision history" items={item.shotRegenerations} render={(entry) => `${entry.shotId} · revision ${entry.revisionNo} · ${entry.replacementAssetId} · ${entry.status}`} /> : null}</div></Section> : null}
     <Section title="Engine detail"><div className="pipeline">{stages.map((stage) => <article className="stage" key={stage.stage}><span>{String(stage.sequence).padStart(2, '0')}</span><strong>{stage.stage}</strong><Badge value={stage.status || 'NOT_STARTED'} /><small>Attempt {stage.attempt || '—'} · {stage.provider || 'provider n/a'} / {stage.model || 'model n/a'}</small>{Object.keys(stage.error || {}).length ? <pre>{JSON.stringify(stage.error, null, 2)}</pre> : null}</article>)}</div></Section>
     {Object.keys(item.jobError || {}).length ? <Section title="Errors / recovery"><div className="error-panel"><strong>{item.jobError.code || 'Production failed'}</strong><p>{item.jobError.message || 'See diagnostics.'}</p></div></Section> : null}<div className="actions detail-actions">{item.status === 'DRAFT' && item.jobStatus === 'QUEUED' ? <button className="start" disabled={action} title="Explicitly start this prepared production" onClick={() => start(item)}>START PRODUCTION</button> : null}<button className="secondary" disabled={action || item.jobStatus !== 'RETRYING'} title="Retry continues the same technical execution" onClick={() => retry(item)}>RETRY SAME EXECUTION</button><button className="regenerate" disabled={action || ['RUNNING','QUEUED'].includes(item.jobStatus) || item.ambiguousExecutions > 0} title="Regenerate creates a new immutable production" onClick={() => regenerate(item)}>REGENERATE NEW REVISION</button></div>
   </>}</State>;
@@ -216,12 +227,26 @@ function ArtifactCard({ artifact }) {
   return <article className="artifact-card">{media}<strong>{artifact.type}</strong><code>{artifact.artifactId}</code><small>v{artifact.version} · {formatDate(artifact.createdAt)}</small><Badge value={artifact.reviewState || artifact.validationStatus} /><small>{artifact.provenance?.provider || artifact.provenance?.renderer || 'provider n/a'} / {artifact.provenance?.model || 'model n/a'}</small></article>;
 }
 
+function ShotInspector({ shot, evaluation, continuity, disabled, regenerate }) {
+  const probe = evaluation?.sourceProbe || {};
+  const settings = evaluation?.generationSettings || {};
+  const lowSource = Math.min(probe.width || Infinity, probe.height || Infinity) < 720;
+  return <article className="shot-inspector"><div className="detail-head"><div><strong>{shot.shotId} · {shot.purpose}</strong><small>{shot.durationSeconds}s · {shot.assetId}</small></div><Badge value={evaluation?.status || 'NOT_EVALUATED'} /></div>
+    <div className="plan-grid"><KeyValue label="Provider / model" value={[evaluation?.provider, evaluation?.model].filter(Boolean).join(' · ')} /><KeyValue label="Profile" value={profileLabel(evaluation?.profile)} /><KeyValue label="Source" value={probe.width ? `${probe.width}×${probe.height} · ${probe.fps}fps · ${probe.videoCodec}` : 'Not generated'} /><KeyValue label="Seed" value={evaluation?.seed ?? shot.seed} /><KeyValue label="Visual score" value={evaluation?.score ?? 'n/a'} /><KeyValue label="Temporal" value={evaluation?.temporal?.status || 'NOT_EVALUATED'} /><KeyValue label="Continuity" value={continuity?.status || 'NOT_EVALUATED'} /></div>
+    {lowSource ? <div className="warning-panel">Upscaled low-resolution source: the 1080×1920 master does not create 1080p source quality.</div> : null}
+    <details><summary>Generation prompt & resolved settings</summary><pre>{evaluation?.canonicalPrompt || shot.generationPrompt}</pre><pre>{JSON.stringify(settings, null, 2)}</pre></details>
+    <ValidationDetails evidence={evaluation} />
+    {evaluation?.sampledFrames?.length ? <div className="evidence-strip">{evaluation.sampledFrames.map((frame) => <code key={frame.analysisHash}>{Math.round(frame.ratio * 100)}% · {frame.timestampMs}ms · {frame.analysisHash.slice(0, 10)}</code>)}</div> : null}
+    <button className="regenerate" disabled={disabled} onClick={regenerate}>REGENERATE THIS SHOT</button>
+  </article>;
+}
+
 function ValidationDetails({ evidence }) {
   if (!evidence) return null;
   const checks = Array.isArray(evidence.checks) ? evidence.checks : Array.isArray(evidence) ? evidence : [];
   return <details open={evidence.status === 'FAIL'}><summary>Structured validation details</summary>
     <div className="validation-summary"><KeyValue label="Status / score" value={`${evidence.status || 'RECORDED'} · ${evidence.score ?? 'n/a'}`} /><KeyValue label="Class" value={evidence.validationClass} /><KeyValue label="Timestamp" value={formatDate(evidence.timestamp)} /><KeyValue label="Master artifact" value={evidence.masterArtifact?.id} /></div>
-    {checks.map((check) => <article className="validation-check" key={check.code}><div><code>{check.code}</code><Badge value={check.status} /></div><p>{check.message}</p><small>Actual: {JSON.stringify(check.details?.actual ?? check.details?.actualMs ?? null)}</small><small>Expected: {JSON.stringify(check.details?.expected ?? check.details?.expectedMs ?? null)}</small></article>)}
+    {checks.map((check, index) => <article className="validation-check" key={`${check.code}-${index}`}><div><code>{check.code}</code><Badge value={check.status} /></div><p>{check.message || check.reason}</p><small>Actual: {JSON.stringify(check.details?.actual ?? check.details?.actualMs ?? check.evidence ?? null)}</small><small>Expected: {JSON.stringify(check.details?.expected ?? check.details?.expectedMs ?? null)}</small></article>)}
   </details>;
 }
 

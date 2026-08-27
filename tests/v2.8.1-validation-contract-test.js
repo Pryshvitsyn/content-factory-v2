@@ -155,13 +155,18 @@ async function main() {
   }
 
   const failedLifecycle = { id: 'production', jobId: 'job', jobStatus: 'RETRYING', status: 'RUNNING',
-    validationStatus: 'FAIL', reviewState: 'BLOCKED', validationEvidence: { masterArtifact: { id: 'master', version: 1 } } };
+    validationStatus: 'FAIL', reviewState: 'BLOCKED', validationEvidence: { masterArtifact: { id: 'master', version: 1 } },
+    qualityLifecycle: { preExecution: 'PASS', providerGeneration: 'PASS', sourceTechnical: 'PASS', sourceVisual: 'PASS',
+      temporalQuality: 'PASS', creativeCompliance: 'PASS', masterAssembly: 'PASS', masterTechnical: 'FAIL',
+      finalQuality: 'FAIL', humanReview: 'BLOCKED' } };
   assert.deepEqual(progressFor(failedLifecycle).map((stage) => [stage.label, stage.status]), [
-    ['Planning','COMPLETED'], ['Provider Generation','COMPLETED'], ['Master Assembly','COMPLETED'],
-    ['Validation','FAILED'], ['Human Review','BLOCKED'],
+    ['Pre-Execution','COMPLETED'], ['Provider Generation','COMPLETED'], ['Source Technical','COMPLETED'],
+    ['Source Visual','COMPLETED'], ['Temporal Quality','COMPLETED'], ['Creative Compliance','COMPLETED'],
+    ['Master Assembly','COMPLETED'], ['Master Technical','FAILED'], ['Final Quality','FAILED'], ['Human Review','BLOCKED'],
   ]);
   const successLifecycle = { ...failedLifecycle, jobStatus: 'COMPLETED', status: 'COMPLETED',
-    validationStatus: 'PASS', reviewState: 'AWAITING_HUMAN_APPROVAL' };
+    validationStatus: 'PASS', reviewState: 'AWAITING_HUMAN_APPROVAL', qualityLifecycle: {
+      ...failedLifecycle.qualityLifecycle, masterTechnical: 'PASS', finalQuality: 'PASS', humanReview: 'AWAITING' } };
   assert.equal(progressFor(successLifecycle).at(-1).status, 'RUNNING');
 
   let persistedError = null;

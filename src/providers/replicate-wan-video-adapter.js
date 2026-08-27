@@ -294,18 +294,19 @@ class ReplicateWanVideoAdapter {
       throw providerError(`Replicate Wan does not support capability '${capability}'`, 'REPLICATE_CAPABILITY_UNSUPPORTED', { model: model || this.model });
     }
     const parsed = parseGenerationPrompt(prompt);
+    const canonicalRequest = options.canonicalRequest || null;
     const requirements = parsed.requirements;
     const input = buildWanInput({
-      prompt: options.videoPrompt || parsed.prompt,
-      resolution: options.resolution ?? requirements.resolution ?? '720p',
-      aspectRatio: options.aspectRatio ?? options.aspect_ratio ?? requirements.aspect_ratio ?? requirements.aspectRatio ?? '9:16',
-      numFrames: options.numFrames ?? options.num_frames ?? requirements.num_frames ?? requirements.numFrames ?? 81,
-      framesPerSecond: options.framesPerSecond ?? options.frames_per_second ?? requirements.frames_per_second ?? requirements.framesPerSecond ?? 16,
-      goFast: options.goFast ?? options.go_fast ?? requirements.go_fast ?? requirements.goFast ?? true,
-      seed: options.seed ?? requirements.seed,
-      sampleShift: options.sampleShift ?? options.sample_shift ?? requirements.sample_shift ?? 12,
-      optimizePrompt: options.optimizePrompt ?? requirements.optimize_prompt,
-      interpolateOutput: options.interpolateOutput ?? requirements.interpolate_output,
+      prompt: canonicalRequest?.providerPrompt || options.videoPrompt || parsed.prompt,
+      resolution: canonicalRequest?.resolution ?? options.resolution ?? requirements.resolution ?? '720p',
+      aspectRatio: canonicalRequest?.aspectRatio ?? options.aspectRatio ?? options.aspect_ratio ?? requirements.aspect_ratio ?? requirements.aspectRatio ?? '9:16',
+      numFrames: canonicalRequest?.resolvedSettings?.numFrames ?? options.numFrames ?? options.num_frames ?? requirements.num_frames ?? requirements.numFrames ?? 81,
+      framesPerSecond: canonicalRequest?.resolvedSettings?.framesPerSecond ?? options.framesPerSecond ?? options.frames_per_second ?? requirements.frames_per_second ?? requirements.framesPerSecond ?? 16,
+      goFast: canonicalRequest?.resolvedSettings?.goFast ?? options.goFast ?? options.go_fast ?? requirements.go_fast ?? requirements.goFast ?? true,
+      seed: canonicalRequest?.seed ?? options.seed ?? requirements.seed,
+      sampleShift: canonicalRequest?.resolvedSettings?.sampleShift ?? options.sampleShift ?? options.sample_shift ?? requirements.sample_shift ?? 12,
+      optimizePrompt: canonicalRequest?.resolvedSettings?.optimizePrompt ?? options.optimizePrompt ?? requirements.optimize_prompt,
+      interpolateOutput: canonicalRequest?.resolvedSettings?.interpolateOutput ?? options.interpolateOutput ?? requirements.interpolate_output,
     });
 
     if (!idempotencyKey) return this.runPrediction({ input, idempotencyKey: null, onProviderRequest: options.onProviderRequest });

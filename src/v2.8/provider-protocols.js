@@ -14,7 +14,7 @@ const PROTOCOLS = Object.freeze({
     status: (id, model) => ({ url: `https://queue.fal.run/${model}/requests/${encodeURIComponent(id)}/status` }),
     result: (id, model, body) => body?.video ? { body } : ({ url: `https://queue.fal.run/${model}/requests/${encodeURIComponent(id)}` }),
     requestId: (body) => body.request_id, state: (body) => state(body.status, { in_queue: 'PENDING', in_progress: 'RUNNING', completed: body.error ? 'FAILED' : 'SUCCEEDED' }),
-    mapRequest: (request) => ({ prompt: request.prompt, resolution: request.resolution,
+    mapRequest: (request) => ({ prompt: request.providerPrompt, resolution: request.resolution,
       duration: String(request.durationSeconds || request.resolvedSettings.duration || '5'), aspect_ratio: request.aspectRatio,
       generate_audio: request.audio.requested, ...(request.seed == null ? {} : { seed: request.seed }),
       ...(request.resolvedSettings.bitrateMode ? { bitrate_mode: request.resolvedSettings.bitrateMode } : {}),
@@ -29,7 +29,7 @@ const PROTOCOLS = Object.freeze({
     status: (id) => ({ url: `https://api.dev.runwayml.com/v1/tasks/${encodeURIComponent(id)}` }),
     result: (_id, _model, body) => ({ body }), requestId: (body) => body.id,
     state: (body) => state(body.status, { pending: 'PENDING', throttled: 'PENDING', running: 'RUNNING', succeeded: 'SUCCEEDED', failed: 'FAILED', canceled: 'CANCELED' }),
-    mapRequest: (request) => ({ model: request.providerSelection.model, promptText: request.prompt,
+    mapRequest: (request) => ({ model: request.providerSelection.model, promptText: request.providerPrompt,
       ratio: ratioPixels(request.aspectRatio), duration: request.durationSeconds || 5,
       ...(request.capability === C.IMAGE_TO_VIDEO ? { promptImage: request.references.firstFrame } : {}) }),
     outputUrl: (body) => Array.isArray(body.output) ? body.output[0] : null,
@@ -43,7 +43,7 @@ const PROTOCOLS = Object.freeze({
     status: (id) => ({ url: `https://generativelanguage.googleapis.com/v1beta/${id}` }),
     result: (_id, _model, body) => ({ body }), requestId: (body) => body.name,
     state: (body) => body.error ? 'FAILED' : body.done === true ? 'SUCCEEDED' : 'PENDING',
-    mapRequest: (request) => ({ instances: [{ prompt: request.prompt }], parameters: {
+    mapRequest: (request) => ({ instances: [{ prompt: request.providerPrompt }], parameters: {
       aspectRatio: request.aspectRatio, resolution: request.resolution,
       durationSeconds: request.durationSeconds || 8, ...(request.negativePrompt ? { negativePrompt: request.negativePrompt } : {}) } }),
     outputUrl: (body) => body.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
@@ -55,7 +55,7 @@ const PROTOCOLS = Object.freeze({
     status: (id) => ({ url: `https://api.lumalabs.ai/dream-machine/v1/generations/${encodeURIComponent(id)}` }),
     result: (_id, _model, body) => ({ body }), requestId: (body) => body.id,
     state: (body) => state(body.state, { queued: 'PENDING', dreaming: 'RUNNING', completed: 'SUCCEEDED', failed: 'FAILED' }),
-    mapRequest: (request) => ({ generation_type: 'video', model: request.providerSelection.model, prompt: request.prompt,
+    mapRequest: (request) => ({ generation_type: 'video', model: request.providerSelection.model, prompt: request.providerPrompt,
       aspect_ratio: request.aspectRatio, resolution: request.resolution,
       duration: request.resolvedSettings.duration || `${request.durationSeconds || 5}s`, loop: false,
       ...(request.references.firstFrame || request.references.lastFrame ? { keyframes: {

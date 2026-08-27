@@ -104,6 +104,7 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
         video: { provider: profile.provider, ...(profile.vendor ? { vendor: profile.vendor } : {}), model: profile.model,
           ...(profile.modelVersion ? { model_version: profile.modelVersion } : {}), profile: profile.name, capability: profile.capability || 'TEXT_TO_VIDEO',
           resolved_settings: profile.resolvedSettings || {}, prompt: planned.generationPrompt,
+          negative_intent: planned.negativeIntent,
           resolution: profile.resolution, aspect_ratio: aspectRatio, num_frames: profile.numFrames,
           frames_per_second: profile.framesPerSecond, go_fast: profile.goFast,
           optimize_prompt: profile.optimizePrompt, interpolate_output: profile.interpolateOutput,

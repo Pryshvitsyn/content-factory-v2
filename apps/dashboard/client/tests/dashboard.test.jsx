@@ -253,6 +253,36 @@ describe('V2.7 operator console', () => {
     await waitFor(() => expect(calls.some(([url, method, body]) => url.endsWith('/shots/operator-shot-1/regenerate')
       && method === 'POST' && JSON.parse(body).confirmation === true)).toBe(true));
   });
+
+  it('shows independent quality lifecycle and shot-level reasons, settings, and evidence', async () => {
+    fetch.mockImplementation((url) => {
+      if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
+      return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Quality-gated creative',
+        renderMode: 'QUALITY', renderer: 'v2.5-quality', status: 'FAILED', jobStatus: 'FAILED', operationalStatus: 'VALIDATION_FAILED',
+        validationStatus: 'FAIL', reviewState: 'BLOCKED', actualProviderCalls: 1, ambiguousExecutions: 0, shotRegenerations: [],
+        progress: [
+          { key: 'pre', label: 'Pre-Execution', status: 'COMPLETED' }, { key: 'generation', label: 'Provider Generation', status: 'COMPLETED' },
+          { key: 'technical', label: 'Source Technical', status: 'COMPLETED' }, { key: 'visual', label: 'Source Visual', status: 'FAILED' },
+          { key: 'temporal', label: 'Temporal Quality', status: 'COMPLETED' }, { key: 'semantic', label: 'Creative Compliance', status: 'FAILED' },
+          { key: 'assembly', label: 'Master Assembly', status: 'BLOCKED' }, { key: 'master', label: 'Master Technical', status: 'PENDING' },
+          { key: 'final', label: 'Final Quality', status: 'PENDING' }, { key: 'review', label: 'Human Review', status: 'BLOCKED' },
+        ], jobPayload: { canonicalRawInput: { creative_plan: { shots: [{ shotId: 'operator-shot-1', assetId: 'operator-video-1', purpose: 'One coherent scene', durationSeconds: 5, seed: 42, generationPrompt: 'One scene' }] } } },
+        validationEvidence: { status: 'FAIL', results: [{ qualityClass: 'SOURCE_QUALITY', shots: [{ assetId: 'operator-video-1', status: 'FAIL', score: 0,
+          provider: 'replicate', model: 'wan-video/wan-2.2-t2v-fast', profile: 'ECONOMY', seed: 42,
+          sourceProbe: { width: 480, height: 832, fps: 16, videoCodec: 'h264' }, generationSettings: { goFast: true },
+          checks: [{ code: 'TRIPTYCH_DETECTED', status: 'FAIL', reason: 'Three panels detected.', evidence: { dividers: 2 } }],
+          temporal: { status: 'PASS' }, sampledFrames: [{ ratio: 0.5, timestampMs: 2500, analysisHash: '1234567890abcdef' }] }] }] },
+        jobError: { code: 'SOURCE_QUALITY_VALIDATION_FAILED', message: 'Source failed' } });
+    });
+    render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    expect(await screen.findByText('Source Visual')).toBeTruthy();
+    expect(screen.getByText('Creative Compliance')).toBeTruthy();
+    expect(screen.getByText('Master Assembly')).toBeTruthy();
+    expect(screen.getByText('TRIPTYCH_DETECTED')).toBeTruthy();
+    expect(screen.getByText('ECONOMY / DRAFT')).toBeTruthy();
+    expect(screen.getByText(/Upscaled low-resolution source/)).toBeTruthy();
+    expect(screen.getByText(/50% · 2500ms · 1234567890/)).toBeTruthy();
+  });
 });
 
 describe('V2.8 universal provider controls', () => {
@@ -278,6 +308,9 @@ describe('V2.8 universal provider controls', () => {
     fetch.mockImplementation((url) => response(url === '/api/brands' ? brands : catalog));
     render(<NewProduction />);
     fireEvent.click(await screen.findByRole('button', { name: /QUALITY/ }));
+    expect(screen.getByLabelText('Profile').value).toBe('STANDARD');
+    fireEvent.change(screen.getByLabelText('Profile'), { target: { value: 'ECONOMY' } });
+    expect(screen.getByText('Draft-quality source generation')).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Replicate' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'fal.ai' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Runway' })).toBeTruthy();
