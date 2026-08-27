@@ -114,7 +114,11 @@ describe('V2.7 operator console', () => {
       if (url === '/api/brands') return response(brands);
       if (url === '/api/providers') return response(providers);
       if (url === `/api/brands/${brandId}`) return response({ ...brands[0], products: [], audiences: [], offers: [], campaigns: [], knowledge: [] });
-      if (url === '/api/productions/preflight') return response({ preflightId: 'fp', brand: 'Attune', production: 'Human moment', renderMode: 'FAST', renderer: 'moneyprinterturbo', targetPlatform: 'Reels', targetDurationSeconds: 10, aspectRatio: '9:16', expectedVideoGenerations: 0, expectedAudioGenerations: 0, expectedExternalExecutions: 1, estimatedCost: null, rendererStatus: 'READY', schemaStatus: 'READY', humanApprovalRequired: true });
+      if (url === '/api/productions/preflight') return response({ preflightId: 'fp', brand: 'Attune', production: 'Human moment', renderMode: 'FAST', renderer: 'moneyprinterturbo', targetPlatform: 'Reels', targetDurationSeconds: 10, aspectRatio: '9:16', expectedVideoGenerations: 0, expectedAudioGenerations: 0, expectedExternalExecutions: 1, estimatedCost: null, rendererStatus: 'READY', schemaStatus: 'READY', humanApprovalRequired: true,
+        semanticEvaluatorProvider: 'openai', semanticEvaluatorModel: 'vision-test', semanticEvaluatorStatus: 'CONFIGURED',
+        expectedSourceSemanticEvaluations: 1, expectedFinalSemanticEvaluations: 0, expectedContinuityEvaluations: 0,
+        expectedQualityEvaluatorCalls: 1, expectedMaxEvaluatorHttpAttempts: 2,
+        semanticFinalEvaluationPolicy: 'STANDARD_REUSE_SOURCE_EVIDENCE_FOR_UNCHANGED_MASTER' });
       if (url === '/api/productions') return response({ productionId: '22222222-2222-4222-8222-222222222222', brandId, jobStatus: 'QUEUED' });
       if (url.includes('/start')) return response({ accepted: true });
       if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
@@ -135,6 +139,9 @@ describe('V2.7 operator console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'PREPARE / PREFLIGHT' }));
     expect(await screen.findByText('Ready to start')).toBeTruthy();
     expect(screen.getByText('PREFLIGHT READY · PROVIDER EXECUTIONS 0')).toBeTruthy();
+    expect(screen.getByText('openai · vision-test')).toBeTruthy();
+    expect(screen.getAllByText('CONFIGURED').length).toBeGreaterThan(0);
+    expect(screen.getByText('STANDARD_REUSE_SOURCE_EVIDENCE_FOR_UNCHANGED_MASTER')).toBeTruthy();
     expect(paths.filter(([path, method]) => method === 'POST' && path !== '/api/productions/preflight')).toHaveLength(0);
     const start = screen.getByRole('button', { name: 'START PRODUCTION' });
     expect(start).toBeTruthy(); fireEvent.click(start);
@@ -271,15 +278,20 @@ describe('V2.7 operator console', () => {
           provider: 'replicate', model: 'wan-video/wan-2.2-t2v-fast', profile: 'ECONOMY', seed: 42,
           sourceProbe: { width: 480, height: 832, fps: 16, videoCodec: 'h264' }, generationSettings: { goFast: true },
           checks: [{ code: 'TRIPTYCH_DETECTED', status: 'FAIL', reason: 'Three panels detected.', evidence: { dividers: 2 } }],
-          temporal: { status: 'PASS' }, sampledFrames: [{ ratio: 0.5, timestampMs: 2500, analysisHash: '1234567890abcdef' }] }] }] },
+          temporal: { status: 'PASS' }, semantic: { status: 'FAIL', metadata: { provider: 'openai', model: 'vision-test', externalCalls: 1 },
+            checks: [{ code: 'TRIPTYCH_DETECTED', status: 'FAIL', confidence: 0.96,
+              reason: 'Three independent simultaneous scenes are visible.', evidence: { frameRatios: [0.5], timestampsMs: [2500] } }] },
+          sampledFrames: [{ ratio: 0.5, timestampMs: 2500, analysisHash: '1234567890abcdef' }] }] }] },
         jobError: { code: 'SOURCE_QUALITY_VALIDATION_FAILED', message: 'Source failed' } });
     });
     render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
     expect(await screen.findByText('Source Visual')).toBeTruthy();
     expect(screen.getByText('Creative Compliance')).toBeTruthy();
     expect(screen.getByText('Master Assembly')).toBeTruthy();
-    expect(screen.getByText('TRIPTYCH_DETECTED')).toBeTruthy();
+    expect(screen.getAllByText('TRIPTYCH_DETECTED')).toHaveLength(2);
     expect(screen.getByText('ECONOMY / DRAFT')).toBeTruthy();
+    expect(screen.getByText('openai · vision-test')).toBeTruthy();
+    expect(screen.getByText('Confidence: 96%')).toBeTruthy();
     expect(screen.getByText(/Upscaled low-resolution source/)).toBeTruthy();
     expect(screen.getByText(/50% · 2500ms · 1234567890/)).toBeTruthy();
   });

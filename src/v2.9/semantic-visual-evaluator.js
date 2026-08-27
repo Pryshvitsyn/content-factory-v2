@@ -4,46 +4,63 @@ const { REASON_CODES, qualityCheck, qualityResult, TIER_POLICIES, normalizeTier 
 
 class SemanticVisualEvaluatorAdapter {
   constructor({ provider = 'unconfigured', model = null, estimatedCallsPerEvaluation = 0,
-    estimatedContinuityCalls = 0 } = {}) {
+    estimatedContinuityCalls = 0, configured = false, paidExecutionAuthorized = false,
+    configurationStatus = 'NOT_CONFIGURED', configurationErrors = [], enforcementEnabled = true } = {}) {
     this.provider = provider;
     this.model = model;
     this.estimatedCallsPerEvaluation = estimatedCallsPerEvaluation;
     this.estimatedContinuityCalls = estimatedContinuityCalls;
+    this.configured = configured;
+    this.paidExecutionAuthorized = paidExecutionAuthorized;
+    this.configurationStatus = configurationStatus;
+    this.configurationErrors = Object.freeze([...configurationErrors]);
+    this.enforcementEnabled = enforcementEnabled;
   }
   async evaluate() { throw new Error('SemanticVisualEvaluatorAdapter.evaluate must be implemented'); }
   async evaluateContinuity() { throw new Error('SemanticVisualEvaluatorAdapter.evaluateContinuity must be implemented'); }
 }
 
 class DisabledSemanticVisualEvaluatorAdapter extends SemanticVisualEvaluatorAdapter {
-  constructor() { super({ provider: 'unconfigured', model: null, estimatedCallsPerEvaluation: 0 }); }
+  constructor({ provider = 'unconfigured', model = null, reasonCode = REASON_CODES.SEMANTIC_VISUAL_QA_NOT_CONFIGURED,
+    reason = null, configurationStatus = 'NOT_CONFIGURED', configurationErrors = [],
+    enforcementEnabled = true } = {}) {
+    super({ provider, model, estimatedCallsPerEvaluation: 0, configured: false,
+      configurationStatus, configurationErrors, enforcementEnabled });
+    this.reasonCode = reasonCode;
+    this.reason = reason;
+  }
   async evaluate({ qualityTier = 'STANDARD' } = {}) {
     const tier = normalizeTier(qualityTier);
     const required = TIER_POLICIES[tier].semanticVisualRequired;
     return qualityResult({ qualityClass: 'SEMANTIC_VISUAL', tier, checks: [qualityCheck({
-      code: REASON_CODES.SEMANTIC_VISUAL_QA_NOT_CONFIGURED,
+      code: this.reasonCode,
       status: required ? 'FAIL' : 'WARN', qualityClass: 'SEMANTIC_VISUAL', confidence: 1,
-      reason: required
+      reason: this.reason || (required
         ? `${tier} requires a configured semantic visual evaluator; no visual pass was fabricated.`
-        : 'Semantic visual QA is not configured for this draft evaluation.',
+        : 'Semantic visual QA is not configured for this draft evaluation.'),
       hardFailure: false,
-    })], metadata: { configured: false, externalCalls: 0 } });
+    })], metadata: { configured: false, externalCalls: 0, provider: this.provider, model: this.model,
+      configurationStatus: this.configurationStatus, configurationErrors: this.configurationErrors } });
   }
   async evaluateContinuity({ qualityTier = 'STANDARD', shotEvaluations = [] } = {}) {
     const tier = normalizeTier(qualityTier); const required = TIER_POLICIES[tier].semanticVisualRequired;
     return qualityResult({ qualityClass: 'CONTINUITY_QUALITY', tier, checks: [qualityCheck({
-      code: shotEvaluations.length <= 1 ? 'CONTINUITY_NOT_APPLICABLE' : REASON_CODES.SEMANTIC_VISUAL_QA_NOT_CONFIGURED,
+      code: shotEvaluations.length <= 1 ? 'CONTINUITY_NOT_APPLICABLE' : this.reasonCode,
       status: shotEvaluations.length <= 1 ? 'PASS' : required ? 'FAIL' : 'WARN', qualityClass: 'CONTINUITY_QUALITY',
       reason: shotEvaluations.length <= 1 ? 'Cross-shot continuity is not applicable to a single-shot production.'
-        : 'Cross-shot continuity requires a configured semantic evaluator; no continuity pass was fabricated.',
+        : this.reason || 'Cross-shot continuity requires a configured semantic evaluator; no continuity pass was fabricated.',
       hardFailure: false,
-    })], metadata: { configured: false, externalCalls: 0, shotCount: shotEvaluations.length } });
+    })], metadata: { configured: false, externalCalls: 0, shotCount: shotEvaluations.length,
+      provider: this.provider, model: this.model, configurationStatus: this.configurationStatus,
+      configurationErrors: this.configurationErrors, evaluationType: 'continuity_evaluation' } });
   }
 }
 
 class FunctionSemanticVisualEvaluatorAdapter extends SemanticVisualEvaluatorAdapter {
   constructor({ provider, model, evaluate, evaluateContinuity = null, estimatedCallsPerEvaluation = 1,
     estimatedContinuityCalls = evaluateContinuity ? 1 : 0 } = {}) {
-    super({ provider, model, estimatedCallsPerEvaluation, estimatedContinuityCalls });
+    super({ provider, model, estimatedCallsPerEvaluation, estimatedContinuityCalls, configured: true,
+      paidExecutionAuthorized: true, configurationStatus: 'CONFIGURED' });
     if (typeof evaluate !== 'function') throw new Error('evaluate function is required');
     this.evaluateFunction = evaluate;
     this.continuityFunction = evaluateContinuity;

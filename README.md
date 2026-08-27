@@ -28,6 +28,8 @@ Approval does not publish. Every Dashboard production requires human approval an
 
 QUALITY production now defaults to STANDARD and uses independent source technical, visual, temporal, creative, final-master, and human-review gates. STANDARD/PREMIUM fail closed before paid generation when semantic visual QA is not configured; ECONOMY remains available as an explicit DRAFT tier. See [`docs/V2.9-WORLD-CLASS-VISUAL-QUALITY.md`](docs/V2.9-WORLD-CLASS-VISUAL-QUALITY.md).
 
+V2.9.1 supplies a real, configurable OpenAI semantic visual critic behind that provider-neutral gate, with strict structured output, independent paid authorization, bounded retries/timeouts, cost-aware source/final policy, and visible call accounting. See [`docs/V2.9.1-REAL-SEMANTIC-VISUAL-EVALUATION.md`](docs/V2.9.1-REAL-SEMANTIC-VISUAL-EVALUATION.md).
+
 ## Current Status
 
 - **Architecture:** V2

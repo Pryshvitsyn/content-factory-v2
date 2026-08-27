@@ -205,6 +205,21 @@ class ProductionCommandService {
       expectedExternalExecutions: plan.expectedExternalServiceCalls
         ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedRendererJobs || 0) + (plan.expectedQualityEvaluatorCalls || 0)),
       expectedQualityEvaluatorCalls: plan.expectedQualityEvaluatorCalls || 0,
+      expectedSemanticEvaluations: plan.expectedSemanticEvaluations || 0,
+      expectedSourceSemanticEvaluations: plan.expectedSourceSemanticEvaluations || 0,
+      expectedFinalSemanticEvaluations: plan.expectedFinalSemanticEvaluations || 0,
+      expectedContinuityEvaluations: plan.expectedContinuityEvaluations || 0,
+      expectedSemanticEvaluationCalls: plan.expectedSemanticEvaluationCalls || 0,
+      expectedContinuityEvaluationCalls: plan.expectedContinuityEvaluationCalls || 0,
+      semanticEvaluatorProvider: plan.semanticEvaluatorProvider || null,
+      semanticEvaluatorModel: plan.semanticEvaluatorModel || null,
+      semanticEvaluatorStatus: plan.semanticEvaluatorStatus || 'NOT_CONFIGURED',
+      semanticEvaluatorConfigurationErrors: plan.semanticEvaluatorConfigurationErrors || [],
+      semanticEvaluatorMaxRetries: plan.semanticEvaluatorMaxRetries || 0,
+      expectedMaxEvaluatorHttpAttempts: plan.expectedMaxEvaluatorHttpAttempts || 0,
+      expectedExternalServiceCallCeiling: plan.expectedExternalServiceCallCeiling
+        ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedMaxEvaluatorHttpAttempts || 0)),
+      semanticFinalEvaluationPolicy: plan.semanticFinalEvaluationPolicy || null,
       qualityEvaluatorPolicy: plan.qualityEvaluatorPolicy || (command.input.renderMode === 'QUALITY' ? 'NOT_CONFIGURED' : 'NOT_APPLICABLE'),
       expectedExternalExecutionClasses: plan.expectedExternalExecutionClasses || [],
       estimatedCost: plan.estimatedCost ?? null,
@@ -268,7 +283,11 @@ class ProductionCommandService {
   async schedule(production, input) {
     this.assertCapability(input);
     const runtime = this.runtime(input);
-    await runtime.service.prepare({ input, config: runtime.config });
+    const prepared = await runtime.service.prepare({ input, config: runtime.config });
+    if (prepared.plan.readiness === 'BLOCKED') {
+      throw new ProductionCommandError(409, 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED',
+        'Start is blocked before provider execution because semantic visual evaluation is not configured and authorized');
+    }
     this.scheduler(() => runtime.service.run({ input, config: runtime.config }), this.logger);
     return Object.freeze({ productionId: production.id, jobId: production.jobId, brandId: production.brandId,
       status: production.status, jobStatus: production.jobStatus, accepted: true,
@@ -357,6 +376,12 @@ class ProductionCommandService {
       shotId: args.shotId, sourceAssetId: command.revision.sourceAssetId,
       replacementAssetId: command.revision.replacementAssetId, revisionNo: command.revision.revisionNo,
       expectedVideoGenerations: 1, expectedAudioGenerations: 0, expectedProviderCalls: 1,
+      expectedSemanticEvaluations: command.prepared.plan.expectedSemanticEvaluations || 0,
+      expectedContinuityEvaluations: command.prepared.plan.expectedContinuityEvaluations || 0,
+      expectedEvaluatorCalls: command.prepared.plan.expectedQualityEvaluatorCalls || 0,
+      expectedExternalCalls: 1 + (command.prepared.plan.expectedQualityEvaluatorCalls || 0),
+      semanticEvaluatorProvider: command.prepared.plan.semanticEvaluatorProvider || null,
+      semanticEvaluatorModel: command.prepared.plan.semanticEvaluatorModel || null,
       provider: command.prepared.plan.provider, model: command.prepared.plan.model,
       resolution: command.prepared.plan.resolution, estimatedCost: null, costStatus: 'UNKNOWN',
       humanApprovalRequired: true, autoPublish: false, providerCalls: 0 });
@@ -414,7 +439,9 @@ class ProductionCommandService {
           qualityPolicy: { requireVoiceForSpokenCopy: prepared.input.voiceover?.enabled === true,
             strictApprovedCopy: prepared.input.spokenCopyPolicy?.strictApprovedCopy !== false,
             requireVoiceTimingPlan: prepared.input.schemaVersion >= 2,
-            requireProviderCompatibility: prepared.input.schemaVersion >= 2 } });
+            requireProviderCompatibility: prepared.input.schemaVersion >= 2,
+            creativePlan: prepared.input.creativePlan || null,
+            masterVisualTransforms: prepared.input.captions?.enabled === true } });
         await this.repository.completeShotRegeneration(record.id, { replacementAssetId: revision?.replacementAssetId
           || record.replacementAssetId || record.replacement_asset_id,
           masterArtifact: master.master?.artifact || null, quality: master.quality || null,

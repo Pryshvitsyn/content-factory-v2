@@ -83,7 +83,7 @@ async function persistVisualQualityEvidence({ artifactService, brandId, producti
         storageKey: sourceArtifact.storageKey, contentHash: sourceArtifact.contentHash } : null,
       evaluation: sanitized }),
     idempotencyKey: `${sourceArtifact?.contentHash || assetId}:${evaluationClass}:${canonicalFingerprint(sanitized)}`,
-    provider: 'content-factory-quality', model: 'v2.9', validationStatus: 'quality_evidence',
+    provider: 'content-factory-quality', model: 'v2.9.1', validationStatus: 'quality_evidence',
   });
   return Object.freeze({ ...sanitized, evidenceArtifact: Object.freeze({ artifactId: evidenceArtifact.artifactId,
     version: evidenceArtifact.version, storageKey: evidenceArtifact.storageKey, contentHash: evidenceArtifact.contentHash }) });
@@ -336,6 +336,7 @@ class MasterProductionOrchestrator {
     const sourceEvaluations = [];
     const rawSourceEvaluations = [];
     const qualityTier = String(assetPlan.assets.find((asset) => asset.kind === 'video')?.generation_requirements?.profile || 'STANDARD').toUpperCase();
+    const finalSemanticEvaluationRequired = qualityTier === 'PREMIUM' || qualityPolicy.masterVisualTransforms === true;
     for (const asset of assetPlan.assets) {
       if (!['image', 'video', 'voice', 'audio'].includes(asset.kind)) continue;
       let media = reusable.get(String(asset.asset_id));
@@ -541,7 +542,8 @@ class MasterProductionOrchestrator {
         finalEvaluation = await this.finalQualityEvaluator.evaluate({ media: masterMedia,
           creativePlan: qualityPolicy.creativePlan || null, expectedAspectRatio: '9:16', intendedContentType: 'final-master',
           qualityTier, provider: 'ffmpeg', model: 'master', generationSettings: rendered.provenance?.profile || {},
-          motionExpected: true, evaluationClass: 'FINAL' });
+          motionExpected: true, evaluationClass: 'FINAL',
+          semanticEvaluationRequired: finalSemanticEvaluationRequired });
       } catch (cause) {
         finalEvaluation = structuredQualityResult({ qualityClass: 'FINAL_VISUAL_GATE', tier: qualityTier, checks: [qualityCheck({
           code: cause.code || REASON_CODES.FRAME_CORRUPTION, status: 'FAIL', qualityClass: 'FINAL_QUALITY',

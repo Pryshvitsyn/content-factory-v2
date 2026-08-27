@@ -15,6 +15,7 @@ const { DurableFastRenderer, PostgresFastRenderRepository } = require('../v2.6/d
 const { MoneyPrinterTurboAdapter } = require('../v2.6/moneyprinterturbo-adapter');
 const { QualityRendererLane, RendererRouter } = require('../v2.6/renderer-router');
 const { VisualQualityEvaluator } = require('../v2.9/visual-quality-evaluator');
+const { createSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator-factory');
 const { DisabledSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator');
 
 function planOnlyAdapter(provider, capability, model) {
@@ -52,7 +53,8 @@ function unavailableQualityLane() {
 }
 
 function createProductionRuntime({ db, storage, config, env = process.env, logger = console,
-  reviewService = null, mediaInspector = null, adapterFactory = null, visualQualityEvaluator = null } = {}) {
+  reviewService = null, mediaInspector = null, adapterFactory = null, visualQualityEvaluator = null,
+  semanticAdapterFactory = createSemanticVisualEvaluatorAdapter } = {}) {
   if (!db || !storage || !config) throw new Error('db, storage, and config are required');
   const artifactService = new ArtifactService({ storage });
   const reviews = reviewService || new ControlReviewService({ db });
@@ -67,9 +69,11 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     mediaRepository = new PostgresMediaExecutionRepository({ db });
     const mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
       artifactService, mediaInspector: inspector, assetRepository: new PostgresAssetRepository() });
-    const evaluator = visualQualityEvaluator || new VisualQualityEvaluator({
-      semanticAdapter: new DisabledSemanticVisualEvaluatorAdapter(),
-    });
+    const semanticAdapter = config.semanticVisualQaEnforced === false
+      ? new DisabledSemanticVisualEvaluatorAdapter({ enforcementEnabled: false,
+        configurationStatus: 'LEGACY_NOT_ENFORCED' })
+      : semanticAdapterFactory({ env });
+    const evaluator = visualQualityEvaluator || new VisualQualityEvaluator({ semanticAdapter });
     masterOrchestrator = new MasterProductionOrchestrator({ providerGateway: gateway, artifactService,
       renderer: new FfmpegMasterRenderer(), reviewService: reviews, mediaExecutor,
       masterProbeValidator: validateMasterProbe, sourceQualityEvaluator: evaluator, finalQualityEvaluator: evaluator });
