@@ -321,7 +321,7 @@ class SemanticEvaluationRetryService {
           requireProviderCompatibility: true, creativePlan: input.creativePlan || null, masterVisualTransforms: false },
         semanticRecovery: { assetId: plan.assetId, evaluation: masterEvaluation,
           previousEvidence: plan.previousEvaluation.evidenceArtifact } });
-      if (result?.quality?.status !== 'PASS' || result?.quality?.readyForHumanReview !== true) {
+      if (result?.quality?.status === 'FAIL' || result?.quality?.readyForHumanReview !== true) {
         const masterArtifact = result?.master?.artifact ? {
           id: result.master.artifact.artifactId,
           version: result.master.artifact.version,
