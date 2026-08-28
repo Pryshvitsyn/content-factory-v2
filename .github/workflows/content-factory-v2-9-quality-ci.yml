@@ -1,0 +1,70 @@
+name: Content Factory V2.9 Quality CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/v2.9/**"
+      - "src/v2.9.2/**"
+      - "src/v2.8.1/**"
+      - "worker/v2.1-master-production.js"
+      - "tests/v2.9*.js"
+      - "apps/dashboard/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/content-factory-v2-9-quality-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/v2.9/**"
+      - "src/v2.9.2/**"
+      - "src/v2.8.1/**"
+      - "worker/v2.1-master-production.js"
+      - "tests/v2.9*.js"
+      - "apps/dashboard/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/content-factory-v2-9-quality-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: content-factory-v2-9-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 5
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version
+          ffprobe -version
+        timeout-minutes: 3
+
+      - name: Run V2.9.2 quality and semantic recovery contracts
+        run: npm run test:v2.9.2
+        timeout-minutes: 8
+
+      - name: Build dashboard
+        run: npm run dashboard:build
+        timeout-minutes: 3
