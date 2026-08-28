@@ -30,18 +30,59 @@ function planOnlyAdapter(provider, capability, model) {
   });
 }
 
-function providerGateway({ config, live, env = process.env }) {
+function forbiddenAdapter(provider, capability, model, code) {
+  return Object.freeze({
+    provider,
+    supports: ({ capability: requested, model: requestedModel }) => requested === capability
+      && (!requestedModel || requestedModel === model),
+    modelFor: () => model,
+    async generate() {
+      const error = new Error(`Provider capability '${capability}' is forbidden in this execution mode`);
+      error.code = code;
+      throw error;
+    },
+    async recover() {
+      const error = new Error(`Provider capability '${capability}' recovery is forbidden in this execution mode`);
+      error.code = code;
+      throw error;
+    },
+  });
+}
+
+const EXECUTION_POLICIES = Object.freeze(new Set(['LIVE','PLAN_ONLY','FORBIDDEN']));
+
+function providerGateway({ config, live, executionPolicy = null, env = process.env,
+  videoAdapterFactory = createVideoAdapter, openAIMediaProviderFactory = createOpenAIMediaProvider,
+  elevenLabsTtsProviderFactory = createElevenLabsTtsProvider }) {
   const videoProvider = config.provider;
   const voiceProvider = config.audioProvider;
-  const providers = live ? {
-    [videoProvider]: createVideoAdapter({ provider: videoProvider, model: config.model,
-      adapterFamily: config.adapterFamily || (videoProvider === 'replicate' ? 'replicate-wan' : null) }, { env }),
-    ...(voiceProvider === 'openai-media' ? { 'openai-media': createOpenAIMediaProvider({ apiKey: env.OPENAI_API_KEY, speechModel: config.audioModel }) } : {}),
-    ...(voiceProvider === 'elevenlabs' ? { elevenlabs: createElevenLabsTtsProvider({ apiKey: env.ELEVENLABS_API_KEY, model: config.audioModel }) } : {}),
-  } : {
-    [videoProvider]: planOnlyAdapter(videoProvider, 'video-generation', config.model),
-    ...(voiceProvider && voiceProvider !== 'none' ? { [voiceProvider]: planOnlyAdapter(voiceProvider, 'speech-generation', config.audioModel) } : {}),
-  };
+  const policy = Object.freeze({
+    video: executionPolicy?.video || (live ? 'LIVE' : 'PLAN_ONLY'),
+    speech: executionPolicy?.speech || (live ? 'LIVE' : 'PLAN_ONLY'),
+  });
+  for (const [capability, mode] of Object.entries(policy)) {
+    if (!EXECUTION_POLICIES.has(mode)) throw new Error(`Invalid ${capability} execution policy '${mode}'`);
+  }
+  const videoAdapter = policy.video === 'LIVE'
+    ? videoAdapterFactory({ provider: videoProvider, model: config.model,
+      adapterFamily: config.adapterFamily || (videoProvider === 'replicate' ? 'replicate-wan' : null) }, { env })
+    : policy.video === 'FORBIDDEN'
+      ? forbiddenAdapter(videoProvider, 'video-generation', config.model, 'SEMANTIC_RECOVERY_VIDEO_GENERATION_FORBIDDEN')
+      : planOnlyAdapter(videoProvider, 'video-generation', config.model);
+  let voiceAdapter = null;
+  if (voiceProvider && voiceProvider !== 'none') {
+    if (policy.speech === 'LIVE') {
+      if (voiceProvider === 'elevenlabs') {
+        voiceAdapter = elevenLabsTtsProviderFactory({ apiKey: env.ELEVENLABS_API_KEY, model: config.audioModel });
+      } else if (voiceProvider === 'openai-media') {
+        voiceAdapter = openAIMediaProviderFactory({ apiKey: env.OPENAI_API_KEY, speechModel: config.audioModel });
+      } else throw new Error(`Unsupported live speech provider '${voiceProvider}'`);
+    } else if (policy.speech === 'FORBIDDEN') {
+      voiceAdapter = forbiddenAdapter(voiceProvider, 'speech-generation', config.audioModel,
+        'SEMANTIC_RECOVERY_SPEECH_GENERATION_FORBIDDEN');
+    } else voiceAdapter = planOnlyAdapter(voiceProvider, 'speech-generation', config.audioModel);
+  }
+  const providers = { [videoProvider]: videoAdapter, ...(voiceAdapter ? { [voiceProvider]: voiceAdapter } : {}) };
   return new ProviderGateway({
     providers,
     priorities: { 'video-generation': [videoProvider], 'media:video': [videoProvider],
@@ -70,7 +111,8 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
   const fastRenderers = {};
 
   if (config.renderMode === 'QUALITY') {
-    const gateway = providerGateway({ config, live: config.live && !semanticOnly, env });
+    const gateway = providerGateway({ config, live: config.live, env,
+      executionPolicy: semanticOnly ? { video: 'FORBIDDEN', speech: config.live ? 'LIVE' : 'PLAN_ONLY' } : null });
     mediaRepository = new PostgresMediaExecutionRepository({ db });
     const mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
       artifactService, mediaInspector: inspector, assetRepository: new PostgresAssetRepository() });
@@ -103,4 +145,4 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     mediaExecutionRepository: mediaRepository });
 }
 
-module.exports = { createProductionRuntime, planOnlyAdapter, providerGateway };
+module.exports = { EXECUTION_POLICIES, createProductionRuntime, forbiddenAdapter, planOnlyAdapter, providerGateway };

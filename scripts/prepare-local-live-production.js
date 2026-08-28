@@ -33,6 +33,7 @@ const V27_MIGRATIONS = ['migrations/20260824_v2_7_1_shot_regenerations.sql'];
 const V292_MIGRATIONS = [
   'migrations/20260828_v2_9_2_semantic_evaluation_attempts.sql',
   'migrations/20260828_v2_9_2_1_semantic_retry_partial_media.sql',
+  'migrations/20260828_v2_9_2_2_semantic_recovery_resume.sql',
 ];
 
 function discoverDatabaseUrl(env = process.env) {
