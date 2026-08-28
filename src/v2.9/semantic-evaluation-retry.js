@@ -172,14 +172,50 @@ class PostgresSemanticEvaluationAttemptRepository {
   }
 }
 
+function semanticFrameDescriptor(frame = {}) {
+  const descriptor = {
+    ratio: frame.ratio,
+    timestampMs: frame.timestampMs,
+    analysisHash: frame.analysisHash,
+    artifactId: frame.artifactId || frame.artifact_id || null,
+    artifactVersion: frame.artifactVersion ?? frame.artifact_version ?? null,
+    storageKey: frame.storageKey || frame.storage_key || null,
+    contentHash: frame.contentHash || frame.content_hash || null,
+    contentType: frame.contentType || frame.content_type || 'image/jpeg',
+  };
+  if (!descriptor.storageKey || !descriptor.contentHash || !descriptor.analysisHash
+    || !Number.isInteger(descriptor.timestampMs)) {
+    throw new SemanticRetryError('SEMANTIC_RETRY_FRAME_EVIDENCE_MISSING',
+      'Semantic retry requires immutable sampled-frame descriptors before persistence or master continuation');
+  }
+  return Object.freeze(descriptor);
+}
+
+function durableSemanticEvaluation(evaluation) {
+  if (!evaluation) return evaluation;
+  const sampledFrames = Object.freeze((evaluation.sampledFrames || []).map(semanticFrameDescriptor));
+  return Object.freeze({ ...evaluation, sampledFrames });
+}
+
 async function loadVerifiedFrames(storage, descriptors) {
   return Promise.all(descriptors.map(async (frame) => {
-    const bytes = await storage.get({ key: frame.storageKey });
+    const descriptor = semanticFrameDescriptor(frame);
+    const bytes = await storage.get({ key: descriptor.storageKey });
     const hash = crypto.createHash('sha256').update(bytes).digest('hex');
-    if (hash !== frame.contentHash) throw new SemanticRetryError('SEMANTIC_RETRY_FRAME_HASH_MISMATCH',
+    if (hash !== descriptor.contentHash) throw new SemanticRetryError('SEMANTIC_RETRY_FRAME_HASH_MISMATCH',
       'Stored sampled-frame evidence no longer matches its immutable content hash');
-    return Object.freeze({ ...frame, bytes, jpeg: bytes, contentType: 'image/jpeg' });
+    return Object.freeze({ ...descriptor, bytes, jpeg: bytes, contentType: 'image/jpeg' });
   }));
+}
+
+async function materializeEvaluationFrames(storage, evaluation) {
+  const durable = durableSemanticEvaluation(evaluation);
+  if (!durable?.sampledFrames?.length) {
+    throw new SemanticRetryError('SEMANTIC_RETRY_FRAME_EVIDENCE_MISSING',
+      'Semantic recovery PASS has no immutable sampled-frame evidence for master continuation');
+  }
+  const sampledFrames = Object.freeze(await loadVerifiedFrames(storage, durable.sampledFrames));
+  return Object.freeze({ ...durable, sampledFrames });
 }
 
 class SemanticEvaluationRetryService {
@@ -239,17 +275,23 @@ class SemanticEvaluationRetryService {
           provider: sourceMedia.provider, model: sourceMedia.model,
           generationSettings: sourceAsset.generation_requirements?.resolved_settings || {} });
       }
-      semanticEvaluation = evaluation;
-      if (evaluation.status !== 'PASS') {
-        await this.repository.finish({ id: attempt.id, status: 'FAILED', resultEvidence: evaluation,
+      const durableEvaluation = durableSemanticEvaluation(evaluation);
+      semanticEvaluation = durableEvaluation;
+      if (durableEvaluation.status !== 'PASS') {
+        await this.repository.finish({ id: attempt.id, status: 'FAILED', resultEvidence: durableEvaluation,
           actualSemanticCalls, reusedVideoAssets: 1, reusedSpeechAssets: 0,
           newSpeechGenerations: 0, newVideoGenerations: 0, recoveryPhase: 'SEMANTIC_FAILED',
           error: { code: 'SEMANTIC_RETRY_FAILED', message: 'Semantic retry did not PASS',
             recoveryPhase: 'SEMANTIC_FAILED' } });
         attemptFinished = true;
         throw new SemanticRetryError('SEMANTIC_RETRY_FAILED',
-          'Semantic retry did not PASS; master assembly remains blocked', { evaluation });
+          'Semantic retry did not PASS; master assembly remains blocked', { evaluation: durableEvaluation });
       }
+
+      // Materialize and hash-verify the exact persisted frame evidence before any post-PASS paid media call.
+      // JSON-round-tripped Buffer objects from older attempts are deliberately ignored; artifact storage is authoritative.
+      const masterEvaluation = await materializeEvaluationFrames(this.storage, durableEvaluation);
+
       failurePhase = 'POST_PASS_MEDIA_FAILED';
       const assets = [sourceMedia];
       for (const asset of input.assetPlan.assets.filter((item) => item.asset_id !== plan.assetId)) {
@@ -276,8 +318,9 @@ class SemanticEvaluationRetryService {
         resolvedMedia: assets, qualityPolicy: { requireVoiceForSpokenCopy: input.voiceover?.enabled === true,
           strictApprovedCopy: input.spokenCopyPolicy?.strictApprovedCopy !== false, requireVoiceTimingPlan: true,
           requireProviderCompatibility: true, creativePlan: input.creativePlan || null, masterVisualTransforms: false },
-        semanticRecovery: { assetId: plan.assetId, evaluation, previousEvidence: plan.previousEvaluation.evidenceArtifact } });
-      await this.repository.finish({ id: attempt.id, status: 'SUCCEEDED', resultEvidence: evaluation,
+        semanticRecovery: { assetId: plan.assetId, evaluation: masterEvaluation,
+          previousEvidence: plan.previousEvaluation.evidenceArtifact } });
+      await this.repository.finish({ id: attempt.id, status: 'SUCCEEDED', resultEvidence: durableEvaluation,
         actualSemanticCalls, reusedVideoAssets: 1, reusedSpeechAssets,
         newSpeechGenerations, newVideoGenerations: 0, recoveryPhase: 'SUCCEEDED' });
       attemptFinished = true;
@@ -296,6 +339,7 @@ class SemanticEvaluationRetryService {
 }
 
 module.exports = { AMBIGUOUS_MEDIA_STATUSES, RETRYABLE_SEMANTIC_CODES, SemanticRetryError,
-  artifactIdentityMatches, durableArtifactRecorded, evidenceLineageMatches, partialMediaPlan, retryPlan,
-  reusableSemanticPass, sourceArtifactFromExecution, validSemanticPass,
+  artifactIdentityMatches, durableArtifactRecorded, durableSemanticEvaluation, evidenceLineageMatches,
+  materializeEvaluationFrames, partialMediaPlan, retryPlan, reusableSemanticPass, semanticFrameDescriptor,
+  sourceArtifactFromExecution, validSemanticPass,
   PostgresSemanticEvaluationAttemptRepository, SemanticEvaluationRetryService, loadVerifiedFrames };
