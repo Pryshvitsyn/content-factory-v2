@@ -88,6 +88,8 @@ function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
     model: renderMode === 'FAST' ? null : video.model || DEFAULT_VIDEO_MODEL,
     vendor: renderMode === 'FAST' ? null : optionalText(video.vendor),
     modelVersion: renderMode === 'FAST' ? null : optionalText(video.model_version),
+    modelFamily: renderMode === 'FAST' ? null : optionalText(video.model_family),
+    providerModelId: renderMode === 'FAST' ? null : optionalText(video.provider_model_id) || video.model,
     profileName: renderMode === 'FAST' ? null : optionalText(video.profile) || 'STANDARD',
     capability: renderMode === 'FAST' ? 'FAST_RENDER' : optionalText(video.capability) || 'TEXT_TO_VIDEO',
     resolvedSettings: renderMode === 'FAST' ? {} : { ...(video.resolved_settings || {}) },
@@ -102,6 +104,9 @@ function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
     sampleShift: Number(video.sample_shift ?? 12),
     optimizePrompt: video.optimize_prompt,
     interpolateOutput: video.interpolate_output,
+    generateAudio: video.generate_audio === true,
+    audioStrategy: optionalText(video.audio_strategy),
+    dialogueOwner: optionalText(video.dialogue_owner),
   };
   if (renderMode === 'QUALITY' && !KEY_PATTERN.test(profile.provider)) throw new ProductionInputError('shot.video.provider is invalid');
   if (!Number.isInteger(profile.numFrames) || !Number.isInteger(profile.framesPerSecond)) {
@@ -213,6 +218,8 @@ function buildProductionInput(raw = {}) {
         continuity.character_rules && `Character continuity: ${continuity.character_rules}`,
         continuity.location_rules && `Location continuity: ${continuity.location_rules}`,
         `Visual style: ${JSON.stringify(visualStyle)}`,
+        profile.dialogueOwner === 'VIDEO_PROVIDER' && dialogue && `Generate this exact native spoken copy: ${dialogue}`,
+        profile.audioStrategy === 'HYBRID' && 'Generate ambience and sound effects only. Do not generate speech or narration.',
         `Base prompt: ${profile.prompt}`,
       ].filter(Boolean).join('\n');
       shots.push({
@@ -241,12 +248,18 @@ function buildProductionInput(raw = {}) {
           profile: profile.profileName,
           capability: profile.capability,
           provider_selection: { provider: profile.provider, vendor: profile.vendor, model: profile.model,
-            modelVersion: profile.modelVersion, profile: profile.profileName },
+            modelVersion: profile.modelVersion, modelFamily: profile.modelFamily,
+            providerModelId: profile.providerModelId, profile: profile.profileName },
+          model_family: profile.modelFamily,
+          provider_model_id: profile.providerModelId,
           resolved_settings: profile.resolvedSettings,
           negative_intent: profile.negativeIntent,
           prompt: continuityPrompt,
           resolution: profile.resolution,
           aspect_ratio: profile.aspectRatio,
+          generate_audio: profile.generateAudio,
+          audio_strategy: profile.audioStrategy,
+          dialogue_owner: profile.dialogueOwner,
           num_frames: profile.numFrames,
           frames_per_second: profile.framesPerSecond,
           go_fast: profile.goFast,
@@ -288,6 +301,7 @@ function buildProductionInput(raw = {}) {
         model: voiceModel,
         text: voiceText,
         voice: text('voiceover.voice', voiceover.voice),
+        voice_id: optionalText(voiceover.voice_id) || text('voiceover.voice', voiceover.voice),
         instructions: optionalText(voiceover.instructions),
         language: voiceover.language || 'en',
         temporal: { startMs: 0, endMs: Math.round(targetDurationSeconds * 1000), durationMs: Math.round(targetDurationSeconds * 1000) },
@@ -357,6 +371,7 @@ function buildProductionInput(raw = {}) {
     normalized.renderMode = renderMode;
     normalized.renderer = renderMode === 'FAST' ? fastRender.renderer : 'v2.5-quality';
     normalized.fastRender = fastRender;
+    if (raw.media_stack) normalized.mediaStack = structuredClone(raw.media_stack);
   }
   const hasVersionedSpokenCopyContract = raw.approved_spoken_copy !== undefined || raw.spoken_copy_policy !== undefined;
   const fingerprintSource = hasVersionedSpokenCopyContract ? normalized : (() => {

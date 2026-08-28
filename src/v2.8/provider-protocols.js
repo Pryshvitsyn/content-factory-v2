@@ -6,6 +6,49 @@ const ratioPixels = (ratio) => ratio === '9:16' ? '720:1280' : '1280:720';
 const commonHeaders = (authorization) => ({ Authorization: authorization, 'Content-Type': 'application/json', Accept: 'application/json' });
 const state = (value, states) => states[String(value || '').toLowerCase()] || 'PENDING';
 
+const ALIBABA_REGIONS = Object.freeze({ singapore: 'ap-southeast-1', 'ap-southeast-1': 'ap-southeast-1',
+  beijing: 'cn-beijing', 'cn-beijing': 'cn-beijing' });
+
+function createAlibabaProtocol({ region, workspaceId } = {}) {
+  const regionId = ALIBABA_REGIONS[String(region || '').toLowerCase()];
+  if (!regionId) { const error = new Error('ALIBABA_MODEL_STUDIO_REGION must be singapore/ap-southeast-1 or beijing/cn-beijing'); error.code = 'ALIBABA_REGION_INVALID'; throw error; }
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{2,127}$/.test(workspaceId || '')) { const error = new Error('ALIBABA_MODEL_STUDIO_WORKSPACE_ID is invalid'); error.code = 'ALIBABA_WORKSPACE_INVALID'; throw error; }
+  const base = `https://${workspaceId}.${regionId}.maas.aliyuncs.com/api/v1`;
+  return Object.freeze({ id: 'alibaba', adapterFamily: 'dashscope-video', models: ['wan3.0-video'],
+    capabilities: [C.TEXT_TO_VIDEO,C.IMAGE_TO_VIDEO,C.REFERENCE_TO_VIDEO,C.VIDEO_TO_VIDEO,C.VIDEO_EXTENSION],
+    headers: (key) => ({ ...commonHeaders(`Bearer ${key}`), 'X-DashScope-Async': 'enable' }),
+    submit: () => ({ url: `${base}/services/aigc/video-generation/video-synthesis` }),
+    status: (id) => ({ url: `${base}/tasks/${encodeURIComponent(id)}` }), result: (_id, _model, body) => ({ body }),
+    requestId: (body) => body?.output?.task_id, state: (body) => state(body?.output?.task_status,
+      { pending: 'PENDING', queued: 'PENDING', running: 'RUNNING', succeeded: 'SUCCEEDED', failed: 'FAILED', canceled: 'CANCELED', unknown: 'FAILED' }),
+    mapRequest: (request) => {
+      const firstLast = [request.references.firstFrame, request.references.lastFrame].filter(Boolean);
+      const referenceMedia = [...request.references.characterImages, ...request.references.styleImages,
+        ...request.references.referenceVideos, ...(request.references.referenceAudios || [])];
+      if (firstLast.length && referenceMedia.length) {
+        const error = new Error('Wan 3 first/last frames cannot be combined with reference media');
+        error.code = 'PROVIDER_INPUT_INVALID'; throw error;
+      }
+      if (request.references.characterImages.length + request.references.styleImages.length > 10
+        || request.references.referenceVideos.length > 5 || (request.references.referenceAudios || []).length > 5) {
+        const error = new Error('Wan 3 reference media limit exceeded'); error.code = 'PROVIDER_INPUT_INVALID'; throw error;
+      }
+      const media = [];
+      if (request.references.firstFrame) media.push({ type: 'first_frame', url: request.references.firstFrame });
+      if (request.references.lastFrame) media.push({ type: 'last_frame', url: request.references.lastFrame });
+      for (const url of [...request.references.characterImages, ...request.references.styleImages]) media.push({ type: 'reference_image', url });
+      for (const url of request.references.referenceVideos) media.push({ type: 'reference_video', url });
+      for (const url of request.references.referenceAudios || []) media.push({ type: 'reference_audio', url });
+      return { model: request.providerSelection.model, input: { prompt: request.providerPrompt, ...(media.length ? { media } : {}) },
+        parameters: { resolution: String(request.resolution || request.resolvedSettings.resolution || '720p').toUpperCase(),
+          ratio: request.aspectRatio, duration: request.durationSeconds || Number(request.resolvedSettings.duration || 5),
+          audio: request.audio.requested, watermark: Boolean(request.resolvedSettings.watermark),
+          prompt_extend: request.resolvedSettings.enablePromptExpansion !== false,
+          ...(request.seed == null ? {} : { seed: request.seed }) } };
+    }, outputUrl: (body) => body?.output?.video_url, usage: (body) => body?.usage || null,
+  });
+}
+
 const PROTOCOLS = Object.freeze({
   fal: {
     id: 'fal', adapterFamily: 'fal-video', models: ['bytedance/seedance-2.0/text-to-video'],
@@ -65,4 +108,4 @@ const PROTOCOLS = Object.freeze({
   },
 });
 
-module.exports = { PROTOCOLS };
+module.exports = { PROTOCOLS, createAlibabaProtocol, ALIBABA_REGIONS };

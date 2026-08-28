@@ -17,12 +17,13 @@ function references(raw = {}) {
     characterImages: array(raw.characterImages || raw.character_images),
     styleImages: array(raw.styleImages || raw.style_images),
     referenceVideos: array(raw.referenceVideos || raw.reference_videos),
+    referenceAudios: array(raw.referenceAudios || raw.reference_audios),
   });
 }
 
 function hasReferences(value) {
   return Boolean(value.firstFrame || value.lastFrame || value.characterImages.length
-    || value.styleImages.length || value.referenceVideos.length);
+    || value.styleImages.length || value.referenceVideos.length || value.referenceAudios.length);
 }
 
 function createCanonicalMediaRequest(raw = {}) {
@@ -48,15 +49,17 @@ function createCanonicalMediaRequest(raw = {}) {
     throw new CanonicalMediaRequestError('CANONICAL_SEED_INVALID', 'seed must be a non-negative integer');
   }
   return Object.freeze({
-    schemaVersion: '2.8', capability, prompt, canonicalPrompt: prompt,
+    schemaVersion: '2.9.2', capability, prompt, canonicalPrompt: prompt,
     providerPrompt: typeof raw.providerPrompt === 'string' && raw.providerPrompt.trim() ? raw.providerPrompt.trim() : prompt,
     negativeIntent: Object.freeze(structuredClone(raw.negativeIntent || DEFAULT_NEGATIVE_INTENT)),
     negativePrompt: typeof raw.negativePrompt === 'string' ? raw.negativePrompt.trim() : '',
     durationSeconds, aspectRatio: raw.aspectRatio || null, resolution: raw.resolution || null,
-    references: refs, audio: Object.freeze({ requested: raw.audio?.requested === true }),
+    references: refs, audio: Object.freeze({ requested: raw.audio?.requested === true,
+      strategy: raw.audio?.strategy || 'EXTERNAL_VOICE', dialogueOwner: raw.audio?.dialogueOwner || null }),
     camera: Object.freeze({ ...(raw.camera || {}) }), continuity: Object.freeze({ ...(raw.continuity || {}) }),
     seed, providerSelection: Object.freeze({ provider: String(selection.provider).toLowerCase(),
       vendor: selection.vendor || null, model: selection.model, modelVersion: selection.modelVersion || null,
+      modelFamily: selection.modelFamily || null, providerModelId: selection.providerModelId || selection.model,
       profile: String(selection.profile).toUpperCase() }),
     resolvedSettings: Object.freeze({ ...(raw.resolvedSettings || {}) }),
   });
@@ -82,9 +85,11 @@ function fromAsset(asset) {
     capability, prompt, providerPrompt: translated.providerPrompt, negativeIntent: translated.negativeIntent,
     negativePrompt: requirements.negative_prompt, durationSeconds: (requirements.target_clip_duration_ms || 0) / 1000 || null,
     aspectRatio: requirements.aspect_ratio, resolution: requirements.resolution, references: refs,
-    audio: { requested: requirements.generate_audio === true }, camera: requirements.camera,
+    audio: { requested: requirements.generate_audio === true, strategy: requirements.audio_strategy,
+      dialogueOwner: requirements.dialogue_owner }, camera: requirements.camera,
     continuity: requirements.continuity, seed: requirements.seed,
-    providerSelection: selection,
+    providerSelection: { ...selection, modelFamily: selection.modelFamily || requirements.model_family,
+      providerModelId: selection.providerModelId || requirements.provider_model_id || selection.model },
     resolvedSettings: requirements.resolved_settings || requirements,
   });
 }

@@ -6,6 +6,8 @@ const { createProductionRuntime } = require('./production-runtime');
 const { buildOperatorProductionInput } = require('./operator-production-input');
 const { resolveQualityVideoProfile, qualityProfileFromSelection } = require('./quality-video-profile');
 const { buildShotRevision } = require('./shot-regeneration');
+const { brandMediaPreferences, resolveMediaStack } = require('../v2.9.2/media-stack');
+const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ProductionCommandError extends Error {
@@ -61,8 +63,10 @@ class ProductionCommandService {
       return;
     }
     if (this.providerCatalog) {
-      if (input.voiceover?.enabled && !this.env.OPENAI_API_KEY) {
-        throw new ProductionCommandError(409, 'CREDENTIALS_MISSING', 'OpenAI speech credentials are not configured');
+      const voiceProvider = input.mediaStack?.audio?.voice?.provider || 'openai';
+      const voiceCredentials = { openai: 'OPENAI_API_KEY', elevenlabs: 'ELEVENLABS_API_KEY' };
+      if (input.voiceover?.enabled && !this.env[voiceCredentials[voiceProvider]]) {
+        throw new ProductionCommandError(409, 'CREDENTIALS_MISSING', `${voiceProvider} speech credentials are not configured`);
       }
       return;
     }
@@ -85,7 +89,8 @@ class ProductionCommandService {
       REAL_PRODUCTION_INPUT: this.env.REAL_PRODUCTION_INPUT || 'dashboard://operator-console',
       RENDER_MODE: input.renderMode,
       VIDEO_PROVIDER: input.qualityVideoProfile?.provider || 'replicate',
-      AUDIO_PROVIDER: 'openai-media',
+      AUDIO_PROVIDER: input.mediaStack?.audio?.voice?.provider === 'elevenlabs' ? 'elevenlabs'
+        : input.voiceover?.enabled ? 'openai-media' : 'none',
       ...(input.qualityVideoProfile ? { REPLICATE_VIDEO_MODEL: input.qualityVideoProfile.model,
         QUALITY_VIDEO_MODEL: input.qualityVideoProfile.model,
         QUALITY_VIDEO_PROVIDER: input.qualityVideoProfile.provider } : {}),
@@ -114,25 +119,27 @@ class ProductionCommandService {
     let scopedCatalog = this.providerCatalog;
     try {
       let qualityProfile = null;
+      let mediaStack = null;
       if (String(request.renderMode || '').toUpperCase() === 'QUALITY') {
         if (this.providerCatalog) {
           scopedCatalog = await this.providerCatalog.forWorkspace(brand.workspaceId);
-          const selection = scopedCatalog.resolveSelection({
+          mediaStack = resolveMediaStack({ request: { ...request, video: {
             provider: request.provider || this.env.DEFAULT_QUALITY_PROVIDER,
-            model: request.model || this.env.DEFAULT_QUALITY_MODEL,
-            profile: request.profile || this.env.DEFAULT_QUALITY_PROFILE || 'STANDARD',
-            capability: request.capability || 'TEXT_TO_VIDEO', aspectRatio: request.aspectRatio || '9:16',
-            allowExperimental: request.allowExperimental === true,
-          });
-          qualityProfile = qualityProfileFromSelection(selection);
+            modelFamily: request.modelFamily || undefined, model: request.model || this.env.DEFAULT_QUALITY_MODEL,
+            profile: request.profile || this.env.DEFAULT_QUALITY_PROFILE || undefined,
+          } }, brandPreferences: brandMediaPreferences(brand), catalog: scopedCatalog,
+          semantic: { provider: this.env.SEMANTIC_VISUAL_PROVIDER, model: this.env.SEMANTIC_VISUAL_MODEL }, env: this.env });
+          qualityProfile = qualityProfileFromSelection(mediaStack.video);
         } else qualityProfile = this.qualityProfileResolver(this.env);
       }
-      built = buildOperatorProductionInput(request, brand, { productionKey, qualityProfile });
+      built = buildOperatorProductionInput(request, brand, { productionKey, qualityProfile, mediaStack });
     }
     catch (error) {
       if (['V27_INPUT_INVALID','V25_INPUT_INVALID','QUALITY_PROFILE_INVALID','QUALITY_MODEL_REQUIRED','QUALITY_CAPABILITY_UNAVAILABLE',
         'SELECTED_PROVIDER_UNAVAILABLE','SELECTED_MODEL_UNAVAILABLE','SELECTED_PROFILE_UNAVAILABLE','CAPABILITY_UNSUPPORTED',
-        'CREDENTIALS_MISSING','UNSUPPORTED_DURATION','UNSUPPORTED_RESOLUTION','UNSUPPORTED_ASPECT_RATIO'].includes(error.code)) {
+        'CREDENTIALS_MISSING','UNSUPPORTED_DURATION','UNSUPPORTED_RESOLUTION','UNSUPPORTED_ASPECT_RATIO',
+        'MEDIA_PRESET_INVALID','MEDIA_VIDEO_SELECTION_REQUIRED','MODEL_FAMILY_MISMATCH','AUDIO_STRATEGY_INVALID',
+        'NATIVE_AUDIO_UNSUPPORTED','HYBRID_AUDIO_UNSUPPORTED','VOICE_SELECTION_REQUIRED','MASTER_PROFILE_INVALID'].includes(error.code)) {
         throw new ProductionCommandError(400, error.code, error.message, error.details);
       }
       throw error;
@@ -233,6 +240,18 @@ class ProductionCommandService {
       humanApprovalRequired: plan.publicationPolicy?.requiresHumanApproval === true,
       autoPublish: false,
       preflightProviderExecutions: 0,
+      mediaStack: command.input.mediaStack || null,
+      pricing: command.input.renderMode === 'QUALITY' ? estimateMediaStack({
+        video: { provider: command.input.qualityVideoProfile.provider, model: command.input.qualityVideoProfile.model,
+          resolution: command.input.qualityVideoProfile.resolution,
+          durationSeconds: command.input.assetPlan.assets.filter((item) => item.kind === 'video')
+            .reduce((sum, item) => sum + (item.generation_requirements.target_clip_duration_ms || 0) / 1000, 0), count: 1 },
+        voice: command.input.voiceover?.enabled ? { provider: command.input.mediaStack?.audio?.voice?.provider || 'openai',
+          model: command.input.mediaStack?.audio?.voice?.model || 'gpt-4o-mini-tts',
+          characterCount: command.input.approvedSpokenCopy?.length || 0, count: 1 } : null,
+        semantic: { provider: plan.semanticEvaluatorProvider, model: plan.semanticEvaluatorModel,
+          count: plan.expectedQualityEvaluatorCalls || 0 }, master: { profile: command.input.mediaStack?.master?.profile || 'SOCIAL_VERTICAL', amountUsd: null },
+      }) : null,
     });
   }
 

@@ -86,7 +86,7 @@ class AsyncMediaProviderAdapter extends UniversalMediaProviderAdapter {
   }
   normalizeResult({ requestId, request, body, output, mediaUrl }) {
     return Object.freeze({ provider: this.provider, model: request.providerSelection.model,
-      capability: request.capability, requestId, output, mediaUrl, contentType: 'video/mp4', usage: body.metrics || null,
+      capability: request.capability, requestId, output, mediaUrl, contentType: 'video/mp4', usage: this.protocol.usage?.(body) || body.metrics || null,
       provenance: Object.freeze({ provider: this.provider, vendor: request.providerSelection.vendor || null,
         model: request.providerSelection.model, modelVersion: request.providerSelection.modelVersion || null,
         profile: request.providerSelection.profile, capability: request.capability,

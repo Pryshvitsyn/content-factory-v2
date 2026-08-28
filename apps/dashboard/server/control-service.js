@@ -1,5 +1,7 @@
 'use strict';
 
+const { publicMediaStackCatalog } = require('../../../src/v2.9.2/media-stack');
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRODUCTION_STATUSES = new Set(['DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED']);
 const RENDER_MODES = new Set(['FAST','QUALITY']);
@@ -101,6 +103,12 @@ class ControlService {
     if (!this.providerCatalog) return this.providers;
     const catalog = await this.providerCatalog.snapshot();
     return [...catalog, ...this.providers.filter((item) => item.capability === 'SEMANTIC VISUAL QA')];
+  }
+
+  async mediaStackCatalog() {
+    if (!this.providerCatalog) throw new ControlError(503, 'CATALOG_UNAVAILABLE', 'Universal media catalog is unavailable');
+    await this.providerCatalog.refresh();
+    return publicMediaStackCatalog(this.providerCatalog);
   }
 
   async addProviderModel({ brandId, provider, modelId, displayName, preset }) {
