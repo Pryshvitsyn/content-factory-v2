@@ -8,6 +8,7 @@ const { spawn } = require('node:child_process');
 const { constants } = require('node:fs');
 const { Pool } = require('pg');
 const { discoverLocalDatabase, localStorageRoot } = require('./local-runtime');
+const { prepareDatabase } = require('./prepare-local-live-production');
 
 function dashboardPorts(env = process.env) {
   const apiPort = Number(env.DASHBOARD_API_PORT || 3001);
@@ -75,10 +76,14 @@ async function main() {
   const ports = dashboardPorts(process.env);
   const host = process.env.DASHBOARD_API_HOST || '127.0.0.1';
   const webHost = process.env.DASHBOARD_WEB_HOST || '127.0.0.1';
-  const db = new Pool({ connectionString: discovered.url, max: 1 });
+  const db = new Pool({ connectionString: discovered.url, max: 2 });
   let readiness;
-  try { readiness = await validateDashboardDatabase(db); }
-  finally { await db.end(); }
+  try {
+    // Local operator startup owns additive/idempotent schema verification so a merged
+    // recovery feature cannot silently depend on a migration the operator forgot to run.
+    await prepareDatabase(db);
+    readiness = await validateDashboardDatabase(db);
+  } finally { await db.end(); }
   try { await fs.access(storageRoot, constants.R_OK | constants.W_OK); }
   catch (cause) {
     const error = new Error(`Content Factory storage is not readable/writable at '${storageRoot}'. Set CONTENT_FACTORY_STORAGE_ROOT to the production artifact root. ${cause.message}`);
