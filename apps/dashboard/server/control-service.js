@@ -1,6 +1,8 @@
 'use strict';
 
 const { publicMediaStackCatalog } = require('../../../src/v2.9.2/media-stack');
+const { retryPlan } = require('../../../src/v2.9/semantic-evaluation-retry');
+const { operatorInputFromRaw } = require('../../../src/v2.7/production-command-service');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRODUCTION_STATUSES = new Set(['DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED']);
@@ -143,10 +145,15 @@ class ControlService {
     const shotRegenerations = typeof this.repository.listShotRegenerations === 'function'
       ? await this.repository.listShotRegenerations(item.id, item.brandId) : [];
     const evaluator = evaluatorAccounting(item);
+    let semanticRetry = retryPlan(item);
+    if (semanticRetry.eligible && item.jobPayload?.canonicalRawInput) {
+      try { semanticRetry = retryPlan(item, operatorInputFromRaw(item.jobPayload.canonicalRawInput)); }
+      catch { semanticRetry = Object.freeze({ ...semanticRetry, eligible: false, action: null }); }
+    }
     return { ...item, operationalStatus: operationalStatus(item), progress: progressFor(item), shotRegenerations,
       actualProviderCalls: execution.actualProviderCalls, ambiguousExecutions: execution.ambiguousExecutions,
       ...evaluator, actualExternalCalls: execution.actualProviderCalls + evaluator.actualEvaluatorCalls,
-      autoPublish: false };
+      semanticRetry, autoPublish: false };
   }
 
   async stages(productionId, brandId) {
@@ -198,6 +205,16 @@ class ControlService {
   async retryProduction({ productionId, brandId }) {
     return this.requireCommands().retry({ productionId: requiredUuid('productionId', productionId),
       brandId: requiredUuid('brandId', brandId) });
+  }
+
+  async preflightSemanticRetry({ productionId, brandId }) {
+    return this.requireCommands().preflightSemanticRetry({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId) });
+  }
+
+  async retrySemanticEvaluation({ productionId, brandId, confirmation }) {
+    return this.requireCommands().retrySemanticEvaluation({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId), confirmation });
   }
 
   async regenerateProduction({ productionId, brandId, requestId, reason }) {

@@ -179,6 +179,36 @@ describe('V2.7 operator console', () => {
     await waitFor(() => expect(calls.some(([url]) => url.endsWith('/regenerate'))).toBe(true));
   });
 
+  it('offers semantic-only recovery separately with an exact zero-generation call budget', async () => {
+    const calls = [];
+    vi.spyOn(window, 'confirm').mockImplementation((message) => {
+      expect(message).toContain('Video generation: 0');
+      expect(message).toContain('Speech generation: 0');
+      expect(message).toContain('Semantic evaluation: 1');
+      return true;
+    });
+    fetch.mockImplementation((url, options = {}) => {
+      calls.push([url, options.method || 'GET', options.body]);
+      if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
+      if (url.endsWith('/semantic-retry/preflight')) return response({ expectedVideoGenerations: 0,
+        expectedSpeechGenerations: 0, expectedSemanticEvaluations: 1 });
+      if (url.endsWith('/semantic-retry')) return response({ accepted: true });
+      return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Semantic contract failure',
+        renderMode: 'QUALITY', renderer: 'v2.5-quality', status: 'FAILED', jobStatus: 'FAILED',
+        operationalStatus: 'VALIDATION_FAILED', progress: [], actualProviderCalls: 1, ambiguousExecutions: 0,
+        shotRegenerations: [], semanticRetry: { eligible: true }, jobError: {
+          code: 'SOURCE_QUALITY_VALIDATION_FAILED', message: 'Evaluator omitted required semantic family' } });
+    });
+    render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
+    expect(await screen.findByText('Video generation: 0', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Speech generation: 0', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Semantic evaluation: 1', { exact: false })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'RETRY SEMANTIC EVALUATION' }));
+    await waitFor(() => expect(calls.some(([url, method, body]) => url.endsWith('/semantic-retry')
+      && method === 'POST' && JSON.parse(body).confirmation === true)).toBe(true));
+    expect(calls.some(([url]) => url.endsWith('/regenerate'))).toBe(false);
+  });
+
   it('shows post-render validation failure as completed generation/assembly with review blocked', async () => {
     fetch.mockImplementation((url) => {
       if (url.includes('/stages') || url.includes('/artifacts')) return response([]);

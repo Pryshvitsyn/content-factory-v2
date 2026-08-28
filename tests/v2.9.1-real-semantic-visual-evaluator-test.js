@@ -1,13 +1,14 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { OpenAISemanticVisualEvaluatorAdapter, OPENAI_RESPONSES_ENDPOINT } = require('../src/v2.9/openai-semantic-visual-evaluator');
+const { CONTINUITY_FAMILY_PROPERTIES, OpenAISemanticVisualEvaluatorAdapter, OPENAI_RESPONSES_ENDPOINT,
+  SOURCE_FAMILY_PROPERTIES, strictSchema } = require('../src/v2.9/openai-semantic-visual-evaluator');
 const { createSemanticVisualEvaluatorAdapter } = require('../src/v2.9/semantic-visual-evaluator-factory');
 const { DisabledSemanticVisualEvaluatorAdapter, FunctionSemanticVisualEvaluatorAdapter } = require('../src/v2.9/semantic-visual-evaluator');
 const { semanticEvaluationPlan } = require('../src/v2.9/semantic-evaluation-policy');
 const { QualityRendererLane } = require('../src/v2.6/renderer-router');
 const { REASON_CODES, qualityCheck, qualityResult } = require('../src/v2.9/quality-contract');
-const { SEMANTIC_FIXTURES } = require('./fixtures/v2.9.1/semantic-results');
+const { SEMANTIC_FIXTURES, result: semanticFixture } = require('./fixtures/v2.9.1/semantic-results');
 
 const API_KEY = 'synthetic-test-key-never-log';
 const MODEL = 'explicit-vision-test-model';
@@ -67,6 +68,9 @@ async function main() {
   assert.equal(captured.body.model, MODEL); assert.equal(captured.body.store, false);
   assert.equal(captured.body.text.format.type, 'json_schema'); assert.equal(captured.body.text.format.strict, true);
   assert.equal(captured.body.text.format.schema.additionalProperties, false);
+  assert.deepEqual(captured.body.text.format.schema.properties.checks.required, Object.keys(SOURCE_FAMILY_PROPERTIES));
+  assert.equal(captured.body.text.format.schema.properties.checks.type, 'object');
+  assert.equal(captured.body.text.format.schema.properties.checks.additionalProperties, false);
   const content = captured.body.input[0].content;
   assert.equal(content.filter((item) => item.type === 'input_image').length, 3);
   assert(content.filter((item) => item.type === 'input_image').every((item) => item.image_url.startsWith('data:image/jpeg;base64,')));
@@ -93,11 +97,16 @@ async function main() {
   assert.equal(malformedJson.checks[0].code, REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE);
   const malformedSchema = await evaluate(adapter(async () => httpResponse({ body: openAIResponse({ status: 'PASS', checks: [] }) })));
   assert.equal(malformedSchema.status, 'FAIL');
-  const missingRequiredFamily = await evaluate(adapter(async () => httpResponse({ body: openAIResponse({
-    status: 'PASS', checks: Array.from({ length: 7 }, () => SEMANTIC_FIXTURES.pass.checks[0]),
-  }) })));
-  assert.equal(missingRequiredFamily.status, 'FAIL');
-  assert.equal(missingRequiredFamily.checks[0].code, REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE);
+  for (const family of Object.keys(SOURCE_FAMILY_PROPERTIES)) {
+    const incomplete = structuredClone(SEMANTIC_FIXTURES.pass); delete incomplete.checks[family];
+    const missingRequiredFamily = await evaluate(adapter(async () => httpResponse({ body: openAIResponse(incomplete) })));
+    assert.equal(missingRequiredFamily.status, 'FAIL', `missing source family ${family} must fail closed`);
+    assert.equal(missingRequiredFamily.checks[0].code, REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE);
+  }
+  const brandSafetyDefect = await evaluate(adapter(async () => httpResponse({ body: openAIResponse(semanticFixture(
+    REASON_CODES.BRAND_SAFETY_PROHIBITED_ELEMENT, 'FAIL', 'A prohibited brand element is clearly visible.')) })));
+  assert.equal(brandSafetyDefect.status, 'FAIL');
+  assert.equal(brandSafetyDefect.checks.find((check) => check.code === REASON_CODES.BRAND_SAFETY_PROHIBITED_ELEMENT).status, 'FAIL');
 
   for (const [status, code] of [[401, REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_AUTH_FAILED],
     [429, REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_RATE_LIMITED], [500, REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_HTTP_FAILED]]) {
@@ -128,6 +137,18 @@ async function main() {
     shotEvaluations: [{ assetId: 'one', evaluation: { sampledFrames: frames } },
       { assetId: 'two', evaluation: { sampledFrames: frames } }] });
   assert.equal(continuityPassed.status, 'PASS'); assert.equal(continuityRequests, 1);
+  const continuitySchema = strictSchema('CONTINUITY_QUALITY');
+  assert.deepEqual(continuitySchema.properties.checks.required, Object.keys(CONTINUITY_FAMILY_PROPERTIES));
+  for (const family of Object.keys(CONTINUITY_FAMILY_PROPERTIES)) {
+    const incomplete = structuredClone(SEMANTIC_FIXTURES.continuityPass); delete incomplete.checks[family];
+    const result = await adapter(async () => httpResponse({ body: openAIResponse(incomplete) })).evaluateContinuity({
+      qualityTier: 'STANDARD', creativePlan,
+      shotEvaluations: [{ assetId: 'one', evaluation: { sampledFrames: frames } },
+        { assetId: 'two', evaluation: { sampledFrames: frames } }],
+    });
+    assert.equal(result.status, 'FAIL', `missing continuity family ${family} must fail closed`);
+    assert.equal(result.checks[0].code, REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE);
+  }
   const continuityFailed = await adapter(async () => httpResponse({ body: openAIResponse(SEMANTIC_FIXTURES.continuityFail) }))
     .evaluateContinuity({ qualityTier: 'STANDARD', creativePlan,
       shotEvaluations: [{ evaluation: { sampledFrames: frames } }, { evaluation: { sampledFrames: frames } }] });
