@@ -301,6 +301,11 @@ class DurableMediaExecutor {
     const cached = await this.cached({ identities, asset, row });
     if (!cached) throw new DurableMediaError('SEMANTIC_RETRY_MEDIA_MISSING',
       `Semantic retry cannot load immutable artifact bytes for ${asset.asset_id}`);
+    if (cached.artifact.storageKey !== row.artifact_storage_key
+      || cached.artifact.contentHash !== row.artifact_content_hash) {
+      throw new DurableMediaError('SEMANTIC_RETRY_MEDIA_IDENTITY_MISMATCH',
+        `Semantic retry immutable artifact identity mismatch for ${asset.asset_id}`);
+    }
     const probe = row.media_probe && Object.keys(row.media_probe).length ? row.media_probe
       : await this.mediaInspector.inspect({ bytes: cached.bytes, contentType: cached.contentType, kind: asset.kind,
         expectedDurationMs: asset.generation_requirements?.target_clip_duration_ms || null });

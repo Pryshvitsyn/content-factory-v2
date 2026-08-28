@@ -30,6 +30,8 @@ async function main() {
     await migration('20260822_v2_2_growth_foundation.sql');
     await migration('20260828_v2_9_2_semantic_evaluation_attempts.sql');
     await migration('20260828_v2_9_2_semantic_evaluation_attempts.sql');
+    await migration('20260828_v2_9_2_1_semantic_retry_partial_media.sql');
+    await migration('20260828_v2_9_2_1_semantic_retry_partial_media.sql');
     await db.query("INSERT INTO workspaces(id,name) VALUES($1,'one'),($2,'two')", [WORKSPACE_ID, OTHER_WORKSPACE_ID]);
     await db.query("INSERT INTO v2_2.brands(id,workspace_id,name,slug) VALUES($1,$2,'one','one'),($3,$4,'two','two')",
       [BRAND_ID, WORKSPACE_ID, OTHER_BRAND_ID, OTHER_WORKSPACE_ID]);
@@ -43,12 +45,20 @@ async function main() {
       productionId: production.rows[0].id, jobId: job.rows[0].id, assetId: 'operator-video-1',
       sourceArtifact: { artifactId: 'brand:one:asset:operator-video-1', version: 1, contentHash: 'immutable' },
       previousEvidence: { status: 'FAIL', evidenceArtifact: { version: 1 } },
-      evaluator: { provider: 'openai', model: 'semantic-test' } });
-    await repository.finish({ id: attempt.id, status: 'SUCCEEDED', resultEvidence: { status: 'PASS' }, actualSemanticCalls: 1 });
+      evaluator: { provider: 'openai', model: 'semantic-test' },
+      mediaPlan: { reusedVideoAssets: 1, reusedSpeechAssets: 0, possiblePostPassSpeechGenerations: 1 } });
+    await repository.finish({ id: attempt.id, status: 'SUCCEEDED', resultEvidence: { status: 'PASS' },
+      actualSemanticCalls: 1, reusedVideoAssets: 1, reusedSpeechAssets: 0,
+      newSpeechGenerations: 1, newVideoGenerations: 0 });
     const preserved = await db.query('SELECT * FROM v2_9.semantic_evaluation_attempts WHERE id=$1', [attempt.id]);
     assert.equal(preserved.rows[0].expected_video_calls, 0);
     assert.equal(preserved.rows[0].expected_speech_calls, 0);
     assert.equal(preserved.rows[0].expected_semantic_calls, 1);
+    assert.equal(preserved.rows[0].possible_post_pass_speech_calls, 1);
+    assert.equal(preserved.rows[0].reused_video_assets, 1);
+    assert.equal(preserved.rows[0].reused_speech_assets, 0);
+    assert.equal(preserved.rows[0].new_speech_generations, 1);
+    assert.equal(preserved.rows[0].new_video_generations, 0);
     assert.equal(preserved.rows[0].source_artifact.contentHash, 'immutable');
     await assert.rejects(() => db.query('UPDATE v2_9.semantic_evaluation_attempts SET brand_id=$2 WHERE id=$1',
       [attempt.id, OTHER_BRAND_ID]), /immutable|ownership mismatch/);
