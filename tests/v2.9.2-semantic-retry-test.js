@@ -8,6 +8,9 @@ const { sourceFailureNextAction } = require('../worker/v2.1-master-production');
 
 const frameBytes = Buffer.from('existing immutable sampled frame');
 const frameHash = crypto.createHash('sha256').update(frameBytes).digest('hex');
+const frameDescriptor = Object.freeze({ ratio: 0.5, timestampMs: 1000, analysisHash: 'analysis-1',
+  storageKey: 'frame-1.jpg', contentHash: frameHash, artifactId: 'quality:frame:1', artifactVersion: 1,
+  contentType: 'image/jpeg' });
 const deterministicVisual = qualityResult({ qualityClass: 'SOURCE_VISUAL', checks: [qualityCheck({
   code: 'SOURCE_TECHNICAL_PASS', status: 'PASS', qualityClass: 'SOURCE_VISUAL', reason: 'Existing technical evidence passed.',
 })] });
@@ -20,8 +23,7 @@ function productionWith(code) {
     code, status: 'FAIL', qualityClass: 'SEMANTIC_VISUAL', reason: 'Evaluator infrastructure response failed.', hardFailure: false,
   })] });
   const shot = { assetId: 'operator-video-1', status: 'FAIL', deterministicVisual, temporal, semantic,
-    sampledFrames: [{ ratio: 0.5, timestampMs: 1000, analysisHash: 'analysis-1', storageKey: 'frame-1.jpg',
-      contentHash: frameHash, artifactId: 'quality:frame:1', artifactVersion: 1 }],
+    sampledFrames: [frameDescriptor],
     evidenceArtifact: { artifactId: 'quality:evaluation', version: 1, contentHash: 'previous-evidence' } };
   return { id: '29449687-4f0a-450b-bba2-f71b0f94cff0', workspaceId: 'workspace-1', brandId: 'brand-1', jobId: 'job-1',
     jobError: { code: 'SOURCE_QUALITY_VALIDATION_FAILED', details: { sourceQuality: { shots: [shot] } } } };
@@ -40,7 +42,8 @@ function passingEvaluation() {
   })], metadata: { externalCalls: 1 } });
   return { ...qualityResult({ qualityClass: 'SOURCE_VISUAL_GATE', checks: [
     ...deterministicVisual.checks, ...temporal.checks, ...semantic.checks,
-  ], metadata: { semanticOnlyRetry: true } }), deterministicVisual, temporal, semantic, sampledFrames: [] };
+  ], metadata: { semanticOnlyRetry: true } }), deterministicVisual, temporal, semantic,
+  sampledFrames: [{ ...frameDescriptor, bytes: frameBytes, jpeg: frameBytes }] };
 }
 
 async function exercise({ semanticStatus = 'PASS', voiceState = 'REUSED', sourceExists = true,
@@ -97,6 +100,9 @@ async function exercise({ semanticStatus = 'PASS', voiceState = 'REUSED', source
       sourceArtifact, 'immutable source identity must be reused');
     assert.equal(args.resolvedMedia.length, 2, 'video and resolved voice are required for assembly');
     assert.equal(args.semanticRecovery.assetId, 'operator-video-1');
+    assert.equal(Buffer.isBuffer(args.semanticRecovery.evaluation.sampledFrames[0].jpeg), true,
+      'master must receive materialized immutable JPEG bytes, never JSON-round-tripped Buffer objects');
+    assert.deepEqual(args.semanticRecovery.evaluation.sampledFrames[0].jpeg, frameBytes);
     return { master: { artifact: { artifactId: 'master', version: 1, storageKey: 'master.mp4' } }, quality: { status: 'PASS' } };
   } };
   const service = new SemanticEvaluationRetryService({ repository,
