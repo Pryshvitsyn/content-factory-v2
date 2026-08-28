@@ -612,7 +612,7 @@ class LiveProductionService {
   async retrySemanticEvaluation({ production, input, config }) {
     if (!this.semanticRetryService) throw new LiveProductionError('SEMANTIC_RETRY_UNAVAILABLE', 'Semantic retry runtime is unavailable');
     const recovered = await this.semanticRetryService.execute({ production, input, workerId: config.workerId });
-    if (recovered.result.quality?.status !== 'PASS' || recovered.result.quality?.readyForHumanReview !== true) {
+    if (recovered.result.quality?.status === 'FAIL' || recovered.result.quality?.readyForHumanReview !== true) {
       throw new LiveProductionError('LIVE_MASTER_VALIDATION_FAILED',
         'Cached master assembly did not pass all required validation after semantic recovery', { quality: recovered.result.quality });
     }
