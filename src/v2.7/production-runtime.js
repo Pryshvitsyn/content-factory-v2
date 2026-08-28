@@ -3,6 +3,7 @@
 const { ArtifactService } = require('../artifacts/artifact-service');
 const { ProviderGateway } = require('../providers/provider-gateway');
 const { createOpenAIMediaProvider } = require('../providers/openai-media-provider');
+const { createElevenLabsTtsProvider } = require('../providers/elevenlabs-tts-provider');
 const { createVideoAdapter } = require('../v2.8/provider-adapter-factory');
 const { PostgresAssetRepository } = require('../v2.1/asset-repository');
 const { FfmpegMasterRenderer } = require('../v2.1/ffmpeg-master-renderer');
@@ -30,18 +31,21 @@ function planOnlyAdapter(provider, capability, model) {
 
 function providerGateway({ config, live, env = process.env }) {
   const videoProvider = config.provider;
+  const voiceProvider = config.audioProvider;
   const providers = live ? {
     [videoProvider]: createVideoAdapter({ provider: videoProvider, model: config.model,
       adapterFamily: config.adapterFamily || (videoProvider === 'replicate' ? 'replicate-wan' : null) }, { env }),
-    'openai-media': createOpenAIMediaProvider({ apiKey: env.OPENAI_API_KEY, speechModel: config.audioModel }),
+    ...(voiceProvider === 'openai-media' ? { 'openai-media': createOpenAIMediaProvider({ apiKey: env.OPENAI_API_KEY, speechModel: config.audioModel }) } : {}),
+    ...(voiceProvider === 'elevenlabs' ? { elevenlabs: createElevenLabsTtsProvider({ apiKey: env.ELEVENLABS_API_KEY, model: config.audioModel }) } : {}),
   } : {
     [videoProvider]: planOnlyAdapter(videoProvider, 'video-generation', config.model),
-    'openai-media': planOnlyAdapter('openai-media', 'speech-generation', config.audioModel),
+    ...(voiceProvider && voiceProvider !== 'none' ? { [voiceProvider]: planOnlyAdapter(voiceProvider, 'speech-generation', config.audioModel) } : {}),
   };
   return new ProviderGateway({
     providers,
     priorities: { 'video-generation': [videoProvider], 'media:video': [videoProvider],
-      'speech-generation': ['openai-media'], 'media:voice': ['openai-media'] },
+      'speech-generation': voiceProvider && voiceProvider !== 'none' ? [voiceProvider] : [],
+      'media:voice': voiceProvider && voiceProvider !== 'none' ? [voiceProvider] : [] },
     routing: { strategy: 'priority', fallbackOnError: false },
   });
 }

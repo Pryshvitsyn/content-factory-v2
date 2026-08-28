@@ -41,9 +41,11 @@ async function adapterContract(provider, model, responses) {
 
 async function main() {
   const env = { REPLICATE_API_TOKEN: 'x', FAL_KEY: 'x', RUNWAYML_API_SECRET: 'x', GOOGLE_API_KEY: 'x', LUMA_API_KEY: 'x',
-    OPENAI_API_KEY: 'x', MPT_ENABLED: 'true', MPT_BASE_URL: 'http://127.0.0.1:8080', MPT_AUTO_PUBLISH_DISABLED: 'true' };
+    OPENAI_API_KEY: 'x', ELEVENLABS_API_KEY: 'x', DASHSCOPE_API_KEY: 'x',
+    ALIBABA_MODEL_STUDIO_WORKSPACE_ID: 'ws-test-123', ALIBABA_MODEL_STUDIO_REGION: 'singapore',
+    MPT_ENABLED: 'true', MPT_BASE_URL: 'http://127.0.0.1:8080', MPT_AUTO_PUBLISH_DISABLED: 'true' };
   const catalog = new ProviderCatalog({ env });
-  assert.deepEqual(catalog.listProviders().map((item) => item.id), ['replicate','fal','runway','google','luma','openai','moneyprinterturbo']);
+  assert.deepEqual(catalog.listProviders().map((item) => item.id), ['replicate','fal','runway','google','luma','openai','alibaba','elevenlabs','moneyprinterturbo']);
   for (const provider of catalog.listProviders()) {
     assert.equal(provider.configured, true); assert.notEqual(provider.availability, 'READY', 'credential presence is not a live probe');
     assert.equal(Object.hasOwn(provider, 'credential'), false); assert.equal(JSON.stringify(provider).includes('synthetic-test-key'), false);

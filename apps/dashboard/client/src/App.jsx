@@ -62,10 +62,13 @@ function Overview({ navigate }) {
 }
 
 export function NewProduction({ onCreated = () => {} }) {
-  const catalog = useLoad(() => Promise.all([api('/api/brands'), api('/api/providers')]).then(([brands, providers]) => ({ brands, providers })));
+  const catalog = useLoad(() => Promise.all([api('/api/brands'), api('/api/providers'), api('/api/media-stack').catch(() => null)])
+    .then(([brands, providers, mediaStack]) => ({ brands, providers, mediaStack })));
   const [requestId] = useState(commandId);
   const [form, setForm] = useState({ requestId, brandId: '', renderMode: 'FAST', title: '', objective: 'ENGAGEMENT',
-    provider: '', model: '', profile: '',
+    preset: 'STANDARD', modelFamily: '', provider: '', model: '', profile: '', capability: 'TEXT_TO_VIDEO', resolution: '',
+    audioStrategy: 'EXTERNAL_VOICE', voiceProvider: 'openai', voiceModel: 'gpt-4o-mini-tts', voiceId: 'alloy',
+    voiceLanguage: 'en', masterProfile: 'SOCIAL_VERTICAL', semanticProvider: '', semanticModel: '',
     platform: 'Instagram Reels', targetDurationSeconds: 15, aspectRatio: '9:16', hook: '', coreMessage: '', creativeBrief: '', cta: '',
     voiceover: '', sceneIdeas: '', visualDirection: '', captionsEnabled: true, musicEnabled: false,
     audience: '', campaign: '', additionalInstructions: '' });
@@ -101,10 +104,12 @@ export function NewProduction({ onCreated = () => {} }) {
   return <Page title="New Production" eyebrow="SIMPLE MODE · CANONICAL INPUT">
     <p className="page-note">Choose a brand and renderer, describe the creative, then preflight. Preflight never starts production.</p>
     {error ? <div className="error-panel"><strong>{error.code || 'PREFLIGHT_FAILED'}</strong><p>{error.message || String(error)}</p><ValidationDetails evidence={error.details?.validation} /></div> : null}
-    <State state={catalog}>{({ brands, providers }) => {
+    <State state={catalog}>{({ brands, providers, mediaStack }) => {
+      const stack = mediaStack?.presets ? mediaStack : { presets: { ECONOMY: {}, STANDARD: {}, PREMIUM: {}, CUSTOM: {} },
+        audioStrategies: ['EXTERNAL_VOICE','NATIVE_VIDEO_AUDIO','HYBRID','NO_VOICE'], masterProfiles: { SOCIAL_VERTICAL: {} } };
       const catalogProviders = providers.filter((item) => item.id && Array.isArray(item.models));
       const fastReady = providers.some((item) => (item.id === 'moneyprinterturbo' || item.capability === 'FAST RENDERER') && item.configured);
-      const speechReady = catalogProviders.length ? providers.some((item) => item.id === 'openai' && item.configured)
+      const speechReady = catalogProviders.length ? providers.some((item) => ['openai','elevenlabs'].includes(item.id) && item.configured)
         : providers.some((item) => item.capability === 'SPEECH' && item.configured);
       const qualityProviders = catalogProviders.filter((item) => item.configured
         && item.models.some((model) => model.capabilities?.includes('TEXT_TO_VIDEO') && model.selectable !== false));
@@ -112,13 +117,36 @@ export function NewProduction({ onCreated = () => {} }) {
         : providers.some((item) => item.capability === 'VIDEO' && item.provider === 'Replicate' && item.configured) && speechReady;
       const selectedProvider = catalogProviders.find((item) => item.id === form.provider);
       const selectedModels = (selectedProvider?.models || []).filter((model) => model.capabilities?.includes('TEXT_TO_VIDEO'));
-      const selectedModel = selectedModels.find((model) => model.modelId === form.model);
+      const selectedModel = selectedModels.find((model) => model.modelId === form.model) || selectedModels[0];
       const selectedProfiles = Object.keys(selectedModel?.profiles || {});
+      const videoCapabilities = (selectedModel?.capabilities || []).filter((name) => ['TEXT_TO_VIDEO','IMAGE_TO_VIDEO','REFERENCE_TO_VIDEO','VIDEO_TO_VIDEO','VIDEO_EXTENSION'].includes(name));
+      const selectedResolutions = selectedModel?.constraints?.resolutions
+        || [...new Set(Object.values(selectedModel?.profiles || {}).map((item) => item.resolution).filter(Boolean))];
+      const modelFamilies = [...new Set(catalogProviders.flatMap((item) => item.models)
+        .filter((model) => model.capabilities?.includes('TEXT_TO_VIDEO')).map((model) => model.modelFamily).filter(Boolean))];
+      const familyProviders = catalogProviders.filter((item) => item.models.some((model) => model.modelFamily === form.modelFamily
+        && model.capabilities?.includes('TEXT_TO_VIDEO')));
+      const voiceProviders = catalogProviders.filter((item) => item.models.some((model) => model.capabilities?.includes('SPEECH')));
+      const selectedVoiceProvider = voiceProviders.find((item) => item.id === form.voiceProvider);
+      const voiceModels = (selectedVoiceProvider?.models || []).filter((item) => item.capabilities?.includes('SPEECH'));
+      const applyPreset = (name) => {
+        const preset = stack.presets[name] || {}; let route = preset.video || {}; let model = catalogProviders
+          .find((item) => item.id === route.provider)?.models.find((item) => item.modelId === route.model);
+        if (!model) { const provider = qualityProviders[0]; model = provider?.models.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false); route = { provider: provider?.id, model: model?.modelId, profile: preferredProfile(model), modelFamily: model?.modelFamily }; }
+        setForm((current) => ({ ...current, preset: name, modelFamily: route.modelFamily || model?.modelFamily || '',
+          provider: route.provider || current.provider, model: route.model || current.model, profile: route.profile || preferredProfile(model),
+          capability: model?.capabilities?.includes('TEXT_TO_VIDEO') ? 'TEXT_TO_VIDEO' : model?.capabilities?.[0] || current.capability,
+          resolution: model?.profiles?.[route.profile || preferredProfile(model)]?.resolution || '',
+          audioStrategy: preset.audioStrategy || current.audioStrategy,
+          voiceProvider: preset.voice?.provider || current.voiceProvider, voiceModel: preset.voice?.model || current.voiceModel,
+          voiceId: preset.voice?.voiceId || current.voiceId, masterProfile: preset.masterProfile || current.masterProfile })); setPreflight(null);
+      };
       const selectQuality = () => {
         const route = qualityProviders[0]; const model = route?.models.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
-        setForm((current) => ({ ...current, renderMode: 'QUALITY', captionsEnabled: false,
-          provider: current.provider || route?.id || '', model: current.model || model?.modelId || '',
-          profile: current.profile || preferredProfile(model) })); setPreflight(null);
+        if (!form.provider) { applyPreset('STANDARD'); setForm((current) => ({ ...current, renderMode: 'QUALITY', captionsEnabled: false })); }
+        else setForm((current) => ({ ...current, renderMode: 'QUALITY', captionsEnabled: false,
+          provider: current.provider || route?.id || '', model: current.model || model?.modelId || '', profile: current.profile || preferredProfile(model) }));
+        setPreflight(null);
       };
       return <form className="production-form" onSubmit={prepare}>
         <Section title="1 · Production route">
@@ -127,18 +155,30 @@ export function NewProduction({ onCreated = () => {} }) {
             <ModeCard mode="FAST" selected={form.renderMode === 'FAST'} available={fastReady} onSelect={() => change('renderMode', 'FAST')} description="Best for high-volume, stock/template-based social creative." unavailable="MoneyPrinterTurbo is not configured" />
             <ModeCard mode="QUALITY" selected={form.renderMode === 'QUALITY'} available={qualityReady} onSelect={selectQuality} description="AI-generated visual production with an explicit provider, model, and profile." unavailable="No configured production video route or speech provider" />
           </div>
-          {form.renderMode === 'QUALITY' && catalogProviders.length ? <div className="form-grid routing-fields">
+          {form.renderMode === 'QUALITY' && catalogProviders.length ? <Section title="Universal media stack"><div className="preset-row">{Object.keys(stack.presets).map((name) => <button type="button" className={`secondary ${form.preset === name ? 'selected' : ''}`} key={name} onClick={() => applyPreset(name)}>{name}</button>)}</div><div className="form-grid routing-fields">
+            <label>Model family<select aria-label="Model family" required value={form.modelFamily} onChange={(event) => {
+              const family = event.target.value; const route = catalogProviders.find((item) => item.models.some((model) => model.modelFamily === family));
+              const model = route?.models.find((item) => item.modelFamily === family && item.capabilities?.includes('TEXT_TO_VIDEO'));
+              setForm((current) => ({ ...current, preset: 'CUSTOM', modelFamily: family, provider: route?.id || '', model: model?.modelId || '', profile: preferredProfile(model), capability: 'TEXT_TO_VIDEO', resolution: model?.profiles?.[preferredProfile(model)]?.resolution || '' })); setPreflight(null);
+            }}><option value="">Choose family</option>{modelFamilies.map((family) => <option key={family}>{family}</option>)}</select></label>
             <label>Provider<select aria-label="Provider" required value={form.provider} onChange={(event) => {
               const route = catalogProviders.find((item) => item.id === event.target.value);
-              const model = route?.models.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
-              setForm((current) => ({ ...current, provider: event.target.value, model: model?.modelId || '', profile: preferredProfile(model) })); setPreflight(null);
-            }}><option value="">Choose provider</option>{qualityProviders.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label>
+              const model = route?.models.find((item) => (!form.modelFamily || item.modelFamily === form.modelFamily) && item.capabilities?.includes('TEXT_TO_VIDEO'));
+              setForm((current) => ({ ...current, preset: 'CUSTOM', provider: event.target.value, model: model?.modelId || '', profile: preferredProfile(model), capability: 'TEXT_TO_VIDEO', resolution: model?.profiles?.[preferredProfile(model)]?.resolution || '' })); setPreflight(null);
+            }}><option value="">Choose provider</option>{(form.modelFamily ? familyProviders : catalogProviders).filter((item) => item.models.some((model) => model.capabilities?.includes('TEXT_TO_VIDEO'))).map((item) => <option aria-label={item.displayName} key={item.id} value={item.id}>{item.displayName} · {item.supportStatus || item.productionStatus || 'SUPPORTED'} · {item.configurationStatus || item.credentialStatus || (item.configured ? 'CONFIGURED' : 'NOT_CONFIGURED')}</option>)}</select></label>
             <label>Model<select aria-label="Model" required value={form.model} onChange={(event) => {
               const model = selectedModels.find((item) => item.modelId === event.target.value);
-              setForm((current) => ({ ...current, model: event.target.value, profile: preferredProfile(model) })); setPreflight(null);
-            }}><option value="">Choose model</option>{selectedModels.filter((item) => item.selectable !== false).map((item) => <option key={item.modelId} value={item.modelId}>{item.displayName}</option>)}</select></label>
+              setForm((current) => ({ ...current, preset: 'CUSTOM', modelFamily: model?.modelFamily || current.modelFamily, model: event.target.value, profile: preferredProfile(model), capability: 'TEXT_TO_VIDEO', resolution: model?.profiles?.[preferredProfile(model)]?.resolution || '' })); setPreflight(null);
+            }}><option value="">Choose model</option>{selectedModels.filter((item) => !form.modelFamily || item.modelFamily === form.modelFamily).map((item) => <option aria-label={item.displayName} key={item.modelId} value={item.modelId}>{item.displayName} · {item.supportStatus || 'SUPPORTED'} · {item.configurationStatus || 'CONFIGURATION UNKNOWN'}</option>)}</select></label>
             <label>Profile<select aria-label="Profile" required value={form.profile} onChange={(event) => change('profile', event.target.value)}><option value="">Choose profile</option>{selectedProfiles.map((name) => <option key={name} value={name}>{profileLabel(name)}</option>)}</select></label>
-          </div> : null}
+            <label>Capability<select aria-label="Capability" value={form.capability} onChange={(event) => change('capability', event.target.value)}>{videoCapabilities.map((name) => <option key={name}>{name}</option>)}</select></label>
+            <label>Resolution<select aria-label="Resolution" value={form.resolution} onChange={(event) => change('resolution', event.target.value)}><option value="">Profile default</option>{selectedResolutions.map((name) => <option key={name}>{name}</option>)}</select></label>
+            <label>Audio strategy<select aria-label="Audio strategy" value={form.audioStrategy} onChange={(event) => change('audioStrategy', event.target.value)}>{stack.audioStrategies.map((name) => <option key={name}>{name}</option>)}</select></label>
+            {['EXTERNAL_VOICE','HYBRID'].includes(form.audioStrategy) ? <><label>Voice provider<select aria-label="Voice provider" value={form.voiceProvider} onChange={(event) => { const provider = voiceProviders.find((item) => item.id === event.target.value); const model = provider?.models.find((item) => item.capabilities?.includes('SPEECH')); setForm((current) => ({ ...current, voiceProvider: event.target.value, voiceModel: model?.modelId || '', voiceId: current.voiceId })); setPreflight(null); }}>{voiceProviders.map((item) => <option key={item.id} value={item.id}>{item.displayName} · {item.configurationStatus}</option>)}</select></label>
+              <label>Voice model<select aria-label="Voice model" value={form.voiceModel} onChange={(event) => change('voiceModel', event.target.value)}>{voiceModels.map((item) => <option value={item.modelId} key={item.modelId}>{item.displayName}</option>)}</select></label>
+              <Field label="Voice ID" name="voiceId" value={form.voiceId} change={change} required /></> : null}
+            <label>Master profile<select aria-label="Master profile" value={form.masterProfile} onChange={(event) => change('masterProfile', event.target.value)}>{Object.keys(stack.masterProfiles).map((name) => <option key={name}>{name}</option>)}</select></label>
+          </div></Section> : null}
           {form.renderMode === 'QUALITY' && form.profile === 'ECONOMY' ? <div className="warning-panel"><strong>Draft-quality source generation</strong><p>ECONOMY is intended for ideation and previews. It does not imply production-grade source fidelity.</p></div> : null}
           {brand ? <div className="brand-context"><strong>{brand.name} Brand Brain</strong><span>{brand.positioning || brand.mission || 'No Brand Brain context recorded. Operator brief remains authoritative.'}</span></div> : null}
         </Section>
@@ -174,8 +214,8 @@ function ModeCard({ mode, selected, available, onSelect, description, unavailabl
 function Preflight({ plan, onStart, busy }) {
   const blocked = plan.readiness === 'BLOCKED';
   return <section className="preflight"><span className="eyebrow">{blocked ? 'PREFLIGHT BLOCKED · PROVIDER EXECUTIONS 0' : 'PREFLIGHT READY · PROVIDER EXECUTIONS 0'}</span><h2>{blocked ? 'Configuration required' : 'Ready to start'}</h2><div className="plan-grid">
-    <KeyValue label="Brand" value={plan.brand} /><KeyValue label="Production" value={plan.production} /><KeyValue label="Mode / renderer" value={`${plan.renderMode} · ${plan.renderer}`} /><KeyValue label="Provider / model" value={[plan.provider, plan.vendor, plan.model].filter(Boolean).join(' · ')} /><KeyValue label="Profile / capability" value={[profileLabel(plan.profile), plan.capability].filter(Boolean).join(' · ')} /><KeyValue label="Resolution / quality" value={[plan.resolution, plan.qualityMode].filter(Boolean).join(' · ')} /><KeyValue label="Configuration" value={plan.configurationStatus} /><KeyValue label="Prompt optimization" value={plan.promptOptimization == null ? 'N/A' : plan.promptOptimization ? 'ENABLED' : 'DISABLED'} /><KeyValue label="Semantic evaluator" value={[plan.semanticEvaluatorProvider, plan.semanticEvaluatorModel].filter(Boolean).join(' · ')} /><KeyValue label="Evaluator status" value={plan.semanticEvaluatorStatus} /><KeyValue label="Source semantic" value={String(plan.expectedSourceSemanticEvaluations || 0)} /><KeyValue label="Final semantic" value={String(plan.expectedFinalSemanticEvaluations || 0)} /><KeyValue label="Continuity" value={String(plan.expectedContinuityEvaluations || 0)} /><KeyValue label="Final policy" value={plan.semanticFinalEvaluationPolicy} /><KeyValue label="Evaluator calls" value={String(plan.expectedQualityEvaluatorCalls || 0)} /><KeyValue label="Evaluator attempt ceiling" value={String(plan.expectedMaxEvaluatorHttpAttempts || 0)} /><KeyValue label="External classes" value={(plan.expectedExternalExecutionClasses || []).join(' · ') || 'NONE'} /><KeyValue label="Platform" value={plan.targetPlatform} /><KeyValue label="Master" value={`${plan.targetDurationSeconds} sec · ${plan.aspectRatio}`} /><KeyValue label="Expected generations" value={`${plan.expectedVideoGenerations} video · ${plan.expectedAudioGenerations} audio`} /><KeyValue label="External executions" value={String(plan.expectedExternalExecutions)} /><KeyValue label="Estimated cost" value={plan.estimatedCost ?? 'UNKNOWN'} /><KeyValue label="Renderer" value={plan.rendererStatus} /><KeyValue label="Schema" value={plan.schemaStatus} /><KeyValue label="Human approval" value={plan.humanApprovalRequired ? 'REQUIRED' : 'NO'} /><KeyValue label="Auto publish" value="NO" />
-  </div>{blocked ? <p className="warning"><strong>Production blocked.</strong> Configure semantic visual QA or deliberately select ECONOMY / DRAFT before crossing a paid boundary.</p> : null}<p className="boundary">Starting may cross an external cost boundary. Approval of the final master will not publish it.</p><button className="start" type="button" disabled={busy || blocked} onClick={onStart}>{busy ? 'STARTING…' : blocked ? 'START BLOCKED' : 'START PRODUCTION'}</button></section>;
+    <KeyValue label="Brand" value={plan.brand} /><KeyValue label="Production" value={plan.production} /><KeyValue label="Mode / renderer" value={`${plan.renderMode} · ${plan.renderer}`} /><KeyValue label="Provider / model" value={[plan.provider, plan.vendor, plan.model].filter(Boolean).join(' · ')} /><KeyValue label="Model family" value={plan.mediaStack?.video?.modelFamily} /><KeyValue label="Profile / capability" value={[profileLabel(plan.profile), plan.capability].filter(Boolean).join(' · ')} /><KeyValue label="Audio strategy" value={plan.mediaStack?.audio?.strategy} /><KeyValue label="Voice" value={plan.mediaStack?.audio?.voice ? [plan.mediaStack.audio.voice.provider, plan.mediaStack.audio.voice.model, plan.mediaStack.audio.voice.voiceId].join(' · ') : 'NONE'} /><KeyValue label="Resolution / quality" value={[plan.resolution, plan.qualityMode].filter(Boolean).join(' · ')} /><KeyValue label="Configuration" value={plan.configurationStatus} /><KeyValue label="Prompt optimization" value={plan.promptOptimization == null ? 'N/A' : plan.promptOptimization ? 'ENABLED' : 'DISABLED'} /><KeyValue label="Semantic evaluator" value={[plan.semanticEvaluatorProvider, plan.semanticEvaluatorModel].filter(Boolean).join(' · ')} /><KeyValue label="Evaluator status" value={plan.semanticEvaluatorStatus} /><KeyValue label="Source semantic" value={String(plan.expectedSourceSemanticEvaluations || 0)} /><KeyValue label="Final semantic" value={String(plan.expectedFinalSemanticEvaluations || 0)} /><KeyValue label="Continuity" value={String(plan.expectedContinuityEvaluations || 0)} /><KeyValue label="Final policy" value={plan.semanticFinalEvaluationPolicy} /><KeyValue label="Evaluator calls" value={String(plan.expectedQualityEvaluatorCalls || 0)} /><KeyValue label="Evaluator attempt ceiling" value={String(plan.expectedMaxEvaluatorHttpAttempts || 0)} /><KeyValue label="External classes" value={(plan.expectedExternalExecutionClasses || []).join(' · ') || 'NONE'} /><KeyValue label="Platform" value={plan.targetPlatform} /><KeyValue label="Master" value={`${plan.targetDurationSeconds} sec · ${plan.aspectRatio}`} /><KeyValue label="Expected generations" value={`${plan.expectedVideoGenerations} video · ${plan.expectedAudioGenerations} audio`} /><KeyValue label="External executions" value={String(plan.expectedExternalExecutions)} /><KeyValue label="Estimated cost" value={plan.pricing?.estimatedTotalUsd ?? plan.estimatedCost ?? 'UNKNOWN'} /><KeyValue label="Cost status" value={plan.pricing?.status || plan.costStatus} /><KeyValue label="Renderer" value={plan.rendererStatus} /><KeyValue label="Schema" value={plan.schemaStatus} /><KeyValue label="Human approval" value={plan.humanApprovalRequired ? 'REQUIRED' : 'NO'} /><KeyValue label="Auto publish" value="NO" />
+  </div>{plan.pricing?.components?.length ? <div className="pricing-breakdown"><strong>Provider-specific cost breakdown</strong>{plan.pricing.components.map((item) => <p key={`${item.component}-${item.provider}-${item.model}`}>{({ VIDEO: 'VIDEO COST', VOICE: 'VOICE COST', SEMANTIC_CRITIC: 'SEMANTIC QA COST', OTHER_EXTERNAL: 'OTHER EXTERNAL COST' })[item.component] || item.component}: {item.provider || 'none'} / {item.model || 'not applicable'} · {item.amountUsd == null ? 'UNKNOWN' : `$${item.amountUsd}`} · {item.status}</p>)}</div> : null}{blocked ? <p className="warning"><strong>Production blocked.</strong> Configure semantic visual QA or deliberately select ECONOMY / DRAFT before crossing a paid boundary.</p> : null}<p className="boundary">Starting may cross an external cost boundary. Approval of the final master will not publish it.</p><button className="start" type="button" disabled={busy || blocked} onClick={onStart}>{busy ? 'STARTING…' : blocked ? 'START BLOCKED' : 'START PRODUCTION'}</button></section>;
 }
 
 function Brands() {

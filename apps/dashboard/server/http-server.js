@@ -87,6 +87,9 @@ function createControlServer({ service, logger = console } = {}) {
       if (request.method === 'GET' && url.pathname === '/api/providers') {
         return json(response, 200, typeof service.listProviders === 'function' ? await service.listProviders() : service.providers);
       }
+      if (request.method === 'GET' && url.pathname === '/api/media-stack') {
+        return json(response, 200, await service.mediaStackCatalog());
+      }
       if (request.method === 'POST' && url.pathname === '/api/provider-models') {
         return json(response, 201, await service.addProviderModel(await readJson(request)));
       }

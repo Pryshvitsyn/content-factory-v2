@@ -346,3 +346,49 @@ describe('V2.8 universal provider controls', () => {
     expect(screen.getByRole('button', { name: 'ADD MODEL' })).toBeTruthy();
   });
 });
+
+describe('V2.9.2 universal media stack controls', () => {
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn()); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('applies STANDARD and preserves voice overrides while video family/provider change', async () => {
+    const model = (modelId, displayName, modelFamily, capabilities, profiles = { STANDARD: {} }) => ({
+      modelId, displayName, modelFamily, providerModelId: modelId, capabilities, profiles,
+      supportStatus: 'SUPPORTED', configurationStatus: 'CONFIGURED', selectable: true,
+    });
+    const providers = [
+      { id: 'replicate', displayName: 'Replicate', configured: true, supportStatus: 'SUPPORTED', configurationStatus: 'CONFIGURED',
+        models: [model('alibaba/wan-3', 'Wan 3', 'WAN_3', ['TEXT_TO_VIDEO'])] },
+      { id: 'alibaba', displayName: 'Alibaba Model Studio', configured: false, supportStatus: 'SUPPORTED', configurationStatus: 'NOT_CONFIGURED',
+        models: [model('wan3.0-video', 'Wan 3.0 Video', 'WAN_3', ['TEXT_TO_VIDEO','NATIVE_AUDIO'])] },
+      { id: 'runway', displayName: 'Runway', configured: true, supportStatus: 'SUPPORTED', configurationStatus: 'CONFIGURED',
+        models: [model('gen4.5', 'Runway Gen-4.5', 'RUNWAY_GEN_4_5', ['TEXT_TO_VIDEO'])] },
+      { id: 'openai', displayName: 'OpenAI', configured: true, supportStatus: 'SUPPORTED', configurationStatus: 'CONFIGURED',
+        models: [model('gpt-4o-mini-tts', 'OpenAI TTS', 'OPENAI_TTS', ['SPEECH'])] },
+      { id: 'elevenlabs', displayName: 'ElevenLabs', configured: true, supportStatus: 'SUPPORTED', configurationStatus: 'CONFIGURED',
+        models: [model('eleven_v3', 'Eleven v3', 'ELEVENLABS_TTS', ['SPEECH'])] },
+    ];
+    const mediaStack = { presets: {
+      ECONOMY: {}, STANDARD: { video: { provider: 'runway', modelFamily: 'RUNWAY_GEN_4_5', model: 'gen4.5', profile: 'STANDARD' },
+        audioStrategy: 'EXTERNAL_VOICE', voice: { provider: 'openai', model: 'gpt-4o-mini-tts', voiceId: 'alloy' }, masterProfile: 'SOCIAL_VERTICAL' },
+      PREMIUM: {}, CUSTOM: {},
+    }, audioStrategies: ['EXTERNAL_VOICE','NATIVE_VIDEO_AUDIO','HYBRID','NO_VOICE'], masterProfiles: { SOCIAL_VERTICAL: {} } };
+    fetch.mockImplementation((url) => response(url === '/api/brands' ? [{ id: brandId, name: 'Attune', status: 'ACTIVE' }]
+      : url === '/api/providers' ? providers : mediaStack));
+    render(<NewProduction />);
+    fireEvent.click(await screen.findByRole('button', { name: /QUALITY/ }));
+    expect(screen.getByLabelText('Model family').value).toBe('RUNWAY_GEN_4_5');
+    expect(screen.getByLabelText('Provider').value).toBe('runway');
+    expect(screen.getByLabelText('Capability').value).toBe('TEXT_TO_VIDEO');
+    expect(screen.getByLabelText('Resolution').value).toBe('');
+    fireEvent.change(screen.getByLabelText('Voice ID'), { target: { value: 'operator-voice' } });
+    fireEvent.change(screen.getByLabelText('Model family'), { target: { value: 'WAN_3' } });
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'alibaba' } });
+    expect(screen.getByLabelText('Voice ID').value).toBe('operator-voice');
+    expect(screen.getByRole('option', { name: 'Alibaba Model Studio' }).textContent).toContain('NOT_CONFIGURED');
+    fireEvent.change(screen.getByLabelText('Audio strategy'), { target: { value: 'NATIVE_VIDEO_AUDIO' } });
+    expect(screen.queryByLabelText('Voice ID')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Audio strategy'), { target: { value: 'EXTERNAL_VOICE' } });
+    expect(screen.getByLabelText('Voice ID').value).toBe('operator-voice');
+  });
+});

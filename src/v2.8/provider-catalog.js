@@ -21,7 +21,8 @@ function credentialConfigured(provider, env) {
       ? env.MPT_ENABLED === 'true' && Boolean(env.MPT_BASE_URL) && env.MPT_AUTO_PUBLISH_DISABLED === 'true'
       : true;
   }
-  return [provider.credentialEnv, ...(provider.credentialAliases || [])].some((name) => Boolean(env[name]));
+  const credential = [provider.credentialEnv, ...(provider.credentialAliases || [])].some((name) => Boolean(env[name]));
+  return credential && (provider.requiredEnv || []).every((name) => Boolean(env[name]));
 }
 
 function availability(provider, env) {
@@ -103,12 +104,17 @@ class ProviderCatalog {
       return Object.freeze({ id: provider.id, provider: provider.displayName, displayName: provider.displayName,
         type: provider.type, adapterFamily: provider.adapterFamily, configured,
         credentialStatus: configured ? 'CONFIGURED' : 'NOT_CONFIGURED', availability: availability(provider, this.env),
-        productionStatus: provider.productionStatus, modelCount: models.length,
+        productionStatus: provider.productionStatus, supportStatus: provider.productionStatus,
+        configurationStatus: configured ? 'CONFIGURED' : 'NOT_CONFIGURED', modelCount: models.length,
         capabilities: [...new Set(models.flatMap((model) => model.capabilities))].sort(), models });
     });
   }
   listModels(provider) { return this.allModels().filter((model) => model.provider === String(provider).toLowerCase() && model.enabled !== false)
-    .map((model) => Object.freeze({ ...clone(model), selectable: model.experimental !== true || this.env.V28_ALLOW_EXPERIMENTAL_MODELS === 'true' })); }
+    .map((model) => Object.freeze({ ...clone(model), modelFamily: model.modelFamily || null,
+      providerModelId: model.providerModelId || model.modelId, supportStatus: model.supportStatus || 'SUPPORTED',
+      configurationStatus: credentialConfigured(this.providers.find((item) => item.id === model.provider), this.env) ? 'CONFIGURED' : 'NOT_CONFIGURED',
+      selectable: (model.supportStatus || 'SUPPORTED') === 'SUPPORTED'
+        && (model.experimental !== true || this.env.V28_ALLOW_EXPERIMENTAL_MODELS === 'true') })); }
   listProfiles(provider, modelId) {
     const model = this.listModels(provider).find((item) => item.modelId === modelId);
     if (!model) return [];
@@ -136,6 +142,9 @@ class ProviderCatalog {
     if (modelDefinition.experimental && !(allowExperimental || this.env.V28_ALLOW_EXPERIMENTAL_MODELS === 'true')) {
       throw new ProviderCatalogError('SELECTED_MODEL_UNAVAILABLE', `Model '${model}' is experimental and explicit experimental use is disabled`);
     }
+    if ((modelDefinition.supportStatus || 'SUPPORTED') !== 'SUPPORTED') {
+      throw new ProviderCatalogError('SELECTED_MODEL_UNAVAILABLE', `Model '${model}' support status is ${modelDefinition.supportStatus}`);
+    }
     const normalizedCapability = normalizeCapability(capability);
     if (!modelDefinition.capabilities.includes(normalizedCapability)) {
       throw new ProviderCatalogError('CAPABILITY_UNSUPPORTED', `${modelDefinition.displayName} does not support ${normalizedCapability}`);
@@ -146,6 +155,10 @@ class ProviderCatalog {
     const constraints = modelDefinition.constraints || {};
     const effectiveDuration = durationSeconds ?? (Number(String(settings.duration || '').replace(/s$/, '')) || null);
     const effectiveResolution = resolution || settings.resolution || null;
+    if (effectiveDuration != null && constraints.durationRange
+      && (effectiveDuration < constraints.durationRange[0] || effectiveDuration > constraints.durationRange[1])) {
+      throw new ProviderCatalogError('UNSUPPORTED_DURATION', `${modelDefinition.displayName} supports ${constraints.durationRange[0]}-${constraints.durationRange[1]}s`);
+    }
     if (effectiveDuration != null && constraints.durations && !constraints.durations.includes(effectiveDuration)) {
       throw new ProviderCatalogError('UNSUPPORTED_DURATION', `${modelDefinition.displayName} does not support ${effectiveDuration}s`);
     }
@@ -157,11 +170,19 @@ class ProviderCatalog {
     }
     return Object.freeze({ provider: providerId, providerDisplayName: providerDefinition.displayName,
       providerType: providerDefinition.type, vendor: modelDefinition.vendor, model: modelDefinition.modelId,
+      modelFamily: modelDefinition.modelFamily || null, providerModelId: modelDefinition.providerModelId || modelDefinition.modelId,
       modelVersion: modelDefinition.modelVersion || null, displayName: modelDefinition.displayName,
       adapterFamily: modelDefinition.adapterFamily, profile: profileName, capability: normalizedCapability,
       resolvedSettings: Object.freeze({ ...settings, ...(resolution ? { resolution } : {}),
         ...(durationSeconds ? { durationSeconds } : {}), ...(aspectRatio ? { aspectRatio } : {}) }),
       costStatus: modelDefinition.costStatus || 'UNKNOWN', relativeTier: modelDefinition.relativeTier || profileName,
+      supportStatus: modelDefinition.supportStatus || 'SUPPORTED', configurationStatus: 'CONFIGURED',
+      capabilities: Object.freeze([...(modelDefinition.capabilities || [])]),
+      capabilityMetadata: Object.freeze({ nativeAudio: modelDefinition.capabilities.includes('NATIVE_AUDIO'),
+        nativeDialogue: modelDefinition.capabilities.includes('NATIVE_DIALOGUE'),
+        nativeAmbience: modelDefinition.capabilities.includes('NATIVE_AMBIENCE'),
+        audioDisableSupported: modelDefinition.capabilities.includes('AUDIO_DISABLE_SUPPORTED'),
+        hybridAudioSupported: modelDefinition.capabilities.includes('HYBRID_AUDIO_SUPPORTED') }),
       availability: providerAvailability, configured: true, experimental: modelDefinition.experimental === true });
   }
   async addModel(input) {

@@ -45,7 +45,7 @@ function compactBrandContext(brand = {}) {
   return values.join(' | ').slice(0, 1200) || null;
 }
 
-function buildRawInput(request, brand, { productionKey = null, qualityProfile = null } = {}) {
+function buildRawInput(request, brand, { productionKey = null, qualityProfile = null, mediaStack = null } = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new OperatorInputError('request must be an object');
   const brandId = required('brandId', request.brandId, 64);
   if (!UUID_PATTERN.test(brandId) || brand?.id !== brandId) throw new OperatorInputError('brandId is not a canonical selected brand');
@@ -102,8 +102,13 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
         action: planned.action,
         continuity: `Use continuity identity ${planned.continuityIdentity}.`,
         video: { provider: profile.provider, ...(profile.vendor ? { vendor: profile.vendor } : {}), model: profile.model,
+          ...(profile.modelFamily ? { model_family: profile.modelFamily } : {}),
+          ...(profile.providerModelId ? { provider_model_id: profile.providerModelId } : {}),
           ...(profile.modelVersion ? { model_version: profile.modelVersion } : {}), profile: profile.name, capability: profile.capability || 'TEXT_TO_VIDEO',
           resolved_settings: profile.resolvedSettings || {}, prompt: planned.generationPrompt,
+          generate_audio: mediaStack?.audio?.generateNativeAudio === true,
+          audio_strategy: mediaStack?.audio?.strategy || 'EXTERNAL_VOICE',
+          dialogue_owner: mediaStack?.audio?.dialogueOwner || 'EXTERNAL_VOICE',
           negative_intent: planned.negativeIntent,
           resolution: profile.resolution, aspect_ratio: aspectRatio, num_frames: profile.numFrames,
           frames_per_second: profile.framesPerSecond, go_fast: profile.goFast,
@@ -137,12 +142,15 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
     cta,
     creative_plan: creativePlan,
     quality_video_profile: mode === 'QUALITY' ? profile : null,
+    media_stack: mode === 'QUALITY' && mediaStack ? mediaStack : null,
     provider_selection: mode === 'QUALITY' ? { provider: profile.provider, vendor: profile.vendor || null,
       model: profile.model, model_version: profile.modelVersion || null, profile: profile.name,
       capability: profile.capability || 'TEXT_TO_VIDEO', resolved_settings: profile.resolvedSettings || {} } : null,
     scenes,
-    voiceover: { enabled: true, asset_id: 'voiceover-main',
-      ...(mode === 'QUALITY' ? { provider: 'openai-media', model: 'gpt-4o-mini-tts', voice: 'alloy' }
+    voiceover: { enabled: mode !== 'QUALITY' || mediaStack?.audio?.generateExternalVoice !== false, asset_id: 'voiceover-main',
+      ...(mode === 'QUALITY' ? { provider: mediaStack?.audio?.voice?.provider === 'openai' ? 'openai-media' : mediaStack?.audio?.voice?.provider || 'openai-media',
+        model: mediaStack?.audio?.voice?.model || 'gpt-4o-mini-tts',
+        voice: mediaStack?.audio?.voice?.voiceId || 'alloy', voice_id: mediaStack?.audio?.voice?.voiceId || 'alloy' }
         : { voice: optional(request.voice, 120) || 'en-US-AvaNeural-Female' }),
       language: optional(request.language, 24) || 'en',
       instructions: optional(request.voiceoverInstructions, 1000) || 'Warm, clear, natural delivery. Speech intelligibility has priority.',
@@ -159,7 +167,9 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
     // as JSON in the generated prompt, so a durable round-trip must not alter
     // the canonical fingerprint.
     visual_style: { avoid: ['app UI', 'secret text', 'glossy stock-ad behavior'], direction: visualDirection },
-    audio: { ambience_intent: optional(request.ambience, 800) || 'Subtle ambience below speech.',
+    audio: { strategy: mediaStack?.audio?.strategy || (mode === 'QUALITY' ? 'EXTERNAL_VOICE' : 'EXTERNAL_VOICE'),
+      dialogue_owner: mediaStack?.audio?.dialogueOwner || 'EXTERNAL_VOICE', prevent_duplicate_narration: true,
+      ambience_intent: optional(request.ambience, 800) || 'Subtle ambience below speech.',
       music_intent: musicEnabled ? 'Restrained background music below speech.' : 'No generated music.', speech_priority: true },
     captions: { enabled: captionsEnabled,
       intent: captionsEnabled && mode === 'FAST' ? 'Burned-in renderer captions.' : 'Disabled or not renderer-supported.',
@@ -191,6 +201,8 @@ function buildOperatorProductionInput(request, brand, options = {}) {
     renderMode: input.renderMode,
     providerSelection: input.renderMode === 'QUALITY' ? Object.freeze({
       provider: input.qualityVideoProfile.provider, vendor: input.qualityVideoProfile.vendor || null,
+      modelFamily: input.qualityVideoProfile.modelFamily || null,
+      providerModelId: input.qualityVideoProfile.providerModelId || input.qualityVideoProfile.model,
       model: input.qualityVideoProfile.model, modelVersion: input.qualityVideoProfile.modelVersion || null,
       profile: input.qualityVideoProfile.name, capability: input.qualityVideoProfile.capability || 'TEXT_TO_VIDEO',
       resolvedSettings: input.qualityVideoProfile.resolvedSettings || {},
@@ -217,6 +229,7 @@ function buildOperatorProductionInput(request, brand, options = {}) {
     captionsEnabled: input.captions.enabled,
     musicEnabled: request.musicEnabled === true,
     publicationPolicy: input.publicationPolicy,
+    mediaStack: input.mediaStack || null,
   });
   return Object.freeze({ input, canonicalRawInput: Object.freeze(canonicalRawInput), canonicalRequest });
 }

@@ -30,6 +30,8 @@ QUALITY production now defaults to STANDARD and uses independent source technica
 
 V2.9.1 supplies a real, configurable OpenAI semantic visual critic behind that provider-neutral gate, with strict structured output, independent paid authorization, bounded retries/timeouts, cost-aware source/final policy, and visible call accounting. See [`docs/V2.9.1-REAL-SEMANTIC-VISUAL-EVALUATION.md`](docs/V2.9.1-REAL-SEMANTIC-VISUAL-EVALUATION.md).
 
+V2.9.2 adds a universal media stack with explicit provider model families, provider-specific capability/configuration status, unlocked presets, native/external/hybrid audio ownership, optional ElevenLabs TTS, direct durable Alibaba Wan 3 execution, and provider-specific pricing provenance. See [`docs/V2.9.2-UNIVERSAL-MEDIA-STACK.md`](docs/V2.9.2-UNIVERSAL-MEDIA-STACK.md).
+
 ## Current Status
 
 - **Architecture:** V2
