@@ -1,7 +1,8 @@
 'use strict';
 
 const { publicMediaStackCatalog } = require('../../../src/v2.9.2/media-stack');
-const { partialMediaPlan, retryPlan } = require('../../../src/v2.9/semantic-evaluation-retry');
+const { partialMediaPlan, reusableSemanticPass, retryPlan,
+  sourceArtifactFromExecution } = require('../../../src/v2.9/semantic-evaluation-retry');
 const { operatorInputFromRaw } = require('../../../src/v2.7/production-command-service');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -85,7 +86,8 @@ function evaluatorAccounting(item) {
 }
 
 class ControlService {
-  constructor({ repository, reviewService, commandService = null, storage, providers, providerCatalog = null, actor = 'local-operator' } = {}) {
+  constructor({ repository, reviewService, commandService = null, storage, providers, providerCatalog = null,
+    actor = 'local-operator', env = process.env } = {}) {
     if (!repository) throw new Error('repository is required');
     if (!reviewService) throw new Error('reviewService is required');
     if (!storage) throw new Error('storage is required');
@@ -96,6 +98,7 @@ class ControlService {
     this.providers = providers || [];
     this.providerCatalog = providerCatalog;
     this.actor = actor;
+    this.env = env;
   }
 
   async health() { return { status: 'ok', database: await this.repository.health() }; }
@@ -152,7 +155,17 @@ class ControlService {
         semanticRetry = retryPlan(item, input);
         const executions = typeof this.repository.semanticRetryMediaExecutions === 'function'
           ? await this.repository.semanticRetryMediaExecutions(item.id, item.brandId) : [];
+        const sourceExecution = executions.find((row) => String(row.asset_id || row.assetId) === semanticRetry.assetId);
+        const latestAttempt = typeof this.repository.latestSemanticRetryAttempt === 'function'
+          ? await this.repository.latestSemanticRetryAttempt(item.id, item.brandId, semanticRetry.assetId) : null;
+        const semanticPass = reusableSemanticPass({ attempt: latestAttempt,
+          sourceArtifact: sourceArtifactFromExecution(sourceExecution),
+          previousEvidenceArtifact: semanticRetry.previousEvidenceArtifact,
+          evaluator: { provider: String(this.env.SEMANTIC_VISUAL_PROVIDER || '').toLowerCase(),
+            model: this.env.SEMANTIC_VISUAL_MODEL } });
         semanticRetry = Object.freeze({ ...semanticRetry,
+          expectedSemanticEvaluations: semanticPass.reusable ? 0 : 1,
+          semanticPass: Object.freeze({ reused: semanticPass.reusable, attempt: semanticPass.attempt }),
           media: partialMediaPlan({ input, sourceAssetId: semanticRetry.assetId, executions }) });
       }
       catch { semanticRetry = Object.freeze({ ...semanticRetry, eligible: false, action: null }); }

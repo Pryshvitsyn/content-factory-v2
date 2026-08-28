@@ -622,6 +622,7 @@ class LiveProductionService {
       validationStatus: recovered.result.quality?.status, semanticRetryAttemptId: recovered.attemptId,
       semanticRetry: { assetId: recovered.assetId, reusedVideoAssets: recovered.reusedVideoAssets,
         reusedSpeechAssets: recovered.reusedSpeechAssets, semanticEvaluations: recovered.semanticEvaluations,
+        reusedSemanticAttemptId: recovered.reusedSemanticAttemptId || null,
         newSpeechGenerations: recovered.newSpeechGenerations, newVideoGenerations: recovered.newVideoGenerations },
       publicationTriggered: false };
     const completed = await this.db.query(`/* v2.9.2:complete-semantic-retry */

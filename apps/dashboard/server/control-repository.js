@@ -209,6 +209,18 @@ class ControlRepository {
     return result.rows;
   }
 
+  async latestSemanticRetryAttempt(productionId, brandId, assetId) {
+    const available = await this.db.query("SELECT to_regclass('v2_9.semantic_evaluation_attempts') IS NOT NULL AS ready");
+    if (!available.rows[0]?.ready) return null;
+    const result = await this.db.query(`/* dashboard:latest-semantic-retry-attempt */
+      SELECT sea.* FROM v2_9.semantic_evaluation_attempts sea
+      JOIN v2_1.productions p ON p.id=sea.production_id
+      WHERE sea.production_id=$1 AND sea.brand_id=$2 AND sea.asset_id=$3
+        AND p.brand_id=$2 AND p.workspace_id=sea.workspace_id
+      ORDER BY sea.attempt DESC LIMIT 1`, [productionId, brandId, assetId]);
+    return result.rows[0] || null;
+  }
+
   async listStages(productionId, brandId = null) {
     const result = await this.db.query(`/* dashboard:list-stages */
       SELECT sd.stage, sd.sequence_no AS "sequence", latest.status, latest.attempt,

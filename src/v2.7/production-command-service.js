@@ -8,7 +8,8 @@ const { resolveQualityVideoProfile, qualityProfileFromSelection } = require('./q
 const { buildShotRevision } = require('./shot-regeneration');
 const { brandMediaPreferences, resolveMediaStack } = require('../v2.9.2/media-stack');
 const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
-const { partialMediaPlan, retryPlan } = require('../v2.9/semantic-evaluation-retry');
+const { partialMediaPlan, reusableSemanticPass, retryPlan,
+  sourceArtifactFromExecution } = require('../v2.9/semantic-evaluation-retry');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ProductionCommandError extends Error {
@@ -108,6 +109,10 @@ class ProductionCommandService {
         || env.LIVE_PAID_VISUAL_EVALUATION !== 'true' || !env.OPENAI_API_KEY || !env.SEMANTIC_VISUAL_MODEL) {
         throw new ProductionCommandError(409, 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED',
           'Semantic retry requires the explicitly enabled and paid-authorized OpenAI evaluator configuration');
+      }
+      if (semanticOnly && input.voiceover?.enabled && config.audioProvider === 'elevenlabs' && !env.ELEVENLABS_API_KEY) {
+        throw new ProductionCommandError(409, 'LIVE_AUDIO_TOKEN_REQUIRED',
+          'ElevenLabs credentials are required for post-PASS semantic recovery speech');
       }
     }
     const runtime = this.runtimeFactory({ db: this.repository.db, storage: this.storage, config, env,
@@ -358,19 +363,34 @@ class ProductionCommandService {
         AND table_name='semantic_evaluation_attempts' AND column_name='new_speech_generations') AS ready`);
     if (!continuationSchema.rows[0]?.ready) throw new ProductionCommandError(409, 'V2921_SCHEMA_MISSING',
       'V2.9.2.1 partial-media semantic retry migration is required');
+    const resumeSchema = await this.repository.db.query(`SELECT
+      EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='v2_9'
+        AND table_name='semantic_evaluation_attempts' AND column_name='recovery_phase') AS ready`);
+    if (!resumeSchema.rows[0]?.ready) throw new ProductionCommandError(409, 'V2922_SCHEMA_MISSING',
+      'V2.9.2.2 capability-scoped semantic recovery migration is required');
     const executions = typeof this.repository.semanticRetryMediaExecutions === 'function'
       ? await this.repository.semanticRetryMediaExecutions(productionId, brandId) : [];
     const media = partialMediaPlan({ input, sourceAssetId: plan.assetId, executions });
     if (!media.existingSourceVideo) throw new ProductionCommandError(409, 'SEMANTIC_RETRY_SOURCE_MISSING',
       'The exact succeeded immutable source video is unavailable; no evaluator call can be made');
+    const sourceExecution = executions.find((row) => String(row.asset_id || row.assetId) === plan.assetId);
+    const latestAttempt = typeof this.repository.latestSemanticRetryAttempt === 'function'
+      ? await this.repository.latestSemanticRetryAttempt(productionId, brandId, plan.assetId) : null;
+    const semanticPass = reusableSemanticPass({ attempt: latestAttempt,
+      sourceArtifact: sourceArtifactFromExecution(sourceExecution), previousEvidenceArtifact: plan.previousEvidenceArtifact,
+      evaluator: { provider: String(this.env.SEMANTIC_VISUAL_PROVIDER || '').toLowerCase(),
+        model: this.env.SEMANTIC_VISUAL_MODEL } });
+    const expectedSemanticEvaluations = semanticPass.reusable ? 0 : 1;
     return Object.freeze({ productionId, brandId, action: plan.action, assetId: plan.assetId,
-      expectedVideoGenerations: 0, expectedSpeechGenerations: 0, expectedSemanticEvaluations: 1,
+      expectedVideoGenerations: 0, expectedSpeechGenerations: 0, expectedSemanticEvaluations,
       possiblePostPassSpeechGenerations: media.possiblePostPassSpeechGenerations,
       existingSourceVideo: media.existingSourceVideo,
+      existingSemanticPassReused: semanticPass.reusable, reusedSemanticAttempt: semanticPass.attempt,
       existingVoiceReused: media.voices.length > 0 && media.reusedSpeechAssets === media.voices.length,
       reusedVideoAssets: media.reusedVideoAssets, reusedSpeechAssets: media.reusedSpeechAssets,
       ambiguousSpeechAssets: media.ambiguousSpeechAssets, blockedSpeechAssets: media.blockedSpeechAssets,
-      expectedExternalCalls: 1, maximumExternalCalls: 1 + media.possiblePostPassSpeechGenerations,
+      expectedExternalCalls: expectedSemanticEvaluations,
+      maximumExternalCalls: expectedSemanticEvaluations + media.possiblePostPassSpeechGenerations,
       previousEvidenceArtifact: plan.previousEvidenceArtifact, readiness: 'READY' });
   }
 

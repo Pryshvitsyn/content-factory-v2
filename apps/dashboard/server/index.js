@@ -25,7 +25,7 @@ function createDashboardRuntime(env = process.env) {
   const actor = env.DASHBOARD_ACTOR || 'local-operator';
   const commandService = new ProductionCommandService({ repository, storage, providers, providerCatalog, env, actor });
   const service = new ControlService({
-    repository, reviewService, commandService, storage, providers, providerCatalog, actor,
+    repository, reviewService, commandService, storage, providers, providerCatalog, actor, env,
   });
   return { db, server: createControlServer({ service }) };
 }

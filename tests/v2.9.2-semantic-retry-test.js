@@ -43,7 +43,8 @@ function passingEvaluation() {
   ], metadata: { semanticOnlyRetry: true } }), deterministicVisual, temporal, semantic, sampledFrames: [] };
 }
 
-async function exercise({ semanticStatus = 'PASS', voiceState = 'REUSED', sourceExists = true } = {}) {
+async function exercise({ semanticStatus = 'PASS', voiceState = 'REUSED', sourceExists = true,
+  latestAttempt = null, speechStageError = null } = {}) {
   const calls = { video: 0, speech: 0, semantic: 0, assembly: 0, attempts: [], order: [] };
   const sourceArtifact = Object.freeze({ artifactId: 'brand:brand-1:asset:operator-video-1', version: 1,
     storageKey: 'immutable-video.mp4', contentHash: 'video-content-hash' });
@@ -53,8 +54,10 @@ async function exercise({ semanticStatus = 'PASS', voiceState = 'REUSED', source
     artifact_storage_key: 'immutable-voice.mp3', artifact_content_hash: 'voice-content-hash' }
     : voiceState === 'AMBIGUOUS' ? { asset_id: 'voiceover-main', kind: 'voice', status: 'NEEDS_RECONCILIATION' }
       : null;
-  const repository = { async inspectSchema() { return { ready: true }; }, async start(args) {
-    calls.attempts.push({ status: 'RUNNING', previousEvidence: args.previousEvidence, mediaPlan: args.mediaPlan });
+  const repository = { async inspectSchema() { return { ready: true }; }, async latest() { return latestAttempt; }, async start(args) {
+    calls.attempts.push({ status: 'RUNNING', previousEvidence: args.previousEvidence, mediaPlan: args.mediaPlan,
+      expectedSemanticCalls: args.expectedSemanticCalls, reusedSemanticAttemptId: args.reusedSemanticAttemptId,
+      recoveryPhase: args.recoveryPhase });
     return { id: 'attempt-2' };
   }, async finish(args) { calls.attempts.push(args); return args; } };
   const executionRepository = { async get({ assetId }) {
@@ -63,6 +66,7 @@ async function exercise({ semanticStatus = 'PASS', voiceState = 'REUSED', source
   const mediaExecutor = { repository: executionRepository, async execute({ asset }) {
     calls.order.push(`generate:${asset.kind}`);
     if (asset.kind === 'video') { calls.video += 1; throw new Error('Video generation invariant violated'); }
+    if (speechStageError) throw Object.assign(new Error(speechStageError), { code: 'SPEECH_STAGE_FAILED' });
     calls.speech += 1;
     assert.equal(asset.generation_requirements.text, 'Approved canonical spoken copy.');
     assert.deepEqual([asset.generation_requirements.provider, asset.generation_requirements.model,
@@ -131,6 +135,34 @@ async function main() {
   assert.deepEqual([missingVoice.value.newVideoGenerations, missingVoice.value.semanticEvaluations,
     missingVoice.value.newSpeechGenerations], [0, 1, 1]);
 
+  const postPassFailure = await exercise({ voiceState: 'MISSING', speechStageError: 'speech adapter failed before HTTP' });
+  assert.equal(postPassFailure.error.code, 'SPEECH_STAGE_FAILED');
+  assert.deepEqual([postPassFailure.calls.video, postPassFailure.calls.semantic,
+    postPassFailure.calls.speech, postPassFailure.calls.assembly], [0, 1, 0, 0]);
+  const failedAttempt = postPassFailure.calls.attempts.at(-1);
+  assert.equal(failedAttempt.recoveryPhase, 'POST_PASS_MEDIA_FAILED');
+  const resumed = await exercise({ voiceState: 'MISSING', latestAttempt: {
+    id: 'attempt-1', attempt: 1, status: 'FAILED', source_artifact: postPassFailure.sourceArtifact,
+    previous_evidence: productionWith(REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE)
+      .jobError.details.sourceQuality.shots[0],
+    result_evidence: failedAttempt.resultEvidence, evaluator_provider: 'openai', evaluator_model: 'semantic-test',
+    recovery_phase: 'POST_PASS_MEDIA_FAILED',
+  } });
+  assert.ifError(resumed.error);
+  assert.deepEqual([resumed.calls.video, resumed.calls.semantic, resumed.calls.speech, resumed.calls.assembly], [0, 0, 1, 1]);
+  assert.equal(resumed.calls.attempts[0].expectedSemanticCalls, 0);
+  assert.equal(resumed.calls.attempts[0].reusedSemanticAttemptId, 'attempt-1');
+  assert.equal(resumed.value.reusedSemanticAttemptId, 'attempt-1');
+  const stalePass = await exercise({ voiceState: 'MISSING', latestAttempt: {
+    id: 'stale-attempt', attempt: 9, status: 'FAILED',
+    source_artifact: { ...postPassFailure.sourceArtifact, contentHash: 'different-source-hash' },
+    previous_evidence: productionWith(REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE)
+      .jobError.details.sourceQuality.shots[0],
+    result_evidence: failedAttempt.resultEvidence, evaluator_provider: 'openai', evaluator_model: 'semantic-test',
+  } });
+  assert.ifError(stalePass.error);
+  assert.equal(stalePass.calls.semantic, 1, 'PASS evidence for a different source hash must not be reused');
+
   const existingVoice = await exercise({ voiceState: 'REUSED' });
   assert.ifError(existingVoice.error);
   assert.deepEqual([existingVoice.calls.video, existingVoice.calls.semantic, existingVoice.calls.speech], [0, 1, 0]);
@@ -140,6 +172,7 @@ async function main() {
   assert.equal(semanticFailure.error.code, 'SEMANTIC_RETRY_FAILED');
   assert.deepEqual([semanticFailure.calls.video, semanticFailure.calls.semantic,
     semanticFailure.calls.speech, semanticFailure.calls.assembly], [0, 1, 0, 0]);
+  assert.equal(semanticFailure.calls.attempts.at(-1).recoveryPhase, 'SEMANTIC_FAILED');
 
   const ambiguousSpeech = await exercise({ voiceState: 'AMBIGUOUS' });
   assert.equal(ambiguousSpeech.error.code, 'SEMANTIC_RETRY_SPEECH_RECONCILIATION_REQUIRED');
@@ -153,7 +186,7 @@ async function main() {
   assert.equal(missingSource.error.code, 'SEMANTIC_RETRY_SOURCE_MISSING');
   assert.deepEqual([missingSource.calls.video, missingSource.calls.semantic,
     missingSource.calls.speech, missingSource.calls.assembly], [0, 0, 0, 0]);
-  console.log('V2.9.2.1 partial-media semantic recovery passed (video always 0; speech only after semantic PASS).');
+  console.log('V2.9.2.2 capability-scoped semantic recovery and semantic-PASS resume passed.');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });
