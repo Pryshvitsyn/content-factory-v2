@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - "src/v2.4/live-production-service.js"
       - "src/v2.9/**"
       - "src/v2.9.2/**"
       - "src/v2.8.1/**"
@@ -18,6 +19,7 @@ on:
     branches:
       - main
     paths:
+      - "src/v2.4/live-production-service.js"
       - "src/v2.9/**"
       - "src/v2.9.2/**"
       - "src/v2.8.1/**"
@@ -64,6 +66,10 @@ jobs:
       - name: Run V2.9.2 quality and semantic recovery contracts
         run: npm run test:v2.9.2
         timeout-minutes: 8
+
+      - name: Run review-ready WARN semantic recovery regression
+        run: node tests/v2.9.2.5-review-ready-warn-test.js
+        timeout-minutes: 2
 
       - name: Build dashboard
         run: npm run dashboard:build

@@ -42,7 +42,8 @@ function validSemanticPass(evidence) {
 }
 
 function reusableSemanticPass({ attempt, sourceArtifact, previousEvidenceArtifact, evaluator } = {}) {
-  const reusable = attempt?.status === 'FAILED' && validSemanticPass(attempt.result_evidence)
+  const terminalAttempt = attempt?.status === 'FAILED' || attempt?.status === 'SUCCEEDED';
+  const reusable = terminalAttempt && validSemanticPass(attempt.result_evidence)
     && artifactIdentityMatches(attempt.source_artifact, sourceArtifact)
     && evidenceLineageMatches(attempt.previous_evidence, previousEvidenceArtifact)
     && attempt.evaluator_provider === evaluator?.provider && attempt.evaluator_model === evaluator?.model;
@@ -320,6 +321,18 @@ class SemanticEvaluationRetryService {
           requireProviderCompatibility: true, creativePlan: input.creativePlan || null, masterVisualTransforms: false },
         semanticRecovery: { assetId: plan.assetId, evaluation: masterEvaluation,
           previousEvidence: plan.previousEvaluation.evidenceArtifact } });
+      if (result?.quality?.status === 'FAIL' || result?.quality?.readyForHumanReview !== true) {
+        const masterArtifact = result?.master?.artifact ? {
+          id: result.master.artifact.artifactId,
+          version: result.master.artifact.version,
+          storageKey: result.master.artifact.storageKey,
+        } : null;
+        throw new SemanticRetryError('LIVE_MASTER_VALIDATION_FAILED',
+          'Cached master assembly did not pass all required validation after semantic recovery', {
+            quality: result?.quality || null,
+            masterArtifact,
+          });
+      }
       await this.repository.finish({ id: attempt.id, status: 'SUCCEEDED', resultEvidence: durableEvaluation,
         actualSemanticCalls, reusedVideoAssets: 1, reusedSpeechAssets,
         newSpeechGenerations, newVideoGenerations: 0, recoveryPhase: 'SUCCEEDED' });
@@ -330,7 +343,8 @@ class SemanticEvaluationRetryService {
     } catch (error) {
       if (attempt && !attemptFinished) await this.repository.finish({ id: attempt.id, status: 'FAILED',
         resultEvidence: semanticEvaluation,
-        error: { code: error.code || 'SEMANTIC_RETRY_FAILED', message: error.message, recoveryPhase: failurePhase }, actualSemanticCalls,
+        error: { code: error.code || 'SEMANTIC_RETRY_FAILED', message: error.message,
+          recoveryPhase: failurePhase, details: error.details || null }, actualSemanticCalls,
         reusedVideoAssets: 1, reusedSpeechAssets, newSpeechGenerations, newVideoGenerations: 0,
         recoveryPhase: failurePhase }).catch(() => {});
       throw error;
