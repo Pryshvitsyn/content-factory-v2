@@ -52,6 +52,37 @@ class VisualQualityEvaluator {
     return Object.freeze({ ...result, deterministicVisual, temporal, semantic, sampledFrames: Object.freeze(frames) });
   }
 
+  async retrySemantic({ priorEvaluation, frames, creativePlan = null, negativeIntent = null,
+    expectedAspectRatio = '9:16', intendedContentType = 'cinematic', qualityTier = 'STANDARD',
+    provider = null, model = null, generationSettings = {}, evaluationClass = 'SOURCE' } = {}) {
+    const tier = normalizeTier(qualityTier);
+    if (priorEvaluation?.deterministicVisual?.status !== 'PASS' || priorEvaluation?.temporal?.status !== 'PASS') {
+      const error = new Error('Semantic-only retry requires prior deterministic and temporal PASS evidence');
+      error.code = 'SEMANTIC_RETRY_PREREQUISITES_FAILED';
+      throw error;
+    }
+    if (!Array.isArray(frames) || frames.length === 0 || frames.some((frame) => !Buffer.isBuffer(frame.bytes || frame.jpeg))) {
+      const error = new Error('Semantic-only retry requires the existing immutable sampled-frame bytes');
+      error.code = 'SEMANTIC_RETRY_FRAME_EVIDENCE_MISSING';
+      throw error;
+    }
+    const semanticFrames = frames.map((frame) => ({ ratio: frame.ratio, timestampMs: frame.timestampMs,
+      contentType: frame.contentType || 'image/jpeg', bytes: frame.bytes || frame.jpeg,
+      analysisHash: frame.analysisHash }));
+    const semantic = await this.semanticAdapter.evaluate({ frames: semanticFrames, creativePlan, negativeIntent,
+      expectedAspectRatio, intendedContentType, qualityTier: tier, provider, model, generationSettings,
+      evaluationClass });
+    const result = combineResults({ qualityClass: `${evaluationClass}_VISUAL_GATE`, tier,
+      results: [priorEvaluation.deterministicVisual, priorEvaluation.temporal, semantic], metadata: {
+        evaluatorVersion: 'v2.9.2', provider, model, generationSettings,
+        semanticProvider: this.semanticAdapter.provider, semanticModel: this.semanticAdapter.model,
+        semanticExternalCalls: semantic.metadata?.externalCalls || 0,
+        semanticEvaluationRequired: true, semanticOnlyRetry: true,
+      } });
+    return Object.freeze({ ...result, deterministicVisual: priorEvaluation.deterministicVisual,
+      temporal: priorEvaluation.temporal, semantic, sampledFrames: Object.freeze(frames) });
+  }
+
   async evaluateContinuity({ shotEvaluations = [], creativePlan = null, qualityTier = 'STANDARD' } = {}) {
     return this.semanticAdapter.evaluateContinuity({ shotEvaluations, creativePlan,
       qualityTier: normalizeTier(qualityTier), evaluationClass: 'CONTINUITY' });

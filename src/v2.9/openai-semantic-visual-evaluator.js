@@ -29,29 +29,54 @@ const REQUIRED_CONTINUITY_GROUPS = Object.freeze([
   Object.freeze([REASON_CODES.LIGHTING_COLOR_CONTINUITY]),
 ]);
 
-const CRITIC_INSTRUCTIONS = `You are a strict production visual-quality critic. Judge only visible evidence in the ordered frames and the supplied creative contract. Do not rewrite the brief, generate prompts, compliment the work, assume defects, or fabricate certainty. Be strict about visible production defects, but do not invent defects that are not visible. Use WARN for ambiguous or minor defects and FAIL for obvious material defects. Respect explicitly requested split-screen, panels, text, logos, UI, phones, or stylization. Return only the required structured result.`;
+const SOURCE_FAMILY_PROPERTIES = Object.freeze({
+  composition: REQUIRED_SOURCE_GROUPS[0],
+  generatedText: REQUIRED_SOURCE_GROUPS[1],
+  humanIntegrity: REQUIRED_SOURCE_GROUPS[2],
+  creativeCompliance: REQUIRED_SOURCE_GROUPS[3],
+  realism: REQUIRED_SOURCE_GROUPS[4],
+  brandSafety: REQUIRED_SOURCE_GROUPS[5],
+  temporalConsistency: REQUIRED_SOURCE_GROUPS[6],
+});
+const CONTINUITY_FAMILY_PROPERTIES = Object.freeze({
+  visualIdentity: REQUIRED_CONTINUITY_GROUPS[0],
+  wardrobe: REQUIRED_CONTINUITY_GROUPS[1],
+  location: REQUIRED_CONTINUITY_GROUPS[2],
+  props: REQUIRED_CONTINUITY_GROUPS[3],
+  lightingColor: REQUIRED_CONTINUITY_GROUPS[4],
+});
+
+const CRITIC_INSTRUCTIONS = `You are a strict production visual-quality critic. Judge only visible evidence in the ordered frames and the supplied creative contract. Do not rewrite the brief, generate prompts, compliment the work, assume defects, or fabricate certainty. Be strict about visible production defects, but do not invent defects that are not visible. Use WARN for ambiguous or minor defects and FAIL for obvious material defects. Respect explicitly requested split-screen, panels, text, logos, UI, phones, or stylization. Return every required semantic family even when no defect is visible. A clean family must explicitly return PASS with a concrete reason and evidence arrays; never omit a family. Return only the required structured result.`;
+
+function familyCheckSchema(qualityClass, allowedCodes) {
+  return {
+    type: 'object', additionalProperties: false,
+    required: ['code', 'status', 'confidence', 'qualityClass', 'reason', 'evidence'],
+    properties: {
+      code: { type: 'string', enum: allowedCodes },
+      status: { type: 'string', enum: ['PASS', 'WARN', 'FAIL'] },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      qualityClass: { type: 'string', enum: [qualityClass] },
+      reason: { type: 'string', minLength: 1, maxLength: 500 },
+      evidence: { type: 'object', additionalProperties: false,
+        required: ['frameRatios', 'timestampsMs'], properties: {
+          frameRatios: { type: 'array', items: { type: 'number', minimum: 0, maximum: 1 } },
+          timestampsMs: { type: 'array', items: { type: 'integer', minimum: 0 } },
+        } },
+    },
+  };
+}
 
 function strictSchema(qualityClass) {
+  const families = qualityClass === 'CONTINUITY_QUALITY'
+    ? CONTINUITY_FAMILY_PROPERTIES : SOURCE_FAMILY_PROPERTIES;
   return {
     type: 'object', additionalProperties: false, required: ['status', 'checks'],
     properties: {
       status: { type: 'string', enum: ['PASS', 'WARN', 'FAIL'] },
-      checks: { type: 'array', minItems: qualityClass === 'CONTINUITY_QUALITY' ? 5 : 7, items: {
-        type: 'object', additionalProperties: false,
-        required: ['code', 'status', 'confidence', 'qualityClass', 'reason', 'evidence'],
-        properties: {
-          code: { type: 'string', enum: ALLOWED_CODES },
-          status: { type: 'string', enum: ['PASS', 'WARN', 'FAIL'] },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
-          qualityClass: { type: 'string', enum: [qualityClass] },
-          reason: { type: 'string', minLength: 1, maxLength: 500 },
-          evidence: { type: 'object', additionalProperties: false,
-            required: ['frameRatios', 'timestampsMs'], properties: {
-              frameRatios: { type: 'array', items: { type: 'number', minimum: 0, maximum: 1 } },
-              timestampsMs: { type: 'array', items: { type: 'integer', minimum: 0 } },
-            } },
-        },
-      } },
+      checks: { type: 'object', additionalProperties: false, required: Object.keys(families),
+        properties: Object.fromEntries(Object.entries(families)
+          .map(([name, codes]) => [name, familyCheckSchema(qualityClass, codes)])) },
     },
   };
 }
@@ -81,14 +106,18 @@ function outputText(response) {
 }
 
 function validateStructuredResult(value, qualityClass, tier) {
+  const families = qualityClass === 'CONTINUITY_QUALITY'
+    ? CONTINUITY_FAMILY_PROPERTIES : SOURCE_FAMILY_PROPERTIES;
   if (!value || typeof value !== 'object' || !['PASS','WARN','FAIL'].includes(value.status)
-    || !Array.isArray(value.checks) || value.checks.length === 0) {
+    || !value.checks || typeof value.checks !== 'object' || Array.isArray(value.checks)
+    || Object.keys(families).some((name) => !value.checks[name])) {
     throw Object.assign(new Error('Evaluator returned an invalid structured result'),
       { code: REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE });
   }
-  const checks = value.checks.map((check) => {
+  const checks = Object.entries(families).map(([familyName, allowedCodes]) => {
+    const check = value.checks[familyName];
     const evidence = check?.evidence;
-    if (!check || !ALLOWED_CODES.includes(check.code) || !['PASS','WARN','FAIL'].includes(check.status)
+    if (!check || !allowedCodes.includes(check.code) || !['PASS','WARN','FAIL'].includes(check.status)
       || check.qualityClass !== qualityClass || typeof check.reason !== 'string' || !check.reason.trim()
       || !Number.isFinite(check.confidence) || check.confidence < 0 || check.confidence > 1
       || !evidence || !Array.isArray(evidence.frameRatios) || !Array.isArray(evidence.timestampsMs)
@@ -101,10 +130,6 @@ function validateStructuredResult(value, qualityClass, tier) {
       qualityClass, reason: check.reason.trim(), evidence });
   });
   const normalized = qualityResult({ qualityClass, tier, checks });
-  const requiredGroups = qualityClass === 'CONTINUITY_QUALITY' ? REQUIRED_CONTINUITY_GROUPS : REQUIRED_SOURCE_GROUPS;
-  const missingGroup = requiredGroups.find((group) => !checks.some((check) => group.includes(check.code)));
-  if (missingGroup) throw Object.assign(new Error(`Evaluator omitted required check family: ${missingGroup.join('|')}`),
-    { code: REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE });
   if (normalized.status !== value.status) throw Object.assign(new Error('Evaluator aggregate status conflicts with its checks'),
     { code: REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE });
   return normalized;
@@ -277,8 +302,10 @@ module.exports = {
   EVALUATOR_VERSION,
   OPENAI_RESPONSES_ENDPOINT,
   OpenAISemanticVisualEvaluatorAdapter,
+  CONTINUITY_FAMILY_PROPERTIES,
   REQUIRED_CONTINUITY_GROUPS,
   REQUIRED_SOURCE_GROUPS,
+  SOURCE_FAMILY_PROPERTIES,
   strictSchema,
   validateStructuredResult,
 };

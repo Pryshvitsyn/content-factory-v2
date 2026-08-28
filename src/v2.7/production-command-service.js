@@ -8,6 +8,7 @@ const { resolveQualityVideoProfile, qualityProfileFromSelection } = require('./q
 const { buildShotRevision } = require('./shot-regeneration');
 const { brandMediaPreferences, resolveMediaStack } = require('../v2.9.2/media-stack');
 const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
+const { retryPlan } = require('../v2.9/semantic-evaluation-retry');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ProductionCommandError extends Error {
@@ -83,7 +84,7 @@ class ProductionCommandService {
     }
   }
 
-  runtime(input, { forceDryRun = false } = {}) {
+  runtime(input, { forceDryRun = false, semanticOnly = false } = {}) {
     const env = {
       ...this.env,
       REAL_PRODUCTION_INPUT: this.env.REAL_PRODUCTION_INPUT || 'dashboard://operator-console',
@@ -95,15 +96,22 @@ class ProductionCommandService {
         QUALITY_VIDEO_MODEL: input.qualityVideoProfile.model,
         QUALITY_VIDEO_PROVIDER: input.qualityVideoProfile.provider } : {}),
       FAST_RENDERER: input.renderMode === 'FAST' ? input.fastRender.renderer : this.env.FAST_RENDERER,
+      ...(semanticOnly ? { SEMANTIC_VISUAL_MAX_RETRIES: '0' } : {}),
       ...(forceDryRun ? { LIVE_PAID_GENERATION: 'false' } : {}),
     };
     const config = this.configResolver(env, input);
     if (!forceDryRun) {
       if (!config.live) throw new ProductionCommandError(409, 'V27_EXECUTION_DISABLED',
         'Production execution is disabled. Start the local Dashboard with LIVE_PAID_GENERATION=true after reviewing provider cost.');
-      this.credentialCheck({ config, input, env });
+      if (!semanticOnly) this.credentialCheck({ config, input, env });
+      else if (env.SEMANTIC_VISUAL_ENABLED !== 'true' || String(env.SEMANTIC_VISUAL_PROVIDER).toLowerCase() !== 'openai'
+        || env.LIVE_PAID_VISUAL_EVALUATION !== 'true' || !env.OPENAI_API_KEY || !env.SEMANTIC_VISUAL_MODEL) {
+        throw new ProductionCommandError(409, 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED',
+          'Semantic retry requires the explicitly enabled and paid-authorized OpenAI evaluator configuration');
+      }
     }
-    const runtime = this.runtimeFactory({ db: this.repository.db, storage: this.storage, config, env, logger: this.logger });
+    const runtime = this.runtimeFactory({ db: this.repository.db, storage: this.storage, config, env,
+      logger: this.logger, semanticOnly });
     return { ...runtime, config };
   }
 
@@ -328,6 +336,40 @@ class ProductionCommandService {
     if (executable.terminal) return Object.freeze({ productionId, jobId: production.jobId,
       status: production.status, jobStatus: production.jobStatus, accepted: false, reused: true, publicationTriggered: false });
     return this.schedule(production, operatorInputFromRaw(production.jobPayload.canonicalRawInput));
+  }
+
+  async preflightSemanticRetry({ productionId, brandId }) {
+    const production = await this.stored(productionId, brandId);
+    const input = operatorInputFromRaw(production.jobPayload.canonicalRawInput);
+    const plan = retryPlan(production, input);
+    if (!plan.eligible) throw new ProductionCommandError(409, 'SEMANTIC_RETRY_UNAVAILABLE',
+      'Semantic-only retry is available only for isolated evaluator infrastructure/output-contract failures');
+    if (this.env.SEMANTIC_VISUAL_ENABLED !== 'true'
+      || String(this.env.SEMANTIC_VISUAL_PROVIDER).toLowerCase() !== 'openai'
+      || this.env.LIVE_PAID_VISUAL_EVALUATION !== 'true'
+      || !this.env.OPENAI_API_KEY || !this.env.SEMANTIC_VISUAL_MODEL) {
+      throw new ProductionCommandError(409, 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED',
+        'Semantic retry requires the explicitly enabled and paid-authorized OpenAI evaluator configuration');
+    }
+    const schema = await this.repository.db.query("SELECT to_regclass('v2_9.semantic_evaluation_attempts') IS NOT NULL AS ready");
+    if (!schema.rows[0]?.ready) throw new ProductionCommandError(409, 'V292_SCHEMA_MISSING', 'V2.9.2 semantic retry migration is required');
+    return Object.freeze({ productionId, brandId, action: plan.action, assetId: plan.assetId,
+      expectedVideoGenerations: 0, expectedSpeechGenerations: 0, expectedSemanticEvaluations: 1,
+      expectedExternalCalls: 1, previousEvidenceArtifact: plan.previousEvidenceArtifact, readiness: 'READY' });
+  }
+
+  async retrySemanticEvaluation({ productionId, brandId, confirmation }) {
+    if (confirmation !== true) throw new ProductionCommandError(400, 'SEMANTIC_RETRY_CONFIRMATION_REQUIRED',
+      'Explicit semantic-only retry confirmation is required');
+    const plan = await this.preflightSemanticRetry({ productionId, brandId });
+    const production = await this.stored(productionId, brandId);
+    const safety = await this.repository.executionSafety(production.id);
+    if (safety.ambiguousExecutions > 0) throw new ProductionCommandError(409, 'EXECUTION_NEEDS_RECONCILIATION',
+      'Semantic retry is blocked because durable provider execution state is ambiguous');
+    const input = operatorInputFromRaw(production.jobPayload.canonicalRawInput);
+    const runtime = this.runtime(input, { semanticOnly: true });
+    this.scheduler(() => runtime.service.retrySemanticEvaluation({ production, input, config: runtime.config }), this.logger);
+    return Object.freeze({ ...plan, accepted: true, publicationTriggered: false });
   }
 
   async regenerate({ productionId, brandId, requestId, reason = null }) {

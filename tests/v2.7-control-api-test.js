@@ -25,6 +25,10 @@ async function main() {
     async createProduction(body) { calls.push(['create', body]); return { productionId: PRODUCTION_ID, jobStatus: 'QUEUED' }; },
     async startProduction(body) { calls.push(['start', body]); return { productionId: PRODUCTION_ID, accepted: true }; },
     async retryProduction(body) { calls.push(['retry', body]); return { productionId: PRODUCTION_ID, accepted: true }; },
+    async preflightSemanticRetry(body) { calls.push(['semantic-preflight', body]); return {
+      expectedVideoGenerations: 0, expectedSpeechGenerations: 0, expectedSemanticEvaluations: 1,
+    }; },
+    async retrySemanticEvaluation(body) { calls.push(['semantic-retry', body]); return { accepted: true, publicationTriggered: false }; },
     async regenerateProduction(body) { calls.push(['regenerate', body]); return { productionId: 'new-production', requiresExplicitStart: true }; },
     async preflightShotRegeneration(body) { calls.push(['shot-preflight', body]); return { preflightId: 'shot-fingerprint', expectedProviderCalls: 1, providerCalls: 0 }; },
     async regenerateShot(body) { calls.push(['shot-regenerate', body]); return { regenerationId: 'shot-revision', accepted: true, publicationTriggered: false }; },
@@ -46,6 +50,13 @@ async function main() {
     assert.equal(started.status, 202); assert.equal(started.payload.accepted, true);
     const retried = await post(base, `/api/productions/${PRODUCTION_ID}/retry`, { brandId: BRAND_ID });
     assert.equal(retried.status, 202);
+    const semanticPreflight = await post(base, `/api/productions/${PRODUCTION_ID}/semantic-retry/preflight`, { brandId: BRAND_ID });
+    assert.deepEqual([semanticPreflight.payload.expectedVideoGenerations, semanticPreflight.payload.expectedSpeechGenerations,
+      semanticPreflight.payload.expectedSemanticEvaluations], [0, 0, 1]);
+    const semanticRetry = await post(base, `/api/productions/${PRODUCTION_ID}/semantic-retry`, {
+      brandId: BRAND_ID, confirmation: true,
+    });
+    assert.equal(semanticRetry.status, 202); assert.equal(semanticRetry.payload.publicationTriggered, false);
     const regenerated = await post(base, `/api/productions/${PRODUCTION_ID}/regenerate`, {
       brandId: BRAND_ID, requestId: '33333333-3333-4333-8333-333333333333', reason: 'Stronger hook',
     });
@@ -61,7 +72,8 @@ async function main() {
     assert.equal(shotRegenerated.status, 202); assert.equal(shotRegenerated.payload.publicationTriggered, false);
     const added = await post(base, '/api/provider-models', { brandId: BRAND_ID, provider: 'fal', modelId: 'acme/video', preset: 'VIDEO_STANDARD' });
     assert.equal(added.status, 201); assert.equal(added.payload.modelId, 'acme/video');
-    assert.deepEqual(calls.map(([name]) => name), ['preflight','preflight','create','start','retry','regenerate','shot-preflight','shot-regenerate','add-model']);
+    assert.deepEqual(calls.map(([name]) => name), ['preflight','preflight','create','start','retry','semantic-preflight',
+      'semantic-retry','regenerate','shot-preflight','shot-regenerate','add-model']);
     console.log('V2.7 Control API production command routes passed (zero provider calls).');
   } finally { await new Promise((resolve) => server.close(resolve)); }
 }

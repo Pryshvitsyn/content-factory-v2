@@ -33,6 +33,14 @@ class PostgresMediaExecutionRepository {
     return result.rows;
   }
 
+  async get({ workspaceId, brandId, productionId, assetId }) {
+    const result = await this.db.query(`/* v2.9.2:get-existing-media-execution */
+      SELECT * FROM v2_5.media_executions
+      WHERE workspace_id=$1 AND brand_id=$2 AND production_id=$3 AND asset_id=$4`,
+    [workspaceId, brandId, productionId, assetId]);
+    return result.rows[0] || null;
+  }
+
   async verifyTransactionalPlan({ workspaceId, brandId, objective, inputFingerprint, assets }) {
     const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
     const probe = `v2.5-preflight:${crypto.randomUUID()}`;
@@ -278,6 +286,27 @@ class DurableMediaExecutor {
       await this.repository.markFailure({ id: row.id, workerId, error, boundaryCrossed, terminal }).catch(() => {});
       throw error;
     }
+  }
+
+  async loadExisting({ workspaceId, productionId, brandId, workerId, asset }) {
+    if (typeof this.repository.get !== 'function') {
+      throw new DurableMediaError('SEMANTIC_RETRY_MEDIA_LOOKUP_UNAVAILABLE', 'Durable media lookup is unavailable');
+    }
+    const identities = this.identities({ brandId, productionId, asset });
+    const row = await this.repository.get({ workspaceId, brandId, productionId, assetId: asset.asset_id });
+    if (!row || row.status !== 'SUCCEEDED' || row.input_fingerprint !== identities.fingerprint) {
+      throw new DurableMediaError('SEMANTIC_RETRY_MEDIA_MISSING',
+        `Semantic retry cannot find the exact succeeded immutable asset ${asset.asset_id}`);
+    }
+    const cached = await this.cached({ identities, asset, row });
+    if (!cached) throw new DurableMediaError('SEMANTIC_RETRY_MEDIA_MISSING',
+      `Semantic retry cannot load immutable artifact bytes for ${asset.asset_id}`);
+    const probe = row.media_probe && Object.keys(row.media_probe).length ? row.media_probe
+      : await this.mediaInspector.inspect({ bytes: cached.bytes, contentType: cached.contentType, kind: asset.kind,
+        expectedDurationMs: asset.generation_requirements?.target_clip_duration_ms || null });
+    await this.registerAsset({ productionId, asset, media: cached, workerId, identities, probe });
+    return Object.freeze({ ...cached, brandId, durableExecutionId: row.id, mediaProbe: probe,
+      semanticRetryReuse: true });
   }
 
   async registerAsset({ productionId, asset, media, workerId, identities, probe }) {

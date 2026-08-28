@@ -9,22 +9,22 @@ function check(code, status, reason, qualityClass, confidence = 0.96) {
 }
 
 function result(code, status, reason, qualityClass = 'SEMANTIC_VISUAL', confidence = 0.96) {
-  const source = [
-    check(REASON_CODES.SINGLE_COHERENT_COMPOSITION, 'PASS', 'One coherent full-frame scene is visible.', qualityClass),
-    check(REASON_CODES.PSEUDO_TEXT_ARTIFACT, 'PASS', 'No prohibited text-like artifact is visible.', qualityClass),
-    check(REASON_CODES.HUMAN_VISUAL_INTEGRITY, 'PASS', 'No severe visible human deformation is present.', qualityClass),
-    check(REASON_CODES.CREATIVE_PLAN_MISMATCH, 'PASS', 'Visible content materially matches the creative plan.', qualityClass),
-    check(REASON_CODES.REALISM_QUALITY, 'PASS', 'Requested cinematic naturalism is plausible.', qualityClass),
-    check(REASON_CODES.BRAND_SAFETY_PROHIBITED_ELEMENT, 'PASS', 'No prohibited visible element is present.', qualityClass),
-    check(REASON_CODES.TEMPORAL_SEMANTIC_CONSISTENCY, 'PASS', 'Ordered frames remain semantically coherent.', qualityClass),
-  ];
-  const continuity = [
-    check(REASON_CODES.VISUAL_IDENTITY_CONTINUITY, 'PASS', 'Character appearance remains plausible.', qualityClass),
-    check(REASON_CODES.WARDROBE_CONTINUITY, 'PASS', 'Wardrobe remains plausible.', qualityClass),
-    check(REASON_CODES.LOCATION_CONTINUITY, 'PASS', 'Location remains plausible.', qualityClass),
-    check(REASON_CODES.PROP_CONTINUITY, 'PASS', 'Key props remain plausible.', qualityClass),
-    check(REASON_CODES.LIGHTING_COLOR_CONTINUITY, 'PASS', 'Lighting and color language remain plausible.', qualityClass),
-  ];
+  const source = {
+    composition: check(REASON_CODES.SINGLE_COHERENT_COMPOSITION, 'PASS', 'One coherent full-frame scene is visible.', qualityClass),
+    generatedText: check(REASON_CODES.PSEUDO_TEXT_ARTIFACT, 'PASS', 'No prohibited text-like artifact is visible.', qualityClass),
+    humanIntegrity: check(REASON_CODES.HUMAN_VISUAL_INTEGRITY, 'PASS', 'No severe visible human deformation is present.', qualityClass),
+    creativeCompliance: check(REASON_CODES.CREATIVE_PLAN_MISMATCH, 'PASS', 'Visible content materially matches the creative plan.', qualityClass),
+    realism: check(REASON_CODES.REALISM_QUALITY, 'PASS', 'Requested cinematic naturalism is plausible.', qualityClass),
+    brandSafety: check(REASON_CODES.BRAND_SAFETY_PROHIBITED_ELEMENT, 'PASS', 'No prohibited visible element is present.', qualityClass),
+    temporalConsistency: check(REASON_CODES.TEMPORAL_SEMANTIC_CONSISTENCY, 'PASS', 'Ordered frames remain semantically coherent.', qualityClass),
+  };
+  const continuity = {
+    visualIdentity: check(REASON_CODES.VISUAL_IDENTITY_CONTINUITY, 'PASS', 'Character appearance remains plausible.', qualityClass),
+    wardrobe: check(REASON_CODES.WARDROBE_CONTINUITY, 'PASS', 'Wardrobe remains plausible.', qualityClass),
+    location: check(REASON_CODES.LOCATION_CONTINUITY, 'PASS', 'Location remains plausible.', qualityClass),
+    props: check(REASON_CODES.PROP_CONTINUITY, 'PASS', 'Key props remain plausible.', qualityClass),
+    lightingColor: check(REASON_CODES.LIGHTING_COLOR_CONTINUITY, 'PASS', 'Lighting and color language remain plausible.', qualityClass),
+  };
   const checks = qualityClass === 'CONTINUITY_QUALITY' ? continuity : source;
   const family = qualityClass === 'CONTINUITY_QUALITY'
     ? code === REASON_CODES.CONTINUITY_FAILURE ? [REASON_CODES.VISUAL_IDENTITY_CONTINUITY, REASON_CODES.CONTINUITY_FAILURE, REASON_CODES.IDENTITY_DRIFT]
@@ -32,10 +32,11 @@ function result(code, status, reason, qualityClass = 'SEMANTIC_VISUAL', confiden
     : code === REASON_CODES.TRIPTYCH_DETECTED ? [REASON_CODES.SINGLE_COHERENT_COMPOSITION, REASON_CODES.TRIPTYCH_DETECTED]
       : code === REASON_CODES.SEVERE_ANATOMY_DEFORMATION ? [REASON_CODES.HUMAN_VISUAL_INTEGRITY, REASON_CODES.SEVERE_ANATOMY_DEFORMATION]
         : [code];
-  const replaceIndex = checks.findIndex((item) => family.includes(item.code));
-  if (replaceIndex >= 0) checks[replaceIndex] = check(code, status, reason, qualityClass, confidence);
-  const aggregate = checks.some((item) => item.status === 'FAIL') ? 'FAIL'
-    : checks.some((item) => item.status === 'WARN') ? 'WARN' : 'PASS';
+  const replaceKey = Object.keys(checks).find((key) => family.includes(checks[key].code));
+  if (replaceKey) checks[replaceKey] = check(code, status, reason, qualityClass, confidence);
+  const values = Object.values(checks);
+  const aggregate = values.some((item) => item.status === 'FAIL') ? 'FAIL'
+    : values.some((item) => item.status === 'WARN') ? 'WARN' : 'PASS';
   return Object.freeze({ status: aggregate, checks: Object.freeze(checks) });
 }
 

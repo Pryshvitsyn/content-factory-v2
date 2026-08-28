@@ -26,6 +26,21 @@ const DEFAULT_QUALITY_POLICY = Object.freeze({
   requireVoiceTimingPlan: false,
 });
 
+const SEMANTIC_RETRYABLE_CODES = new Set([
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_HTTP_FAILED,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_NETWORK_FAILED,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_TIMEOUT,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_RATE_LIMITED,
+]);
+
+function sourceFailureNextAction(evaluation) {
+  const failed = evaluation?.semantic?.checks?.filter((check) => check.status === 'FAIL') || [];
+  return evaluation?.deterministicVisual?.status === 'PASS' && evaluation?.temporal?.status === 'PASS'
+    && failed.length > 0 && failed.every((check) => SEMANTIC_RETRYABLE_CODES.has(check.code))
+    ? 'RETRY_SEMANTIC_EVALUATION' : 'REGENERATE_SHOT';
+}
+
 function requireValue(name, value) {
   if (value === undefined || value === null || value === '') throw new Error(`${name} is required`);
 }
@@ -317,7 +332,8 @@ class MasterProductionOrchestrator {
     this.editorialQualityEvaluator = editorialQualityEvaluator;
   }
 
-  async build({ productionId, workspaceId = null, brandId, workerId, script, shotPlan, assetPlan, resolvedMedia = [], qualityPolicy = {} } = {}) {
+  async build({ productionId, workspaceId = null, brandId, workerId, script, shotPlan, assetPlan, resolvedMedia = [],
+    qualityPolicy = {}, semanticRecovery = null } = {}) {
     requireValue('productionId', productionId);
     requireValue('workerId', workerId);
     assertBrandScope(brandId, { script, shotPlan, assetPlan });
@@ -332,6 +348,17 @@ class MasterProductionOrchestrator {
     }
     const timeline = buildMasterTimeline({ productionId, script, shotPlan, assetPlan, fps: settings.fps });
     const reusable = new Map(resolvedMedia.map((media) => [String(media.assetId), media]));
+    if (semanticRecovery) {
+      const target = assetPlan.assets.find((asset) => asset.asset_id === semanticRecovery.assetId && asset.kind === 'video');
+      const missing = assetPlan.assets.filter((asset) => ['image','video','voice','audio'].includes(asset.kind))
+        .filter((asset) => !reusable.get(String(asset.asset_id))?.artifact);
+      if (!target || semanticRecovery.evaluation?.metadata?.semanticOnlyRetry !== true || missing.length) {
+        const error = new Error('Semantic recovery requires one verified retry result and every immutable media artifact');
+        error.code = 'SEMANTIC_RETRY_REUSE_CONTRACT_FAILED';
+        error.details = { missingAssetIds: missing.map((asset) => asset.asset_id), providerExecutions: 0 };
+        throw error;
+      }
+    }
     const mediaResults = [];
     const sourceEvaluations = [];
     const rawSourceEvaluations = [];
@@ -437,7 +464,9 @@ class MasterProductionOrchestrator {
       }
       if (asset.kind === 'video' && this.sourceQualityEvaluator) {
         let evaluation;
-        try {
+        if (semanticRecovery?.assetId === asset.asset_id) {
+          evaluation = semanticRecovery.evaluation;
+        } else try {
           evaluation = await this.sourceQualityEvaluator.evaluate({ media, creativePlan: qualityPolicy.creativePlan || null,
             negativeIntent: asset.generation_requirements?.negative_intent || null,
             expectedAspectRatio: asset.generation_requirements?.aspect_ratio || '9:16', intendedContentType: 'cinematic',
@@ -470,8 +499,9 @@ class MasterProductionOrchestrator {
             sourceQuality });
           const error = new Error(`Source visual quality failed for ${asset.asset_id}; master assembly was blocked`);
           error.code = 'SOURCE_QUALITY_VALIDATION_FAILED';
-          error.details = { quality, sourceQuality, providerExecutions: sourceEvaluations.length,
-            paidRegenerationTriggered: false, nextAction: 'REGENERATE_SHOT' };
+          error.details = { quality, sourceQuality, providerExecutions: semanticRecovery ? 0 : sourceEvaluations.length,
+            paidRegenerationTriggered: false, nextAction: sourceFailureNextAction(persisted),
+            semanticOnlyRetry: semanticRecovery?.assetId === asset.asset_id };
           throw error;
         }
       }
@@ -479,7 +509,7 @@ class MasterProductionOrchestrator {
     }
 
     let continuityQuality = null;
-    if (this.sourceQualityEvaluator?.evaluateContinuity) {
+    if (this.sourceQualityEvaluator?.evaluateContinuity && sourceEvaluations.length > 1) {
       try {
         continuityQuality = await this.sourceQualityEvaluator.evaluateContinuity({ shotEvaluations: rawSourceEvaluations,
           creativePlan: qualityPolicy.creativePlan || null, qualityTier });
@@ -506,8 +536,9 @@ class MasterProductionOrchestrator {
       const quality = buildProductionQuality({ tier: qualityTier, preExecution: preExecutionValidation, sourceQuality });
       const error = new Error('Source semantic or continuity quality failed; master assembly was blocked');
       error.code = 'SOURCE_QUALITY_VALIDATION_FAILED';
-      error.details = { quality, sourceQuality, providerExecutions: sourceEvaluations.length,
-        paidRegenerationTriggered: false, nextAction: 'REGENERATE_SHOT' };
+      error.details = { quality, sourceQuality, providerExecutions: semanticRecovery ? 0 : sourceEvaluations.length,
+        paidRegenerationTriggered: false, nextAction: 'REGENERATE_SHOT',
+        semanticOnlyRetry: semanticRecovery !== null };
       throw error;
     }
     const audioQuality = this.audioQualityEvaluator?.evaluate({ mediaResults, expectedDurationMs: timeline.durationMs,
@@ -612,4 +643,5 @@ module.exports = {
   validatePostRenderQuality,
   validatePreExecutionQuality,
   persistVisualQualityEvidence,
+  sourceFailureNextAction,
 };

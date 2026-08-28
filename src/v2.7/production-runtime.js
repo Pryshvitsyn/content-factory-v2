@@ -18,6 +18,7 @@ const { QualityRendererLane, RendererRouter } = require('../v2.6/renderer-router
 const { VisualQualityEvaluator } = require('../v2.9/visual-quality-evaluator');
 const { createSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator-factory');
 const { DisabledSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator');
+const { PostgresSemanticEvaluationAttemptRepository } = require('../v2.9/semantic-evaluation-retry');
 
 function planOnlyAdapter(provider, capability, model) {
   return Object.freeze({
@@ -58,7 +59,7 @@ function unavailableQualityLane() {
 
 function createProductionRuntime({ db, storage, config, env = process.env, logger = console,
   reviewService = null, mediaInspector = null, adapterFactory = null, visualQualityEvaluator = null,
-  semanticAdapterFactory = createSemanticVisualEvaluatorAdapter } = {}) {
+  semanticAdapterFactory = createSemanticVisualEvaluatorAdapter, semanticOnly = false } = {}) {
   if (!db || !storage || !config) throw new Error('db, storage, and config are required');
   const artifactService = new ArtifactService({ storage });
   const reviews = reviewService || new ControlReviewService({ db });
@@ -69,7 +70,7 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
   const fastRenderers = {};
 
   if (config.renderMode === 'QUALITY') {
-    const gateway = providerGateway({ config, live: config.live, env });
+    const gateway = providerGateway({ config, live: config.live && !semanticOnly, env });
     mediaRepository = new PostgresMediaExecutionRepository({ db });
     const mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
       artifactService, mediaInspector: inspector, assetRepository: new PostgresAssetRepository() });
@@ -95,7 +96,9 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
 
   const rendererRouter = new RendererRouter({ qualityLane, fastRenderers });
   const service = new LiveProductionService({ db, masterOrchestrator, artifactService,
-    storageRoot: config.storageRoot, mediaExecutionRepository: mediaRepository, rendererRouter, logger });
+    storageRoot: config.storageRoot, mediaExecutionRepository: mediaRepository, mediaExecutor: masterOrchestrator?.mediaExecutor,
+    visualQualityEvaluator: masterOrchestrator?.sourceQualityEvaluator,
+    semanticAttemptRepository: new PostgresSemanticEvaluationAttemptRepository({ db }), rendererRouter, logger });
   return Object.freeze({ service, rendererRouter, artifactService, reviewService: reviews,
     mediaExecutionRepository: mediaRepository });
 }

@@ -14,6 +14,7 @@ const {
   verifyTransactionalLiveWrites,
 } = require('./schema-compatibility');
 const { QualityRendererLane, RendererRouter } = require('../v2.6/renderer-router');
+const { SemanticEvaluationRetryService } = require('../v2.9/semantic-evaluation-retry');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LIVE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
@@ -165,7 +166,8 @@ async function validateStorageRoot(root) {
 class LiveProductionService {
   constructor({ db, masterOrchestrator, artifactService, storageRoot, storageValidator = validateStorageRoot,
     schemaInspector = inspectSchemaCompatibility, transactionProbe = verifyTransactionalLiveWrites,
-    storageProbe = verifyArtifactStorage, mediaExecutionRepository = null, rendererRouter = null, logger = console } = {}) {
+    storageProbe = verifyArtifactStorage, mediaExecutionRepository = null, mediaExecutor = null,
+    visualQualityEvaluator = null, semanticAttemptRepository = null, rendererRouter = null, logger = console } = {}) {
     if (!db || typeof db.query !== 'function') throw new Error('db is required');
     if (!rendererRouter && (!masterOrchestrator || typeof masterOrchestrator.build !== 'function')) throw new Error('masterOrchestrator is required');
     if (!artifactService || typeof artifactService.createVersion !== 'function') throw new Error('artifactService is required');
@@ -178,6 +180,9 @@ class LiveProductionService {
     this.transactionProbe = transactionProbe;
     this.storageProbe = storageProbe;
     this.mediaExecutionRepository = mediaExecutionRepository;
+    this.semanticRetryService = semanticAttemptRepository && mediaExecutor && visualQualityEvaluator
+      ? new SemanticEvaluationRetryService({ repository: semanticAttemptRepository,
+        storage: artifactService.storage, mediaExecutor, evaluator: visualQualityEvaluator, masterOrchestrator }) : null;
     this.rendererRouter = rendererRouter || new RendererRouter({
       qualityLane: new QualityRendererLane({ masterOrchestrator, mediaExecutionRepository }),
     });
@@ -602,6 +607,29 @@ class LiveProductionService {
         error, providerBoundaryCrossed, durableAssetRecovery: prepared.input.schemaVersion >= 2 });
       throw error;
     }
+  }
+
+  async retrySemanticEvaluation({ production, input, config }) {
+    if (!this.semanticRetryService) throw new LiveProductionError('SEMANTIC_RETRY_UNAVAILABLE', 'Semantic retry runtime is unavailable');
+    const recovered = await this.semanticRetryService.execute({ production, input, workerId: config.workerId });
+    if (recovered.result.quality?.status !== 'PASS' || recovered.result.quality?.readyForHumanReview !== true) {
+      throw new LiveProductionError('LIVE_MASTER_VALIDATION_FAILED',
+        'Cached master assembly did not pass all required validation after semantic recovery', { quality: recovered.result.quality });
+    }
+    const result = { productionId: production.id, brandId: production.brandId,
+      masterArtifact: recovered.result.master?.artifact ? { id: recovered.result.master.artifact.artifactId,
+        version: recovered.result.master.artifact.version, storageKey: recovered.result.master.artifact.storageKey } : null,
+      validationStatus: recovered.result.quality?.status, semanticRetryAttemptId: recovered.attemptId,
+      semanticRetry: { assetId: recovered.assetId, videoGenerations: 0, speechGenerations: 0,
+        semanticEvaluations: recovered.semanticEvaluations }, publicationTriggered: false };
+    const completed = await this.db.query(`/* v2.9.2:complete-semantic-retry */
+      UPDATE v2_1.jobs SET status='COMPLETED',result=coalesce(result,'{}'::jsonb) || $3::jsonb,
+        completed_at=now(),updated_at=now() WHERE id=$1 AND production_id=$2 AND status='FAILED' RETURNING id`,
+    [production.jobId, production.id, JSON.stringify(result)]);
+    if (!completed.rows[0]) throw new LiveProductionError('SEMANTIC_RETRY_JOB_FENCED', 'Failed job state changed before semantic retry completion');
+    await this.db.query(`UPDATE v2_1.productions SET status='COMPLETED',completed_at=now(),updated_at=now()
+      WHERE id=$1 AND brand_id=$2 AND status='FAILED'`, [production.id, production.brandId]);
+    return result;
   }
 }
 
