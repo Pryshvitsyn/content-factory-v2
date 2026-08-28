@@ -8,7 +8,7 @@ const { resolveQualityVideoProfile, qualityProfileFromSelection } = require('./q
 const { buildShotRevision } = require('./shot-regeneration');
 const { brandMediaPreferences, resolveMediaStack } = require('../v2.9.2/media-stack');
 const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
-const { retryPlan } = require('../v2.9/semantic-evaluation-retry');
+const { partialMediaPlan, retryPlan } = require('../v2.9/semantic-evaluation-retry');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ProductionCommandError extends Error {
@@ -353,9 +353,25 @@ class ProductionCommandService {
     }
     const schema = await this.repository.db.query("SELECT to_regclass('v2_9.semantic_evaluation_attempts') IS NOT NULL AS ready");
     if (!schema.rows[0]?.ready) throw new ProductionCommandError(409, 'V292_SCHEMA_MISSING', 'V2.9.2 semantic retry migration is required');
+    const continuationSchema = await this.repository.db.query(`SELECT
+      EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='v2_9'
+        AND table_name='semantic_evaluation_attempts' AND column_name='new_speech_generations') AS ready`);
+    if (!continuationSchema.rows[0]?.ready) throw new ProductionCommandError(409, 'V2921_SCHEMA_MISSING',
+      'V2.9.2.1 partial-media semantic retry migration is required');
+    const executions = typeof this.repository.semanticRetryMediaExecutions === 'function'
+      ? await this.repository.semanticRetryMediaExecutions(productionId, brandId) : [];
+    const media = partialMediaPlan({ input, sourceAssetId: plan.assetId, executions });
+    if (!media.existingSourceVideo) throw new ProductionCommandError(409, 'SEMANTIC_RETRY_SOURCE_MISSING',
+      'The exact succeeded immutable source video is unavailable; no evaluator call can be made');
     return Object.freeze({ productionId, brandId, action: plan.action, assetId: plan.assetId,
       expectedVideoGenerations: 0, expectedSpeechGenerations: 0, expectedSemanticEvaluations: 1,
-      expectedExternalCalls: 1, previousEvidenceArtifact: plan.previousEvidenceArtifact, readiness: 'READY' });
+      possiblePostPassSpeechGenerations: media.possiblePostPassSpeechGenerations,
+      existingSourceVideo: media.existingSourceVideo,
+      existingVoiceReused: media.voices.length > 0 && media.reusedSpeechAssets === media.voices.length,
+      reusedVideoAssets: media.reusedVideoAssets, reusedSpeechAssets: media.reusedSpeechAssets,
+      ambiguousSpeechAssets: media.ambiguousSpeechAssets, blockedSpeechAssets: media.blockedSpeechAssets,
+      expectedExternalCalls: 1, maximumExternalCalls: 1 + media.possiblePostPassSpeechGenerations,
+      previousEvidenceArtifact: plan.previousEvidenceArtifact, readiness: 'READY' });
   }
 
   async retrySemanticEvaluation({ productionId, brandId, confirmation }) {
@@ -363,9 +379,6 @@ class ProductionCommandService {
       'Explicit semantic-only retry confirmation is required');
     const plan = await this.preflightSemanticRetry({ productionId, brandId });
     const production = await this.stored(productionId, brandId);
-    const safety = await this.repository.executionSafety(production.id);
-    if (safety.ambiguousExecutions > 0) throw new ProductionCommandError(409, 'EXECUTION_NEEDS_RECONCILIATION',
-      'Semantic retry is blocked because durable provider execution state is ambiguous');
     const input = operatorInputFromRaw(production.jobPayload.canonicalRawInput);
     const runtime = this.runtime(input, { semanticOnly: true });
     this.scheduler(() => runtime.service.retrySemanticEvaluation({ production, input, config: runtime.config }), this.logger);

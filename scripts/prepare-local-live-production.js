@@ -30,7 +30,10 @@ const V24_OWNERSHIP_MIGRATIONS = ['migrations/20260823_v2_4_canonical_production
 const V25_MIGRATIONS = ['migrations/20260823_v2_5_durable_media_executions.sql'];
 const V26_MIGRATIONS = ['migrations/20260824_v2_6_fast_render_executions.sql'];
 const V27_MIGRATIONS = ['migrations/20260824_v2_7_1_shot_regenerations.sql'];
-const V292_MIGRATIONS = ['migrations/20260828_v2_9_2_semantic_evaluation_attempts.sql'];
+const V292_MIGRATIONS = [
+  'migrations/20260828_v2_9_2_semantic_evaluation_attempts.sql',
+  'migrations/20260828_v2_9_2_1_semantic_retry_partial_media.sql',
+];
 
 function discoverDatabaseUrl(env = process.env) {
   const discovered = discoverLocalDatabase(env);

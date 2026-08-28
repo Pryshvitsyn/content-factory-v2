@@ -620,8 +620,10 @@ class LiveProductionService {
       masterArtifact: recovered.result.master?.artifact ? { id: recovered.result.master.artifact.artifactId,
         version: recovered.result.master.artifact.version, storageKey: recovered.result.master.artifact.storageKey } : null,
       validationStatus: recovered.result.quality?.status, semanticRetryAttemptId: recovered.attemptId,
-      semanticRetry: { assetId: recovered.assetId, videoGenerations: 0, speechGenerations: 0,
-        semanticEvaluations: recovered.semanticEvaluations }, publicationTriggered: false };
+      semanticRetry: { assetId: recovered.assetId, reusedVideoAssets: recovered.reusedVideoAssets,
+        reusedSpeechAssets: recovered.reusedSpeechAssets, semanticEvaluations: recovered.semanticEvaluations,
+        newSpeechGenerations: recovered.newSpeechGenerations, newVideoGenerations: recovered.newVideoGenerations },
+      publicationTriggered: false };
     const completed = await this.db.query(`/* v2.9.2:complete-semantic-retry */
       UPDATE v2_1.jobs SET status='COMPLETED',result=coalesce(result,'{}'::jsonb) || $3::jsonb,
         completed_at=now(),updated_at=now() WHERE id=$1 AND production_id=$2 AND status='FAILED' RETURNING id`,

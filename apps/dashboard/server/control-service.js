@@ -1,7 +1,7 @@
 'use strict';
 
 const { publicMediaStackCatalog } = require('../../../src/v2.9.2/media-stack');
-const { retryPlan } = require('../../../src/v2.9/semantic-evaluation-retry');
+const { partialMediaPlan, retryPlan } = require('../../../src/v2.9/semantic-evaluation-retry');
 const { operatorInputFromRaw } = require('../../../src/v2.7/production-command-service');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -147,7 +147,14 @@ class ControlService {
     const evaluator = evaluatorAccounting(item);
     let semanticRetry = retryPlan(item);
     if (semanticRetry.eligible && item.jobPayload?.canonicalRawInput) {
-      try { semanticRetry = retryPlan(item, operatorInputFromRaw(item.jobPayload.canonicalRawInput)); }
+      try {
+        const input = operatorInputFromRaw(item.jobPayload.canonicalRawInput);
+        semanticRetry = retryPlan(item, input);
+        const executions = typeof this.repository.semanticRetryMediaExecutions === 'function'
+          ? await this.repository.semanticRetryMediaExecutions(item.id, item.brandId) : [];
+        semanticRetry = Object.freeze({ ...semanticRetry,
+          media: partialMediaPlan({ input, sourceAssetId: semanticRetry.assetId, executions }) });
+      }
       catch { semanticRetry = Object.freeze({ ...semanticRetry, eligible: false, action: null }); }
     }
     return { ...item, operationalStatus: operationalStatus(item), progress: progressFor(item), shotRegenerations,

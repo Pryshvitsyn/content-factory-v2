@@ -197,6 +197,18 @@ class ControlRepository {
     return { ambiguousExecutions, actualProviderCalls };
   }
 
+  async semanticRetryMediaExecutions(productionId, brandId) {
+    const available = await this.db.query("SELECT to_regclass('v2_5.media_executions') IS NOT NULL AS ready");
+    if (!available.rows[0]?.ready) return [];
+    const result = await this.db.query(`/* dashboard:semantic-retry-media-state */
+      SELECT me.asset_id,me.kind,me.status,me.artifact_id,me.artifact_version,
+        me.artifact_storage_key,me.artifact_content_hash
+      FROM v2_5.media_executions me JOIN v2_1.productions p ON p.id=me.production_id
+      WHERE me.production_id=$1 AND me.brand_id=$2 AND p.brand_id=$2 AND p.workspace_id=me.workspace_id`,
+    [productionId, brandId]);
+    return result.rows;
+  }
+
   async listStages(productionId, brandId = null) {
     const result = await this.db.query(`/* dashboard:list-stages */
       SELECT sd.stage, sd.sequence_no AS "sequence", latest.status, latest.attempt,

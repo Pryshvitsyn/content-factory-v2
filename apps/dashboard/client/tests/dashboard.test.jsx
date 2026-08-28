@@ -179,30 +179,38 @@ describe('V2.7 operator console', () => {
     await waitFor(() => expect(calls.some(([url]) => url.endsWith('/regenerate'))).toBe(true));
   });
 
-  it('offers semantic-only recovery separately with an exact zero-generation call budget', async () => {
+  it('separates the semantic step from possible post-pass speech generation', async () => {
     const calls = [];
     vi.spyOn(window, 'confirm').mockImplementation((message) => {
       expect(message).toContain('Video generation: 0');
       expect(message).toContain('Speech generation: 0');
       expect(message).toContain('Semantic evaluation: 1');
+      expect(message).toContain('Existing video reused: YES');
+      expect(message).toContain('Existing voice reused: NO');
+      expect(message).toContain('Possible speech generation after semantic PASS: 1');
+      expect(message).toContain('Video regeneration: 0');
       return true;
     });
     fetch.mockImplementation((url, options = {}) => {
       calls.push([url, options.method || 'GET', options.body]);
       if (url.includes('/stages') || url.includes('/artifacts')) return response([]);
       if (url.endsWith('/semantic-retry/preflight')) return response({ expectedVideoGenerations: 0,
-        expectedSpeechGenerations: 0, expectedSemanticEvaluations: 1 });
+        expectedSpeechGenerations: 0, expectedSemanticEvaluations: 1, existingSourceVideo: true,
+        existingVoiceReused: false, possiblePostPassSpeechGenerations: 1 });
       if (url.endsWith('/semantic-retry')) return response({ accepted: true });
       return response({ id: review.productionId, brandId, brandName: 'Attune', title: 'Semantic contract failure',
         renderMode: 'QUALITY', renderer: 'v2.5-quality', status: 'FAILED', jobStatus: 'FAILED',
         operationalStatus: 'VALIDATION_FAILED', progress: [], actualProviderCalls: 1, ambiguousExecutions: 0,
-        shotRegenerations: [], semanticRetry: { eligible: true }, jobError: {
+        shotRegenerations: [], semanticRetry: { eligible: true, media: { existingSourceVideo: true,
+          reusedSpeechAssets: 0, possiblePostPassSpeechGenerations: 1 } }, jobError: {
           code: 'SOURCE_QUALITY_VALIDATION_FAILED', message: 'Evaluator omitted required semantic family' } });
     });
     render(<ProductionDetail production={{ id: review.productionId, brandId }} />);
-    expect(await screen.findByText('Video generation: 0', { exact: false })).toBeTruthy();
-    expect(screen.getByText('Speech generation: 0', { exact: false })).toBeTruthy();
+    expect(await screen.findByText('Existing source video: REUSED', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Existing voice: MISSING', { exact: false })).toBeTruthy();
     expect(screen.getByText('Semantic evaluation: 1', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Possible post-pass speech generation: 1', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Video regeneration: 0', { exact: false })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'RETRY SEMANTIC EVALUATION' }));
     await waitFor(() => expect(calls.some(([url, method, body]) => url.endsWith('/semantic-retry')
       && method === 'POST' && JSON.parse(body).confirmation === true)).toBe(true));
