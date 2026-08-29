@@ -92,7 +92,7 @@ function attuneBrief() {
       referencePolicy: 'NONE',
     },
     voice,
-    postProduction: { endTitle: { enabled: true, text: "Don't guess. Tune in.", startTime: 13, duration: 2 }, brandName: 'Attune' },
+    postProduction: { endTitle: { enabled: true, text: "Don't guess. Tune in.", startTime: 13, duration: 2 }, brandName: 'Attune', cta: null },
     publicationPolicy: { humanApprovalRequired: true, autoPublish: false },
   };
 }
@@ -171,7 +171,6 @@ async function main() {
     assert.equal(created.status, 'DRAFT');
     assert.equal(created.creative_validation.status, 'PASS', 'Attune 3-shot creative must remain complete');
 
-    // Model the user's persisted state after the old draft-only canonical identity failed before any provider boundary.
     const legacyPreflight = { schemaVersion: '2.10', status: 'READY', blockers: [], fingerprint: 'legacy-preflight-fingerprint',
       humanApprovalRequired: true, autoPublish: false };
     await repository.savePreflight({ id: created.id, workspaceId: W, brandId: B, preflight: legacyPreflight,
@@ -187,7 +186,6 @@ async function main() {
     assert.equal(state.preflight_fingerprint, legacyPreflight.fingerprint);
     const revisionBeforeNoop = state.revision;
 
-    // This is the Dashboard's persistDraft() immediately before FINAL PRODUCTION PREFLIGHT.
     const noop = await service.updateDraft({ id: created.id, brandId: B, brief: state.creative_brief,
       providerSelection: state.provider_selection, voiceSelection: state.voice_selection });
     assert.equal(noop.status, 'PREFLIGHT_READY', 'semantic no-op save must preserve READY evidence instead of violating the DB CHECK');
@@ -223,7 +221,6 @@ async function main() {
     assert.equal(state.start_state, 'IDLE', 'fresh preflight must explicitly clear a safe FAILED_RETRYABLE state');
     assert.equal(state.preflight_fingerprint, final.fingerprint);
 
-    // Seed the exact legacy key that caused the user's original collision. Current START must choose another identity.
     const legacyProductionKey = `v210-${created.id}`;
     starter.existingCanonical.set(legacyProductionKey, 'older-structured-input-fingerprint');
 
