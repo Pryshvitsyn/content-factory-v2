@@ -30,6 +30,8 @@ jobs:
           sudo apt-get install -y ffmpeg
       - name: V2.10 creative contracts and mocked provider boundary
         run: npm run test:v2.10
+      - name: Real LiveProductionService collision guard
+        run: node tests/v2.10-live-production-collision-guard-test.js
       - name: Real local FFmpeg end-title renderer
         run: node tests/v2.1-ffmpeg-master-renderer-test.js
       - name: Certified regression suites
