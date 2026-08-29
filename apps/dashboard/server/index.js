@@ -14,9 +14,10 @@ const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
 const { CreativeProductionService } = require('../../../src/v2.10/creative-production-service');
 const { V210PostgresRepository } = require('../../../src/v2.10/postgres-repository');
+const { V210CanonicalProductionStarter, createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 
-function createDashboardRuntime(env = process.env, { previewProvider = null, creativeStarter = null } = {}) {
+function createDashboardRuntime(env = process.env, { previewProvider, creativeStarter } = {}) {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   const db = new Pool({ connectionString: env.DATABASE_URL, max: 10 });
   const storage = new FilesystemStorageAdapter({
@@ -38,9 +39,18 @@ function createDashboardRuntime(env = process.env, { previewProvider = null, cre
   const service = new ControlService({
     repository, reviewService, commandService, storage, providers, providerCatalog, actor, env,
   });
-  const creativeService = new CreativeProductionService({ repository: new V210PostgresRepository({ db, storage }),
-    brandRepository: repository, actor, storage, audioInspector: new FfprobeMediaInspector(), previewProvider, starter: creativeStarter });
-  return { db, server: createControlServer({ service, creativeService }) };
+  const audioInspector = new FfprobeMediaInspector();
+  const v210Repository = new V210PostgresRepository({ db, storage });
+  const resolvedPreviewProvider = previewProvider || createVoicePreviewGateway({ env });
+  const resolvedStarter = creativeStarter || new V210CanonicalProductionStarter({
+    db, storage, repository: v210Repository, env, logger: console, mediaInspector: audioInspector,
+  });
+  const creativeService = new CreativeProductionService({ repository: v210Repository,
+    brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
+    previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
+  return { db, storage, providerCatalog, service, creativeService, v210Repository,
+    creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
+    server: createControlServer({ service, creativeService }) };
 }
 
 if (require.main === module) {
