@@ -7,12 +7,15 @@ const { FfmpegFrameSampler } = require('./frame-sampler');
 const { reconcileVisualEvidence, RECONCILIATION_VERSION } = require('../v2.10.1/quality-evidence-reconciliation');
 
 function effectiveVisualGate({ evaluationClass, tier, deterministicVisual, temporal, semantic, metadata = {} }) {
+  const rawResults = [deterministicVisual, temporal, semantic];
   const rawEvaluation = combineResults({ qualityClass: `${evaluationClass}_VISUAL_RAW_EVIDENCE`, tier,
-    results: [deterministicVisual, temporal, semantic], metadata: { evaluatorVersion: 'v2.10.1-raw-evidence' } });
+    results: rawResults, metadata: { evaluatorVersion: 'v2.10.1-raw-evidence' } });
   const reconciliation = reconcileVisualEvidence({ deterministic: deterministicVisual, temporal, semantic,
     qualityTier: tier });
+  // Keep all historical/raw reason codes visible to callers and the Dashboard. The independent
+  // reconciliation check adds the production disposition without hiding the evidence that caused it.
   const result = qualityResult({ qualityClass: `${evaluationClass}_VISUAL_GATE`, tier,
-    checks: reconciliation.checks, metadata: {
+    checks: [...rawResults.flatMap((item) => item?.checks || []), ...reconciliation.checks], metadata: {
       ...metadata,
       evaluatorVersion: 'v2.10.1',
       reconciliationVersion: RECONCILIATION_VERSION,
