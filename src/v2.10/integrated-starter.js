@@ -42,14 +42,37 @@ function revisionSafeProductionKey(draftId, canonicalInput) {
   });
 }
 
+function persistedDraftScope(draft) {
+  const workspaceId = draft?.workspace_id || draft?.workspaceId || null;
+  const brandId = draft?.brand_id || draft?.brandId || null;
+  if (!workspaceId || !brandId) {
+    throw new V210RuntimeError('V210_DRAFT_SCOPE_REQUIRED',
+      'Persisted V2.10 workspace and brand scope are required for canonical preflight and START');
+  }
+  return Object.freeze({ workspaceId, brandId });
+}
+
 function revisionSafeCanonical({ draft, preflight }) {
   const canonical = buildCanonicalV210Input({ draft, preflight });
-  const identity = revisionSafeProductionKey(draft.id, canonical.input);
-  const normalized = { ...canonical.input, productionKey: identity.productionKey, liveTestKey: identity.productionKey };
-  delete normalized.fingerprint;
+  const scope = persistedDraftScope(draft);
+  if (canonical.input.brandId !== scope.brandId) {
+    throw new V210RuntimeError('V210_DRAFT_SCOPE_MISMATCH',
+      'Canonical brand does not match the persisted V2.10 draft scope');
+  }
+  // LiveProductionService.prepare() has always added workspaceId from the active
+  // brand before preflight, but START/createDraft historically received the
+  // unscoped canonical input. On legacy databases where productions.workspace_id
+  // is nullable that allowed a transient NULL-workspace INSERT followed by a
+  // `workspace_id = NULL` lookup that can never match. Scope the canonical input
+  // before identity/fingerprinting so FINAL PREFLIGHT and START certify and use
+  // the exact same durable workspace-owned object.
+  const scopedBase = { ...canonical.input, workspaceId: scope.workspaceId };
+  delete scopedBase.fingerprint;
+  const identity = revisionSafeProductionKey(draft.id, scopedBase);
+  const normalized = { ...scopedBase, productionKey: identity.productionKey, liveTestKey: identity.productionKey };
   const input = Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
   const raw = Object.freeze({ ...canonical.raw, production_key: identity.productionKey });
-  return Object.freeze({ ...canonical, raw, input, ...identity });
+  return Object.freeze({ ...canonical, raw, input, scope, ...identity });
 }
 
 class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
@@ -107,4 +130,4 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
 }
 
 module.exports = { V210_EXECUTION_IDENTITY_VERSION, V210IntegratedProductionStarter, executionIdentitySource,
-  integratedEnvironment, revisionSafeCanonical, revisionSafeProductionKey };
+  integratedEnvironment, persistedDraftScope, revisionSafeCanonical, revisionSafeProductionKey };
