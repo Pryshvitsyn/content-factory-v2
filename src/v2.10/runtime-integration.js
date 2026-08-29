@@ -14,6 +14,11 @@ const { CAPABILITIES } = require('../v2.8/capabilities');
 const { canonicalFingerprint } = require('../../worker/v2.1-master-production');
 const { canonicalCreativeBrief, buildShotPrompt } = require('./creative-contract');
 
+const CANONICAL_OBJECTIVES = Object.freeze(new Set([
+  'ORGANIC_REACH','ENGAGEMENT','TRAFFIC','LEAD_GENERATION','APP_INSTALL','PURCHASE','BOOKING',
+  'SEO_AUTHORITY','RETENTION','EXPERIMENT',
+]));
+
 class V210RuntimeError extends Error {
   constructor(code, message, { boundaryState = 'NOT_CROSSED', details = null, productionId = null } = {}) {
     super(message);
@@ -24,6 +29,11 @@ class V210RuntimeError extends Error {
     this.details = details;
     this.productionId = productionId;
   }
+}
+
+function canonicalObjective(value) {
+  const normalized = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  return CANONICAL_OBJECTIVES.has(normalized) ? normalized : 'EXPERIMENT';
 }
 
 function normalizeVoiceProvider(provider) {
@@ -141,7 +151,8 @@ function sceneCopy(brief) {
 
 function canonicalRequestForDraft(draft, brief, video) {
   return Object.freeze({ requestId: draft.id, brandId: draft.brand_id || draft.brandId, title: brief.title,
-    objective: brief.objective, platform: brief.targetPlatform, targetDurationSeconds: brief.targetDurationSeconds,
+    objective: canonicalObjective(brief.objective), creativeObjective: brief.objective,
+    platform: brief.targetPlatform, targetDurationSeconds: brief.targetDurationSeconds,
     aspectRatio: '9:16', renderMode: 'QUALITY', provider: video.provider, model: video.model,
     modelFamily: video.modelFamily || null, profile: video.profile, hook: brief.hook,
     coreMessage: brief.coreMessage, creativeBrief: brief.creativeConcept, cta: brief.cta,
@@ -187,6 +198,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     };
   });
   const creativePlan = { schemaVersion: 2, planner: 'v2.10-operator-storyboard', operatorBriefAuthoritative: true,
+    creativeObjective: brief.objective,
     shots: brief.storyboard.map((shot) => ({ shotId: shot.shotId, assetId: shot.assetId, roles: shot.roles,
       durationSeconds: shot.durationSeconds, purpose: shot.purpose, subject: shot.subject, action: shot.action,
       environment: shot.environment, emotionalIntent: shot.emotionalIntent, framing: shot.framing,
@@ -203,7 +215,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     master: { profile: 'SOCIAL_VERTICAL', container: 'mp4', codec: 'h264', width: 1080, height: 1920,
       framesPerSecond: 30, aspectRatio: '9:16', audioCodec: 'aac' } };
   const raw = { schema_version: '2.6', render_mode: 'QUALITY', brand_id: draft.brand_id || draft.brandId,
-    production_key: `v210-${draft.id}`, title: brief.title, objective: brief.objective,
+    production_key: `v210-${draft.id}`, title: brief.title, objective: canonicalObjective(brief.objective),
     target_platform: brief.targetPlatform, target_duration_seconds: brief.targetDurationSeconds, aspect_ratio: '9:16',
     hook: brief.hook, core_message: brief.coreMessage,
     approved_spoken_copy: approvedSpokenCopy || [brief.hook, brief.coreMessage, brief.cta].filter(Boolean).join(' '),
@@ -341,6 +353,6 @@ class V210CanonicalProductionStarter {
   }
 }
 
-module.exports = { V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input,
-  createVoicePreviewGateway, normalizeVoiceProvider, requestedVideoSelection, resolveAuthoritativeVideo,
+module.exports = { CANONICAL_OBJECTIVES, V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input,
+  canonicalObjective, createVoicePreviewGateway, normalizeVoiceProvider, requestedVideoSelection, resolveAuthoritativeVideo,
   resolveAuthoritativeVoice };
