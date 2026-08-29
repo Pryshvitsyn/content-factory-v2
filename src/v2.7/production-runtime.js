@@ -118,7 +118,8 @@ function unavailableQualityLane() {
 
 function createProductionRuntime({ db, storage, config, env = process.env, logger = console,
   reviewService = null, mediaInspector = null, adapterFactory = null, visualQualityEvaluator = null,
-  semanticAdapterFactory = createSemanticVisualEvaluatorAdapter, semanticOnly = false } = {}) {
+  semanticAdapterFactory = createSemanticVisualEvaluatorAdapter, semanticOnly = false,
+  mediaExecutorDecorator = null, masterRenderer = null } = {}) {
   if (!db || !storage || !config) throw new Error('db, storage, and config are required');
   const artifactService = new ArtifactService({ storage });
   const reviews = reviewService || new ControlReviewService({ db });
@@ -132,15 +133,18 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     const gateway = providerGateway({ config, live: config.live, env,
       executionPolicy: semanticOnly ? { video: 'FORBIDDEN', speech: config.live ? 'LIVE' : 'PLAN_ONLY' } : null });
     mediaRepository = new PostgresMediaExecutionRepository({ db });
-    const mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
+    let mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
       artifactService, mediaInspector: inspector, assetRepository: new PostgresAssetRepository() });
+    if (mediaExecutorDecorator) mediaExecutor = mediaExecutorDecorator(mediaExecutor, {
+      repository: mediaRepository, artifactService, storage, mediaInspector: inspector,
+    });
     const semanticAdapter = config.semanticVisualQaEnforced === false
       ? new DisabledSemanticVisualEvaluatorAdapter({ enforcementEnabled: false,
         configurationStatus: 'LEGACY_NOT_ENFORCED' })
       : semanticAdapterFactory({ env });
     const evaluator = visualQualityEvaluator || new VisualQualityEvaluator({ semanticAdapter });
     masterOrchestrator = new MasterProductionOrchestrator({ providerGateway: gateway, artifactService,
-      renderer: new FfmpegMasterRenderer(), reviewService: reviews, mediaExecutor,
+      renderer: masterRenderer || new FfmpegMasterRenderer(), reviewService: reviews, mediaExecutor,
       masterProbeValidator: validateMasterProbe, sourceQualityEvaluator: evaluator, finalQualityEvaluator: evaluator });
     qualityLane = new QualityRendererLane({ masterOrchestrator, mediaExecutionRepository: mediaRepository,
       qualityEvaluator: evaluator });
@@ -160,7 +164,7 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     visualQualityEvaluator: masterOrchestrator?.sourceQualityEvaluator,
     semanticAttemptRepository: new PostgresSemanticEvaluationAttemptRepository({ db }), rendererRouter, logger });
   return Object.freeze({ service, rendererRouter, artifactService, reviewService: reviews,
-    mediaExecutionRepository: mediaRepository });
+    mediaExecutionRepository: mediaRepository, mediaExecutor: masterOrchestrator?.mediaExecutor });
 }
 
 module.exports = { EXECUTION_POLICIES, createProductionRuntime, forbiddenAdapter, planOnlyAdapter, providerGateway,
