@@ -10,6 +10,7 @@ const { ControlRepository } = require('./control-repository');
 const { ControlService } = require('./control-service');
 const { createControlServer } = require('./http-server');
 const { describeProviders } = require('./provider-status');
+const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
 
 function createDashboardRuntime(env = process.env) {
@@ -18,7 +19,7 @@ function createDashboardRuntime(env = process.env) {
   const storage = new FilesystemStorageAdapter({
     root: env.CONTENT_FACTORY_STORAGE_ROOT || path.resolve(process.cwd(), '.artifacts'),
   });
-  const repository = new ControlRepository({ db });
+  const repository = installSemanticRetryState(new ControlRepository({ db }));
   const reviewService = new ControlReviewService({ db });
   const providers = describeProviders(env);
   const providerCatalog = new ProviderCatalog({ env, repository: new PostgresProviderCatalogRepository({ db }) });
