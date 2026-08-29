@@ -50,8 +50,9 @@ class QualityRendererLane {
     const audioProfile = audio[0]?.generation_requirements || {};
     const semanticAdapter = this.qualityEvaluator?.semanticAdapter || null;
     const selectedTier = String(videoProfile.profile || input.profile?.profile || 'STANDARD').toUpperCase();
+    const masterVisualTransforms = input.captions?.enabled === true || input.postProduction?.endTitle?.enabled === true;
     const evaluatorPlan = semanticEvaluationPlan({ qualityTier: selectedTier, videoCount: videos.length,
-      masterVisualTransforms: input.captions?.enabled === true, semanticAdapter });
+      masterVisualTransforms, semanticAdapter });
     const qualityEvaluatorPolicy = !semanticAdapter || semanticAdapter.enforcementEnabled === false ? 'LEGACY_NOT_APPLICABLE'
       : semanticAdapter.configured !== true ? semanticAdapter.reasonCode || 'SEMANTIC_VISUAL_QA_NOT_CONFIGURED'
       : evaluatorPlan.finalPolicy;
@@ -94,6 +95,7 @@ class QualityRendererLane {
         ? evaluatorPlan.expectedExternalCalls * (1 + (semanticAdapter?.maxRetries || 0)) : 0),
       semanticFinalEvaluationPolicy: evaluatorPlan.finalPolicy,
       qualityEvaluatorPolicy,
+      masterVisualTransforms,
       expectedExternalExecutionClasses: [
         ...(pending.some((asset) => asset.kind === 'video') ? ['VIDEO_GENERATION'] : []),
         ...(pending.some((asset) => asset.kind === 'voice' || asset.kind === 'audio') ? ['SPEECH_GENERATION'] : []),
@@ -106,7 +108,13 @@ class QualityRendererLane {
     };
   }
 
-  async render(context) { return this.masterOrchestrator.build(context); }
+  async render(context) {
+    const transformed = context.input?.captions?.enabled === true || context.input?.postProduction?.endTitle?.enabled === true;
+    return this.masterOrchestrator.build({ ...context, qualityPolicy: {
+      ...(context.qualityPolicy || {}), postProduction: context.input?.postProduction || null,
+      masterVisualTransforms: context.qualityPolicy?.masterVisualTransforms === true || transformed,
+    } });
+  }
 }
 
 class RendererRouter {
