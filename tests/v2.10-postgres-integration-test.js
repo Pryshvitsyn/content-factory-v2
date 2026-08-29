@@ -103,4 +103,8 @@ async function main() {
     console.log('V2.10 PostgreSQL ownership, no-op preflight preservation, immutable evidence, stale preflight, single-winner start, retryable re-preflight, reconciliation stop, and success reuse passed.');
   } finally { await db.query('DROP SCHEMA IF EXISTS v2_10 CASCADE').catch(()=>{}); await db.end(); }
 }
-main().catch((error)=>{console.error(error);process.exitCode=1;});
+
+main().then(() => {
+  require('node:child_process').execFileSync(process.execPath,
+    [path.join(__dirname, 'v2.10-exact-retry-start-postgres-test.js')], { stdio: 'inherit', env: process.env });
+}).catch((error)=>{console.error(error);process.exitCode=1;});
