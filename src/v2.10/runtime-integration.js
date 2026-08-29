@@ -5,7 +5,7 @@ const { ArtifactService } = require('../artifacts/artifact-service');
 const { createOpenAIMediaProvider } = require('../providers/openai-media-provider');
 const { createElevenLabsTtsProvider } = require('../providers/elevenlabs-tts-provider');
 const { buildProductionInput, stableFingerprint } = require('../v2.5/production-input');
-const { resolveV25Configuration } = require('../v2.5/configuration');
+const { assertPaidCredentials, resolveV25Configuration } = require('../v2.5/configuration');
 const { PostgresMediaExecutionRepository } = require('../v2.5/durable-media-executor');
 const { FfprobeMediaInspector } = require('../v2.5/media-validator');
 const { createProductionRuntime } = require('../v2.7/production-runtime');
@@ -60,6 +60,11 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
   let base = null;
   const shotCapabilities = [];
   for (const shot of brief.storyboard) {
+    if (shot.referencePolicy === 'UPLOADED_REFERENCE'
+      && (!shot.referenceMedia?.artifactId || !shot.referenceMedia?.storageKey || !shot.referenceMedia?.contentHash)) {
+      throw new V210RuntimeError('REFERENCE_EVIDENCE_MISSING',
+        `Shot ${shot.shotId} requires immutable uploaded reference artifactId, storageKey and contentHash`);
+    }
     const advertised = scoped.listModels(requested.provider).find((item) => item.modelId === requested.model)?.capabilities || [];
     const capability = requiredCapability(shot, advertised);
     const resolved = scoped.resolveSelection({ provider: requested.provider, model: requested.model,
@@ -67,11 +72,35 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
       resolution: requested.resolution, aspectRatio: '9:16', allowExperimental: requested.allowExperimental });
     if (!base) base = resolved;
     if (base.provider !== resolved.provider || base.model !== resolved.model || base.profile !== resolved.profile) {
-      throw new V210RuntimeError('V210_PROVIDER_RESOLUTION_CONFLICT', 'All storyboard shots must resolve to one authoritative provider/model/profile selection');
+      throw new V210RuntimeError('V210_PROVIDER_RESOLUTION_CONFLICT',
+        'All storyboard shots must resolve to one authoritative provider/model/profile selection');
     }
     shotCapabilities.push(Object.freeze({ shotId: shot.shotId, capability: resolved.capability }));
   }
   return Object.freeze({ ...base, shotCapabilities: Object.freeze(shotCapabilities), requested });
+}
+
+async function resolveAuthoritativeVoice({ catalog, workspaceId, brief: input, repository = null } = {}) {
+  const brief = canonicalCreativeBrief(input);
+  const voice = brief.voice;
+  if (!voice.sourceType) return Object.freeze({ status: 'READY', sourceType: null, externalCalls: 0 });
+  if (!voice.approved) return Object.freeze({ status: 'BLOCKED', code: 'VOICE_NOT_APPROVED', sourceType: voice.sourceType });
+  if (voice.sourceType === 'UPLOADED_AUDIO') {
+    if (!repository || !voice.uploadedArtifactId) return Object.freeze({ status: 'BLOCKED', code: 'VOICE_UPLOAD_REQUIRED', sourceType: voice.sourceType });
+    const artifact = await repository.getUploadedVoice({ id: voice.uploadedArtifactId, workspaceId, brandId: input.brandId || null }).catch(() => null);
+    return Object.freeze({ status: artifact ? 'READY' : 'BLOCKED', code: artifact ? null : 'VOICE_UPLOAD_REQUIRED',
+      sourceType: voice.sourceType, provider: 'operator-upload', model: 'uploaded-audio', voiceId: 'uploaded-human', externalCalls: 0 });
+  }
+  if (!catalog || !voice.provider || !voice.model || !voice.voiceId) {
+    return Object.freeze({ status: 'BLOCKED', code: 'VOICE_SELECTION_INCOMPLETE', sourceType: voice.sourceType });
+  }
+  const scoped = await catalog.forWorkspace(workspaceId);
+  const provider = normalizeVoiceProvider(voice.provider);
+  const resolved = scoped.resolveSelection({ provider, model: voice.model, profile: 'STANDARD', capability: CAPABILITIES.SPEECH });
+  return Object.freeze({ status: 'READY', sourceType: voice.sourceType, provider: resolved.provider,
+    providerDisplayName: resolved.providerDisplayName, model: resolved.model, providerModelId: resolved.providerModelId,
+    configurationStatus: resolved.configurationStatus, availability: resolved.availability,
+    voiceId: voice.voiceId, language: voice.language, externalCalls: 1 });
 }
 
 function createVoicePreviewGateway({ env = process.env } = {}) {
@@ -140,9 +169,6 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     const fps = qualityProfile.framesPerSecond || 24;
     const numFrames = Math.max(2, Math.round(shot.durationSeconds * fps) + 1);
     const capability = capabilities.get(shot.shotId) || CAPABILITIES.TEXT_TO_VIDEO;
-    const references = shot.referencePolicy === 'PREVIOUS_SHOT_FRAME' && index > 0
-      ? { previous_asset_id: brief.storyboard[index - 1].assetId }
-      : shot.referencePolicy === 'UPLOADED_REFERENCE' ? { uploaded_reference: shot.referenceMedia || null } : null;
     return {
       scene_id: `v210-scene-${index + 1}`, duration_seconds: shot.durationSeconds,
       location: shot.environment, visual: `${shot.purpose}. ${shot.action}`, emotional_intent: shot.emotionalIntent,
@@ -156,8 +182,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
           prompt: buildShotPrompt(brief, shot), resolution: video.resolvedSettings?.resolution || qualityProfile.resolution,
           aspect_ratio: '9:16', num_frames: numFrames, frames_per_second: fps,
           go_fast: qualityProfile.goFast === true, optimize_prompt: qualityProfile.optimizePrompt,
-          interpolate_output: qualityProfile.interpolateOutput, sample_shift: qualityProfile.sampleShift,
-          ...(references ? { references } : {}) },
+          interpolate_output: qualityProfile.interpolateOutput, sample_shift: qualityProfile.sampleShift },
       }],
     };
   });
@@ -166,7 +191,8 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
       durationSeconds: shot.durationSeconds, purpose: shot.purpose, subject: shot.subject, action: shot.action,
       environment: shot.environment, emotionalIntent: shot.emotionalIntent, framing: shot.framing,
       camera: shot.camera, lensComposition: shot.lensComposition, lighting: shot.lighting,
-      continuity: shot.continuity, generationPrompt: buildShotPrompt(brief, shot), negativeGuidance: shot.negativeGuidance })),
+      continuity: shot.continuity, generationPrompt: buildShotPrompt(brief, shot), negativeGuidance: shot.negativeGuidance,
+      referencePolicy: shot.referencePolicy, referenceMedia: shot.referenceMedia || null })),
     continuity: brief.continuity };
   const mediaStack = { schemaVersion: '2.9.2', preset: 'CUSTOM', resolutionOrder: ['operator','brand','preset'],
     video, audio: { strategy: voiceEnabled ? 'EXTERNAL_VOICE' : 'NO_VOICE', generateNativeAudio: false,
@@ -179,7 +205,8 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
   const raw = { schema_version: '2.6', render_mode: 'QUALITY', brand_id: draft.brand_id || draft.brandId,
     production_key: `v210-${draft.id}`, title: brief.title, objective: brief.objective,
     target_platform: brief.targetPlatform, target_duration_seconds: brief.targetDurationSeconds, aspect_ratio: '9:16',
-    hook: brief.hook, core_message: brief.coreMessage, approved_spoken_copy: approvedSpokenCopy || [brief.hook, brief.coreMessage, brief.cta].filter(Boolean).join(' '),
+    hook: brief.hook, core_message: brief.coreMessage,
+    approved_spoken_copy: approvedSpokenCopy || [brief.hook, brief.coreMessage, brief.cta].filter(Boolean).join(' '),
     spoken_copy_policy: { contract_version: 'v2.8.1', source: 'v2.10-approved-storyboard', strict_approved_copy: true },
     creative_concept: brief.creativeConcept, cta: brief.cta, creative_plan: creativePlan,
     quality_video_profile: { ...qualityProfile, capabilities: video.capabilities, capabilityMetadata: video.capabilityMetadata,
@@ -200,10 +227,20 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     audio: { strategy: voiceEnabled ? 'EXTERNAL_VOICE' : 'NO_VOICE', dialogue_owner: voiceEnabled ? 'EXTERNAL_VOICE' : 'NONE',
       prevent_duplicate_narration: true, ambience_intent: 'Subtle natural ambience below speech.', music_intent: 'No generated music.', speech_priority: true },
     captions: { enabled: false, intent: 'Approved typography is added only in post-production.', end_title: null },
-    post_production: brief.postProduction,
     publication_policy: { requires_human_approval: true, auto_publish: false, destination: 'disabled' } };
   const base = buildProductionInput(raw);
-  const normalized = { ...base, productionNamespace: 'v2.7-operator', postProduction: brief.postProduction };
+  const refs = new Map(brief.storyboard.map((shot, index) => [shot.assetId, { shot, index }]));
+  const assetPlan = Object.freeze({ ...base.assetPlan, assets: Object.freeze(base.assetPlan.assets.map((asset) => {
+    if (asset.kind !== 'video') return asset;
+    const ref = refs.get(asset.asset_id);
+    if (!ref || ref.shot.referencePolicy === 'NONE') return asset;
+    const v210Reference = ref.shot.referencePolicy === 'PREVIOUS_SHOT_FRAME'
+      ? { policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: brief.storyboard[ref.index - 1]?.assetId || null }
+      : { policy: 'UPLOADED_REFERENCE', artifact: ref.shot.referenceMedia };
+    return Object.freeze({ ...asset, generation_requirements: Object.freeze({ ...asset.generation_requirements,
+      v210_reference: Object.freeze(v210Reference) }) });
+  })) });
+  const normalized = { ...base, assetPlan, productionNamespace: 'v2.7-operator', postProduction: brief.postProduction };
   delete normalized.fingerprint;
   const input = Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
   return Object.freeze({ raw: Object.freeze(raw), input, canonicalRequest: canonicalRequestForDraft(draft, brief, video) });
@@ -221,11 +258,14 @@ function runtimeEnvironment(env, input, live) {
 
 class V210CanonicalProductionStarter {
   constructor({ db, storage, repository, env = process.env, logger = console, scheduler = null,
-    runtimeFactory = createProductionRuntime, configResolver = resolveV25Configuration, mediaInspector = null } = {}) {
+    runtimeFactory = createProductionRuntime, configResolver = resolveV25Configuration, credentialCheck = assertPaidCredentials,
+    mediaInspector = null } = {}) {
     if (!db || !storage || !repository) throw new Error('db, storage, and V2.10 repository are required');
     this.db = db; this.storage = storage; this.repository = repository; this.env = env; this.logger = logger;
-    this.runtimeFactory = runtimeFactory; this.configResolver = configResolver; this.mediaInspector = mediaInspector || new FfprobeMediaInspector();
-    this.scheduler = scheduler || ((task) => setImmediate(() => Promise.resolve().then(task).catch((error) => logger.error?.('V2.10 background production failed', { code: error.code || 'V210_EXECUTION_FAILED', message: error.message }))));
+    this.runtimeFactory = runtimeFactory; this.configResolver = configResolver; this.credentialCheck = credentialCheck;
+    this.mediaInspector = mediaInspector || new FfprobeMediaInspector();
+    this.scheduler = scheduler || ((task) => setImmediate(() => Promise.resolve().then(task).catch((error) =>
+      logger.error?.('V2.10 background production failed', { code: error.code || 'V210_EXECUTION_FAILED', message: error.message }))));
   }
   runtime(input, live) {
     const env = runtimeEnvironment(this.env, input, live);
@@ -245,22 +285,24 @@ class V210CanonicalProductionStarter {
     if (brief.voice.sourceType !== 'UPLOADED_AUDIO') return null;
     const uploaded = await this.repository.getUploadedVoice({ id: brief.voice.uploadedArtifactId,
       workspaceId: draft.workspace_id || draft.workspaceId, brandId: draft.brand_id || draft.brandId });
-    if (!uploaded) throw new V210RuntimeError('VOICE_UPLOAD_REQUIRED', 'Approved uploaded narration artifact is unavailable', { productionId });
+    if (!uploaded) throw new V210RuntimeError('VOICE_UPLOAD_REQUIRED', 'Approved uploaded narration artifact is unavailable',
+      { boundaryState: 'CANONICAL_CREATED', productionId });
     const bytes = await this.storage.get({ key: uploaded.storage_key });
     const hash = crypto.createHash('sha256').update(bytes).digest('hex');
-    if (hash !== uploaded.content_hash) throw new V210RuntimeError('UPLOADED_AUDIO_HASH_MISMATCH', 'Uploaded narration no longer matches immutable evidence', { productionId });
+    if (hash !== uploaded.content_hash) throw new V210RuntimeError('UPLOADED_AUDIO_HASH_MISMATCH',
+      'Uploaded narration no longer matches immutable evidence', { boundaryState: 'CANONICAL_CREATED', productionId });
     const asset = canonical.input.assetPlan.assets.find((item) => item.kind === 'voice');
-    if (!asset) throw new V210RuntimeError('VOICE_UPLOAD_CANONICAL_ASSET_MISSING', 'Canonical production has no voice asset for uploaded narration', { productionId });
-    const identities = { fingerprint: canonicalFingerprint({ brandId: canonical.input.brandId, productionId, asset }) };
-    identities.artifactId = `brand:${canonical.input.brandId}:asset:${asset.asset_id}`;
-    identities.idempotencyKey = `${canonical.input.brandId}:${productionId}:media:${asset.asset_id}:${identities.fingerprint}`;
+    if (!asset) throw new V210RuntimeError('VOICE_UPLOAD_CANONICAL_ASSET_MISSING',
+      'Canonical production has no voice asset for uploaded narration', { boundaryState: 'CANONICAL_CREATED', productionId });
+    const fingerprint = canonicalFingerprint({ brandId: canonical.input.brandId, productionId, asset });
+    const artifactId = `brand:${canonical.input.brandId}:asset:${asset.asset_id}`;
+    const idempotencyKey = `${canonical.input.brandId}:${productionId}:media:${asset.asset_id}:${fingerprint}`;
     const artifactService = runtime.artifactService || new ArtifactService({ storage: this.storage });
-    const artifact = await artifactService.createVersion({ artifactId: identities.artifactId, type: 'binary', content: bytes,
-      idempotencyKey: identities.idempotencyKey, provider: 'operator-upload', model: 'uploaded-audio', validationStatus: 'validated_media' });
+    const artifact = await artifactService.createVersion({ artifactId, type: 'binary', content: bytes,
+      idempotencyKey, provider: 'operator-upload', model: 'uploaded-audio', validationStatus: 'validated_media' });
     const executions = runtime.mediaExecutionRepository || new PostgresMediaExecutionRepository({ db: this.db });
     const row = await executions.ensure({ workspaceId: canonical.input.workspaceId, brandId: canonical.input.brandId,
-      productionId, asset, fingerprint: identities.fingerprint, idempotencyKey: identities.idempotencyKey,
-      provider: 'operator-upload', model: 'uploaded-audio' });
+      productionId, asset, fingerprint, idempotencyKey, provider: 'operator-upload', model: 'uploaded-audio' });
     const probe = await this.mediaInspector.inspect({ bytes, contentType: uploaded.content_type, kind: 'voice',
       expectedDurationMs: Math.round(canonical.input.targetDurationSeconds * 1000) });
     await executions.adopt({ id: row.id, artifact, media: { assetId: asset.asset_id, kind: 'voice', bytes,
@@ -270,10 +312,13 @@ class V210CanonicalProductionStarter {
   }
   async start({ draft, preflight, actor }) {
     if (this.env.LIVE_PAID_GENERATION !== 'true') {
-      throw new V210RuntimeError('V210_EXECUTION_DISABLED', 'LIVE_PAID_GENERATION=true is required after reviewing the final V2.10 preflight');
+      throw new V210RuntimeError('V210_EXECUTION_DISABLED',
+        'LIVE_PAID_GENERATION=true is required after reviewing the final V2.10 preflight');
     }
     const canonical = buildCanonicalV210Input({ draft, preflight });
     const runtime = this.runtime(canonical.input, true);
+    try { this.credentialCheck({ config: runtime.config, input: canonical.input, env: runtime.env }); }
+    catch (error) { throw new V210RuntimeError(error.code || 'V210_CREDENTIALS_MISSING', error.message, { boundaryState: 'NOT_CROSSED' }); }
     let productionId = null;
     try {
       const rows = await runtime.service.createDraft({ input: canonical.input, config: runtime.config,
@@ -286,14 +331,16 @@ class V210CanonicalProductionStarter {
         canonicalInputFingerprint: canonical.input.fingerprint, publicationTriggered: false });
     } catch (error) {
       if (error instanceof V210RuntimeError) {
+        if (productionId && error.boundaryState === 'NOT_CROSSED') error.boundaryState = 'CANONICAL_CREATED';
         if (!error.productionId && productionId) error.productionId = productionId;
         throw error;
       }
       throw new V210RuntimeError(error.code || 'V210_CANONICAL_START_FAILED', error.message,
-        { boundaryState: 'NOT_CROSSED', details: error.details || null, productionId });
+        { boundaryState: productionId ? 'CANONICAL_CREATED' : 'NOT_CROSSED', details: error.details || null, productionId });
     }
   }
 }
 
 module.exports = { V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input,
-  createVoicePreviewGateway, normalizeVoiceProvider, requestedVideoSelection, resolveAuthoritativeVideo };
+  createVoicePreviewGateway, normalizeVoiceProvider, requestedVideoSelection, resolveAuthoritativeVideo,
+  resolveAuthoritativeVoice };
