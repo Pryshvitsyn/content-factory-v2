@@ -5,10 +5,11 @@ const { createProductionRuntime } = require('../v2.7/production-runtime');
 const { V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input } = require('./runtime-integration');
 const { V210PostProductionRenderer, V210ReferenceAwareMediaExecutor } = require('./reference-aware-media');
 
-// Bump this only when canonical execution-identity semantics change. Keeping the
-// version in the durable production key prevents an older canonical row (built
-// under different fingerprint semantics) from permanently blocking a safe
-// NOT_CROSSED retry for the same creative draft.
+// Bump only when durable canonical execution-identity semantics change. The
+// version is salted into the deterministic identity hash while preserving the
+// public production-key shape. This prevents an older canonical row produced
+// under different fingerprint semantics from permanently blocking a safe
+// NOT_CROSSED retry for the same draft.
 const V210_EXECUTION_IDENTITY_VERSION = 'r2';
 
 function integratedEnvironment(env, input, live) {
@@ -22,16 +23,20 @@ function integratedEnvironment(env, input, live) {
     LIVE_PRODUCTION_WORKER_ID: env.LIVE_PRODUCTION_WORKER_ID || `v2.10:${process.pid}` };
 }
 
-function revisionSafeProductionKey(draftId, canonicalInput) {
-  if (!draftId || !canonicalInput) throw new V210RuntimeError('V210_EXECUTION_IDENTITY_REQUIRED',
-    'Draft identity and canonical input are required for revision-safe production identity');
+function executionIdentitySource(canonicalInput, version = V210_EXECUTION_IDENTITY_VERSION) {
   const identitySource = { ...canonicalInput };
   delete identitySource.fingerprint;
   delete identitySource.productionKey;
   delete identitySource.liveTestKey;
-  const executionIdentityFingerprint = stableFingerprint(identitySource);
+  return Object.freeze({ executionIdentityVersion: version, canonicalInput: identitySource });
+}
+
+function revisionSafeProductionKey(draftId, canonicalInput) {
+  if (!draftId || !canonicalInput) throw new V210RuntimeError('V210_EXECUTION_IDENTITY_REQUIRED',
+    'Draft identity and canonical input are required for revision-safe production identity');
+  const executionIdentityFingerprint = stableFingerprint(executionIdentitySource(canonicalInput));
   return Object.freeze({
-    productionKey: `v210-${V210_EXECUTION_IDENTITY_VERSION}-${draftId}-${executionIdentityFingerprint.slice(0, 16)}`,
+    productionKey: `v210-${draftId}-${executionIdentityFingerprint.slice(0, 16)}`,
     executionIdentityFingerprint,
     executionIdentityVersion: V210_EXECUTION_IDENTITY_VERSION,
   });
@@ -101,5 +106,5 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
   }
 }
 
-module.exports = { V210_EXECUTION_IDENTITY_VERSION, V210IntegratedProductionStarter, integratedEnvironment,
-  revisionSafeCanonical, revisionSafeProductionKey };
+module.exports = { V210_EXECUTION_IDENTITY_VERSION, V210IntegratedProductionStarter, executionIdentitySource,
+  integratedEnvironment, revisionSafeCanonical, revisionSafeProductionKey };
