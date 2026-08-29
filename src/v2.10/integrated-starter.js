@@ -5,6 +5,12 @@ const { createProductionRuntime } = require('../v2.7/production-runtime');
 const { V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input } = require('./runtime-integration');
 const { V210PostProductionRenderer, V210ReferenceAwareMediaExecutor } = require('./reference-aware-media');
 
+// Bump this only when canonical execution-identity semantics change. Keeping the
+// version in the durable production key prevents an older canonical row (built
+// under different fingerprint semantics) from permanently blocking a safe
+// NOT_CROSSED retry for the same creative draft.
+const V210_EXECUTION_IDENTITY_VERSION = 'r2';
+
 function integratedEnvironment(env, input, live) {
   const audioProvider = input.mediaStack?.audio?.voice?.provider === 'operator-upload' ? 'operator-upload'
     : input.mediaStack?.audio?.voice?.provider === 'elevenlabs' ? 'elevenlabs'
@@ -25,8 +31,9 @@ function revisionSafeProductionKey(draftId, canonicalInput) {
   delete identitySource.liveTestKey;
   const executionIdentityFingerprint = stableFingerprint(identitySource);
   return Object.freeze({
-    productionKey: `v210-${draftId}-${executionIdentityFingerprint.slice(0, 16)}`,
+    productionKey: `v210-${V210_EXECUTION_IDENTITY_VERSION}-${draftId}-${executionIdentityFingerprint.slice(0, 16)}`,
     executionIdentityFingerprint,
+    executionIdentityVersion: V210_EXECUTION_IDENTITY_VERSION,
   });
 }
 
@@ -94,4 +101,5 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
   }
 }
 
-module.exports = { V210IntegratedProductionStarter, integratedEnvironment, revisionSafeCanonical, revisionSafeProductionKey };
+module.exports = { V210_EXECUTION_IDENTITY_VERSION, V210IntegratedProductionStarter, integratedEnvironment,
+  revisionSafeCanonical, revisionSafeProductionKey };
