@@ -37,9 +37,20 @@ async function main() {
     const draft=await newDraft(repository,'ownership');
     await assert.rejects(()=>db.query(`INSERT INTO v2_10.creative_drafts(workspace_id,brand_id,creative_schema_version,status,creative_brief,created_by)
       VALUES($1,$2,'2.10','DRAFT','{}','operator')`,[W1,B2]),/ownership mismatch/);
-    await ready(repository,draft,'abc');
-    const edited=(await db.query("UPDATE v2_10.creative_drafts SET creative_brief=$2 WHERE id=$1 RETURNING *",[draft.id,{title:'edited'}])).rows[0];
-    assert.equal(edited.preflight_fingerprint,null,'editing clears stale preflight fingerprint'); assert.equal(edited.final_preflight,null); assert.equal(edited.revision,2);
+    const readyDraft=await ready(repository,draft,'abc');
+    const noOp=await repository.updateDraft({ id:draft.id,workspaceId:W1,brandId:B1,
+      brief:readyDraft.creative_brief,validation:readyDraft.creative_validation,
+      providerSelection:readyDraft.provider_selection,voiceSelection:readyDraft.voice_selection,voiceApproval:readyDraft.voice_approval });
+    assert.equal(noOp.status,'PREFLIGHT_READY','no-op draft save preserves READY status');
+    assert.equal(noOp.preflight_fingerprint,'abc','no-op draft save preserves exact preflight fingerprint');
+    assert.equal(noOp.final_preflight.fingerprint,'abc','no-op draft save preserves final preflight evidence');
+    assert.equal(noOp.revision,1,'no-op draft save does not create a fake revision');
+    const edited=await repository.updateDraft({ id:draft.id,workspaceId:W1,brandId:B1,
+      brief:{title:'edited'},validation:{status:'PASS'},providerSelection:readyDraft.provider_selection,
+      voiceSelection:readyDraft.voice_selection,voiceApproval:readyDraft.voice_approval });
+    assert.equal(edited.status,'DRAFT','real creative edit returns draft to DRAFT');
+    assert.equal(edited.preflight_fingerprint,null,'editing clears stale preflight fingerprint');
+    assert.equal(edited.final_preflight,null); assert.equal(edited.revision,2);
 
     const previewValues=[W1,B1,'preview-fingerprint','mock','mock-tts','calm',{voice:'calm'},'text-hash','key','content-hash','audio/wav',4,1,{mocked:true}];
     await db.query(`INSERT INTO v2_10.voice_preview_artifacts(workspace_id,brand_id,preview_fingerprint,provider,model,voice_id,configuration,preview_text_hash,storage_key,content_hash,content_type,duration_seconds,external_call_count,provenance)
@@ -64,13 +75,17 @@ async function main() {
       error:Object.assign(new Error('local construction failed'),{code:'LOCAL_FAILED'}),boundaryState:'NOT_CROSSED',phase:'LOCAL_PRE_PROVIDER'});
     let state=await repository.getDraft({id:retryDraft.id,workspaceId:W1,brandId:B1});
     assert.equal(state.start_state,'FAILED_RETRYABLE');
-    const retry=await repository.claimStart({id:retryDraft.id,workspaceId:W1,brandId:B1,fingerprint:'retry-fp',actor:'operator'});
+    const repreflight=await ready(repository,state,'retry-fp-v2');
+    assert.equal(repreflight.status,'PREFLIGHT_READY','retryable local failure can be safely re-preflighted');
+    assert.equal(repreflight.start_state,'IDLE');
+    assert.equal(repreflight.preflight_fingerprint,'retry-fp-v2');
+    const retry=await repository.claimStart({id:retryDraft.id,workspaceId:W1,brandId:B1,fingerprint:'retry-fp-v2',actor:'operator'});
     assert.equal(retry.startAttempt,2,'explicit retry gets a new durable attempt');
     await repository.finishStartFailure({id:retryDraft.id,workspaceId:W1,brandId:B1,attempt:retry.startAttempt,
       error:Object.assign(new Error('boundary uncertain'),{code:'NETWORK_UNKNOWN'}),boundaryState:'MAY_HAVE_STARTED',phase:'PROVIDER_BOUNDARY'});
     state=await repository.getDraft({id:retryDraft.id,workspaceId:W1,brandId:B1});
     assert.equal(state.start_state,'NEEDS_RECONCILIATION');
-    await assert.rejects(()=>repository.claimStart({id:retryDraft.id,workspaceId:W1,brandId:B1,fingerprint:'retry-fp',actor:'operator'}),
+    await assert.rejects(()=>repository.claimStart({id:retryDraft.id,workspaceId:W1,brandId:B1,fingerprint:'retry-fp-v2',actor:'operator'}),
       e=>e.code==='START_NEEDS_RECONCILIATION');
     const retryAttempts=await repository.startAttempts({id:retryDraft.id,workspaceId:W1,brandId:B1});
     assert.deepEqual(retryAttempts.map(x=>x.status),['NEEDS_RECONCILIATION','FAILED_RETRYABLE']);
@@ -85,7 +100,7 @@ async function main() {
     await assert.rejects(()=>db.query("UPDATE v2_10.creative_drafts SET creative_brief='{}' WHERE id=$1",[successDraft.id]),/immutable/);
     await assert.rejects(()=>db.query('DELETE FROM v2_10.creative_drafts WHERE id=$1',[successDraft.id]),/cannot be deleted/);
 
-    console.log('V2.10 PostgreSQL ownership, immutable evidence, stale preflight, single-winner start, retryable failure, reconciliation stop, and success reuse passed.');
+    console.log('V2.10 PostgreSQL ownership, no-op preflight preservation, immutable evidence, stale preflight, single-winner start, retryable re-preflight, reconciliation stop, and success reuse passed.');
   } finally { await db.query('DROP SCHEMA IF EXISTS v2_10 CASCADE').catch(()=>{}); await db.end(); }
 }
 main().catch((error)=>{console.error(error);process.exitCode=1;});

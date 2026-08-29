@@ -19,7 +19,12 @@ class V210PostgresRepository {
   async updateDraft({ id, workspaceId, brandId, brief, validation, providerSelection, voiceSelection, voiceApproval }) {
     const result = await this.db.query(`UPDATE v2_10.creative_drafts SET creative_brief=$4,creative_validation=$5,
       provider_selection=coalesce($6::jsonb,provider_selection),voice_selection=coalesce($7::jsonb,voice_selection),
-      voice_approval=coalesce($8::jsonb,voice_approval),status=$9
+      voice_approval=coalesce($8::jsonb,voice_approval),
+      status=CASE WHEN creative_brief IS DISTINCT FROM $4
+        OR provider_selection IS DISTINCT FROM coalesce($6::jsonb,provider_selection)
+        OR voice_selection IS DISTINCT FROM coalesce($7::jsonb,voice_selection)
+        OR voice_approval IS DISTINCT FROM coalesce($8::jsonb,voice_approval)
+        THEN $9 ELSE status END
       WHERE id=$1 AND workspace_id=$2 AND brand_id=$3
         AND coalesce(start_state,'IDLE') NOT IN ('RUNNING','NEEDS_RECONCILIATION') AND status<>'STARTED' RETURNING *`,
     [id, workspaceId, brandId, brief, validation,
