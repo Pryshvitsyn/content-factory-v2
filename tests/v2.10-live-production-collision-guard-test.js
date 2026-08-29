@@ -17,7 +17,7 @@ class FakeDb {
     this.nextId = 1;
   }
 
-  productionMapKey(workspaceId, name) { return `${workspaceId}:${name}`; }
+  productionMapKey(workspaceId, name) { return `${workspaceId ?? '__NULL__'}:${name}`; }
   jobMapKey(productionId, key) { return `${productionId}:${key}`; }
 
   seedProduction(row) {
@@ -36,6 +36,10 @@ class FakeDb {
     }
     if (sql.includes('v2.4:get-production-for-run')) {
       const [workspaceId, name] = params;
+      // PostgreSQL `WHERE workspace_id = NULL` never matches. The operator's
+      // legacy v2_1.productions schema allows NULL, so emulate that exact
+      // behavior instead of JavaScript Map equality.
+      if (workspaceId == null) return { rows: [] };
       const row = this.productions.get(this.productionMapKey(workspaceId, name));
       return { rows: row ? [structuredClone(row)] : [] };
     }
@@ -83,6 +87,21 @@ async function main() {
     canonicalRawInput: { schema_version: '2.6' }, canonicalRequest: { requestId: DRAFT } });
   const config = Object.freeze({ provider: 'replicate', model: 'alibaba/wan-3' });
 
+  // Reproduce the operator's actual legacy-schema failure: START previously
+  // called createDraft() with no workspaceId. A nullable workspace column lets
+  // the INSERT happen, but the immediate `workspace_id = NULL` lookup cannot
+  // retrieve it, so LiveProductionService throws the exact observed conflict.
+  const unscopedBase = { ...base };
+  delete unscopedBase.workspaceId;
+  const unscopedIdentity = revisionSafeProductionKey(DRAFT, unscopedBase);
+  const unscopedInput = withProductionKey(unscopedBase, unscopedIdentity.productionKey);
+  await assert.rejects(() => live.ensureDraftRows(db, { input: unscopedInput, config, command }), (error) => {
+    assert.equal(error.code, 'LIVE_INPUT_CONFLICT');
+    assert.equal(error.message, 'Existing production does not match brand or structured input');
+    return true;
+  }, 'nullable legacy workspace schema must reproduce the exact operator START failure when canonical input is unscoped');
+  db.productions.delete(db.productionMapKey(null, `v2.7-operator:${unscopedIdentity.productionKey}`));
+
   const oldKey = oldR1ProductionKey(DRAFT, base);
   const oldInput = withProductionKey(base, oldKey);
   const oldName = `v2.7-operator:${oldKey}`;
@@ -94,7 +113,7 @@ async function main() {
     assert.equal(error.code, 'LIVE_INPUT_CONFLICT');
     assert.equal(error.message, 'Existing production does not match brand or structured input');
     return true;
-  }, 'certification must reproduce the exact real guard failure seen by the operator');
+  }, 'certification must reproduce the stale-canonical guard failure separately from workspace scoping');
 
   const currentIdentity = revisionSafeProductionKey(DRAFT, base);
   assert.equal(currentIdentity.executionIdentityVersion, V210_EXECUTION_IDENTITY_VERSION);
@@ -106,6 +125,7 @@ async function main() {
   const currentInput = withProductionKey(base, currentIdentity.productionKey);
   const created = await live.ensureDraftRows(db, { input: currentInput, config, command });
   assert.equal(created.created, true);
+  assert.equal(created.production.workspace_id, W, 'canonical row must be durably workspace scoped');
   assert.equal(created.production.metadata.live_input_fingerprint, currentInput.fingerprint);
   assert.equal(created.production.brand_id, B);
   assert.equal(created.job.payload.inputFingerprint, currentInput.fingerprint);
@@ -119,7 +139,7 @@ async function main() {
   assert.equal(reused.production.id, created.production.id);
   assert.equal(reused.job.id, created.job.id);
 
-  console.log('V2.10 real LiveProductionService collision reproduced; r2 deterministic identity escapes stale row and exact retry remains idempotent. Provider calls = 0.');
+  console.log('V2.10 real LiveProductionService guard reproduced both nullable-workspace and stale-row conflicts; workspace-scoped exact retry remains idempotent. Provider calls = 0.');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });
