@@ -10,6 +10,16 @@ const RETRYABLE_SEMANTIC_CODES = Object.freeze(new Set([
   REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_TIMEOUT,
   REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_RATE_LIMITED,
 ]));
+const SEMANTIC_INFRASTRUCTURE_CODES = Object.freeze(new Set([
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_HTTP_FAILED,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_NETWORK_FAILED,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_TIMEOUT,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_RATE_LIMITED,
+  REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_AUTH_FAILED,
+  REASON_CODES.SEMANTIC_VISUAL_PAID_GATE_REQUIRED,
+  REASON_CODES.SEMANTIC_VISUAL_QA_NOT_CONFIGURED,
+]));
 const AMBIGUOUS_MEDIA_STATUSES = Object.freeze(new Set(['MAY_HAVE_STARTED','NEEDS_RECONCILIATION']));
 
 function durableArtifactRecorded(row) {
@@ -41,12 +51,37 @@ function validSemanticPass(evidence) {
     && Array.isArray(checks) && checks.length > 0 && checks.every((check) => check.status === 'PASS');
 }
 
-function reusableSemanticPass({ attempt, sourceArtifact, previousEvidenceArtifact, evaluator } = {}) {
+function matchingSemanticAttempt({ attempt, sourceArtifact, previousEvidenceArtifact, evaluator } = {}) {
   const terminalAttempt = attempt?.status === 'FAILED' || attempt?.status === 'SUCCEEDED';
-  const reusable = terminalAttempt && validSemanticPass(attempt.result_evidence)
+  return Boolean(terminalAttempt
     && artifactIdentityMatches(attempt.source_artifact, sourceArtifact)
     && evidenceLineageMatches(attempt.previous_evidence, previousEvidenceArtifact)
-    && attempt.evaluator_provider === evaluator?.provider && attempt.evaluator_model === evaluator?.model;
+    && attempt.evaluator_provider === evaluator?.provider && attempt.evaluator_model === evaluator?.model);
+}
+
+function authoritativeSemanticFailure(evidence) {
+  if (evidence?.semantic?.status !== 'FAIL') return false;
+  const failures = Array.isArray(evidence.semantic.checks)
+    ? evidence.semantic.checks.filter((check) => check.status === 'FAIL') : [];
+  if (!failures.length) return true;
+  return failures.some((check) => !SEMANTIC_INFRASTRUCTURE_CODES.has(check.code));
+}
+
+function semanticContentFailure(attempt) {
+  const failures = attempt?.result_evidence?.semantic?.checks?.filter((check) => check.status === 'FAIL') || [];
+  const error = new Error('A newer authoritative semantic evaluation failed for the same immutable source; older PASS evidence cannot override it');
+  error.name = 'SemanticRetryError';
+  error.code = 'SEMANTIC_RETRY_CONTENT_FAILED';
+  error.status = 409;
+  error.details = { attempt: attempt?.attempt || null, attemptId: attempt?.id || null,
+    reasonCodes: failures.map((check) => check.code), evaluation: attempt?.result_evidence || null };
+  return error;
+}
+
+function reusableSemanticPass({ attempt, sourceArtifact, previousEvidenceArtifact, evaluator } = {}) {
+  const matching = matchingSemanticAttempt({ attempt, sourceArtifact, previousEvidenceArtifact, evaluator });
+  if (matching && authoritativeSemanticFailure(attempt.result_evidence)) throw semanticContentFailure(attempt);
+  const reusable = matching && validSemanticPass(attempt.result_evidence);
   return Object.freeze({ reusable, attemptId: reusable ? attempt.id : null,
     attempt: reusable ? attempt.attempt : null, evaluation: reusable ? attempt.result_evidence : null });
 }
@@ -92,6 +127,7 @@ class SemanticRetryError extends Error {
     this.name = 'SemanticRetryError';
     this.code = code;
     this.details = details;
+    if (['SEMANTIC_RETRY_CONTENT_FAILED','SEMANTIC_RETRY_ALREADY_RUNNING'].includes(code)) this.status = 409;
   }
 }
 
@@ -389,8 +425,9 @@ class SemanticEvaluationRetryService {
   }
 }
 
-module.exports = { AMBIGUOUS_MEDIA_STATUSES, RETRYABLE_SEMANTIC_CODES, SemanticRetryError,
-  artifactIdentityMatches, durableArtifactRecorded, durableSemanticEvaluation, evidenceLineageMatches,
-  materializeEvaluationFrames, partialMediaPlan, retryPlan, reusableSemanticPass, reusableSemanticPassFromHistory,
+module.exports = { AMBIGUOUS_MEDIA_STATUSES, RETRYABLE_SEMANTIC_CODES, SEMANTIC_INFRASTRUCTURE_CODES,
+  SemanticRetryError, artifactIdentityMatches, authoritativeSemanticFailure, durableArtifactRecorded,
+  durableSemanticEvaluation, evidenceLineageMatches, matchingSemanticAttempt, materializeEvaluationFrames,
+  partialMediaPlan, retryPlan, reusableSemanticPass, reusableSemanticPassFromHistory,
   semanticFrameDescriptor, sourceArtifactFromExecution, validSemanticPass,
   PostgresSemanticEvaluationAttemptRepository, SemanticEvaluationRetryService, loadVerifiedFrames };

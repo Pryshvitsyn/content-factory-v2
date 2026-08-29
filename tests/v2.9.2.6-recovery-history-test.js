@@ -32,23 +32,35 @@ function attempt(overrides = {}) {
   };
 }
 
+function semanticFailure(code) {
+  return { status: 'FAIL', semantic: { status: 'FAIL', checks: [{ code, status: 'FAIL' }] } };
+}
+
 async function main() {
-  const newestFailure = attempt({ id: 'attempt-4', attempt: 4, status: 'FAILED',
-    result_evidence: { status: 'FAIL', semantic: { status: 'FAIL', checks: [{ status: 'FAIL' }] } } });
   const olderPass = attempt();
+  const newestInfrastructureFailure = attempt({ id: 'attempt-4', attempt: 4, status: 'FAILED',
+    result_evidence: semanticFailure('SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE') });
   const reusable = reusableSemanticPassFromHistory({
-    attempts: [newestFailure, olderPass], sourceArtifact, previousEvidenceArtifact: evidenceArtifact,
+    attempts: [newestInfrastructureFailure, olderPass], sourceArtifact, previousEvidenceArtifact: evidenceArtifact,
     evaluator: { provider: 'openai', model: 'semantic-test' },
   });
-  assert.equal(reusable.reusable, true);
+  assert.equal(reusable.reusable, true, 'newer evaluator infrastructure failure must not erase earlier matching PASS');
   assert.equal(reusable.attempt, 3);
   assert.equal(reusable.attemptId, 'attempt-3');
   assert.strictEqual(reusable.evaluation, semanticPass);
 
+  const newestContentFailure = attempt({ id: 'attempt-4-content', attempt: 4, status: 'FAILED',
+    result_evidence: semanticFailure('SUBJECT_MISMATCH') });
+  assert.throws(() => reusableSemanticPassFromHistory({
+    attempts: [newestContentFailure, olderPass], sourceArtifact, previousEvidenceArtifact: evidenceArtifact,
+    evaluator: { provider: 'openai', model: 'semantic-test' },
+  }), (error) => error.code === 'SEMANTIC_RETRY_CONTENT_FAILED'
+    && error.status === 409 && error.details.reasonCodes.includes('SUBJECT_MISMATCH'));
+
   const stalePass = attempt({ id: 'stale', attempt: 2,
     source_artifact: { ...sourceArtifact, contentHash: 'different-video' } });
   const none = reusableSemanticPassFromHistory({
-    attempts: [newestFailure, stalePass], sourceArtifact, previousEvidenceArtifact: evidenceArtifact,
+    attempts: [newestInfrastructureFailure, stalePass], sourceArtifact, previousEvidenceArtifact: evidenceArtifact,
     evaluator: { provider: 'openai', model: 'semantic-test' },
   });
   assert.equal(none.reusable, false, 'a PASS for a different immutable source must not be reused');
@@ -59,7 +71,7 @@ async function main() {
   await assert.rejects(() => fencedRepository.start({
     workspaceId: 'w', brandId: 'b', productionId: 'p', jobId: 'j', assetId: 'operator-video-1',
     sourceArtifact, previousEvidence: { evidenceArtifact }, evaluator: { provider: 'openai', model: 'semantic-test' },
-  }), (error) => error.code === 'SEMANTIC_RETRY_ALREADY_RUNNING');
+  }), (error) => error.code === 'SEMANTIC_RETRY_ALREADY_RUNNING' && error.status === 409);
 
   let historySql = '';
   const dashboardRepository = installSemanticRetryState({
@@ -71,10 +83,11 @@ async function main() {
   });
   const dashboardAttempt = await dashboardRepository.latestSemanticRetryAttempt('p', 'b', 'operator-video-1');
   assert.equal(dashboardAttempt.attempt, 3);
-  assert.match(historySql, /result_evidence->>'status'='PASS'/);
+  assert.match(historySql, /SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE/);
+  assert.match(historySql, /NOT IN/);
   assert.match(historySql, /ORDER BY CASE/);
 
-  console.log('V2.9.2.6 historical semantic PASS reuse and running-attempt fence passed.');
+  console.log('V2.9.2.7 semantic evidence ordering and running-attempt fence passed.');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });
