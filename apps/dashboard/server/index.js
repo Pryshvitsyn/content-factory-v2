@@ -6,6 +6,7 @@ const { Pool } = require('pg');
 const { FilesystemStorageAdapter } = require('../../../src/storage/storage-adapter');
 const { ControlReviewService } = require('../../../src/v2.3/control-review-service');
 const { ProductionCommandError, ProductionCommandService } = require('../../../src/v2.7/production-command-service');
+const { QualityRecoveryService } = require('../../../src/v2.10.1/quality-recovery-service');
 const { ControlRepository } = require('./control-repository');
 const { ControlService } = require('./control-service');
 const { createControlServer } = require('./http-server');
@@ -37,8 +38,9 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
       `Semantic recovery attempt ${active.attempt} is already running for this production`);
     return semanticPreflight(args);
   };
+  const qualityRecoveryService = new QualityRecoveryService({ repository, storage, commandService, env, logger: console });
   const service = new ControlService({
-    repository, reviewService, commandService, storage, providers, providerCatalog, actor, env,
+    repository, reviewService, commandService, qualityRecoveryService, storage, providers, providerCatalog, actor, env,
   });
   const audioInspector = new FfprobeMediaInspector();
   const v210Repository = new V210PostgresRepository({ db, storage });
@@ -49,7 +51,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const creativeService = new CreativeProductionService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
-  return { db, storage, providerCatalog, service, creativeService, v210Repository,
+  return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, v210Repository,
     creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
     server: createControlServer({ service, creativeService }) };
 }
