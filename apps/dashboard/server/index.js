@@ -14,7 +14,8 @@ const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
 const { CreativeProductionService } = require('../../../src/v2.10/creative-production-service');
 const { V210PostgresRepository } = require('../../../src/v2.10/postgres-repository');
-const { V210CanonicalProductionStarter, createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
+const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
+const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 
 function createDashboardRuntime(env = process.env, { previewProvider, creativeStarter } = {}) {
@@ -42,7 +43,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const audioInspector = new FfprobeMediaInspector();
   const v210Repository = new V210PostgresRepository({ db, storage });
   const resolvedPreviewProvider = previewProvider || createVoicePreviewGateway({ env });
-  const resolvedStarter = creativeStarter || new V210CanonicalProductionStarter({
+  const resolvedStarter = creativeStarter || new V210IntegratedProductionStarter({
     db, storage, repository: v210Repository, env, logger: console, mediaInspector: audioInspector,
   });
   const creativeService = new CreativeProductionService({ repository: v210Repository,
