@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App, { NewProduction, ProductionDetail, ReviewQueue, Providers } from '../src/App';
+import { CreativeProduction } from '../src/CreativeProduction';
 
 const brandId = '11111111-1111-4111-8111-111111111111';
 const review = {
@@ -17,6 +18,35 @@ const review = {
 };
 
 function response(payload, ok = true) { return Promise.resolve({ ok, status: ok ? 200 : 400, json: async () => payload }); }
+
+describe('V2.10 Creative Production UI', () => {
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn(() => response([{ id: brandId, name: 'Attune' }]))); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows every operator section, two-shot minimum, controls, and fail-closed Start', async () => {
+    render(<CreativeProduction />);
+    for (const title of ['CREATIVE BRIEF','STORYBOARD · 2 SHOTS','CONTINUITY','VOICE STUDIO','POST PRODUCTION','CREATIVE VALIDATION','PRODUCTION PREFLIGHT']) {
+      expect(screen.getByRole('heading', { name: title })).toBeTruthy();
+    }
+    expect(screen.getAllByText(/SHOT [12] · 5 sec/)).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'REMOVE SHOT' }).every((button) => button.disabled)).toBe(true);
+    expect(screen.queryByRole('button', { name: 'START PRODUCTION' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'ADD SHOT' }));
+    expect(screen.getByRole('heading', { name: 'STORYBOARD · 3 SHOTS' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'DUPLICATE SHOT' })).toHaveLength(3);
+  });
+
+  it('makes no provider call while typing, selecting a voice, and editing storyboard', async () => {
+    render(<CreativeProduction />); await screen.findByRole('option', { name: 'Attune' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText('TITLE'), { target: { value: 'Notice the Moment' } });
+    fireEvent.change(screen.getByLabelText('Voice source type'), { target: { value: 'AI_PRESET' } });
+    fireEvent.change(screen.getAllByLabelText('SUBJECT')[0], { target: { value: 'A concrete couple on a sofa' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'MOVE SHOT DOWN' })[0]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'GENERATE VOICE PREVIEW' }).disabled).toBe(true);
+  });
+});
 
 describe('V2.3 dashboard', () => {
   beforeEach(() => { window.location.hash = ''; vi.stubGlobal('fetch', vi.fn()); });

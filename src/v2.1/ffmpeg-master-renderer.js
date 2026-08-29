@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { renderEndTitlePng } = require('../v2.10/post-production-text');
 
 const DEFAULT_PROFILE = Object.freeze({
   width: 1080,
@@ -38,7 +39,7 @@ function extensionFor(contentType, kind) {
   return extensions[contentType] || ({ image: '.img', video: '.video', voice: '.audio', audio: '.audio' }[kind] || '.bin');
 }
 
-function buildFfmpegArgs({ assembly, inputPaths, outputPath, profile = {} } = {}) {
+function buildFfmpegArgs({ assembly, inputPaths, outputPath, profile = {}, postProduction = assembly?.postProduction, endTitlePath = null } = {}) {
   requireValue('assembly', assembly);
   requireValue('outputPath', outputPath);
   if (!Array.isArray(inputPaths) || inputPaths.length !== assembly.clips.length) {
@@ -55,6 +56,11 @@ function buildFfmpegArgs({ assembly, inputPaths, outputPath, profile = {} } = {}
     if (clip.kind === 'image') args.push('-loop', '1', '-t', seconds(clip.durationMs));
     args.push('-i', inputPaths[index]);
   });
+  const endTitle = postProduction?.endTitle;
+  if (endTitle?.enabled) {
+    if (!endTitlePath) throw new Error('Rendered end-title image is required');
+    args.push('-loop','1','-t',seconds(assembly.durationMs),'-i',endTitlePath);
+  }
 
   const filters = [];
   const visualLabels = [];
@@ -86,9 +92,18 @@ function buildFfmpegArgs({ assembly, inputPaths, outputPath, profile = {} } = {}
   });
 
   if (visualLabels.length === 0) throw new Error('At least one visual clip is required');
+  const visualOutput = endTitle?.enabled ? 'vbase' : 'vout';
   filters.push(visualLabels.length === 1
-    ? `[${visualLabels[0]}]null[vout]`
-    : `${visualLabels.map((label) => `[${label}]`).join('')}concat=n=${visualLabels.length}:v=1:a=0[vout]`);
+    ? `[${visualLabels[0]}]null[${visualOutput}]`
+    : `${visualLabels.map((label) => `[${label}]`).join('')}concat=n=${visualLabels.length}:v=1:a=0[${visualOutput}]`);
+  if (endTitle?.enabled) {
+    const start = Number(endTitle.startTime); const duration = Number(endTitle.duration);
+    if (!String(endTitle.text || '').trim() || !Number.isFinite(start) || start < 0 || !Number.isFinite(duration) || duration <= 0
+      || start + duration > assembly.durationMs / 1000 + 0.001) throw new Error('Valid post-production end title text and timing are required');
+    const titleInput = assembly.clips.length;
+    filters.push(`[${titleInput}:v]scale=${settings.width}:${settings.height},format=rgba[titlecard]`);
+    filters.push(`[vbase][titlecard]overlay=0:0:enable='between(t,${start},${start + duration})'[vout]`);
+  }
 
   if (audioLabels.length > 0) {
     filters.push(
@@ -146,6 +161,7 @@ function normalizeProbe(payload) {
     hasAudio: Boolean(audio),
     audioCodec: audio?.codec_name || null,
     audioSampleRate: Number(audio?.sample_rate || 0),
+    audioChannels: Number(audio?.channels || 0),
   });
 }
 
@@ -176,7 +192,13 @@ class FfmpegMasterRenderer {
         }
       }
 
-      const args = buildFfmpegArgs({ assembly, inputPaths, outputPath, profile });
+      let endTitlePath = null;
+      if (assembly.postProduction?.endTitle?.enabled) {
+        const settings = { ...DEFAULT_PROFILE, ...profile }; endTitlePath = path.join(temporaryDirectory,'end-title.png');
+        await fs.writeFile(endTitlePath,renderEndTitlePng({ width:settings.width,height:settings.height,
+          text:assembly.postProduction.endTitle.text,brandName:assembly.postProduction.brandName }),{flag:'wx'});
+      }
+      const args = buildFfmpegArgs({ assembly, inputPaths, outputPath, profile, endTitlePath });
       await this.run(this.ffmpegPath, args);
       const probeResult = await this.run(this.ffprobePath, [
         '-v', 'error', '-show_streams', '-show_format', '-of', 'json', outputPath,

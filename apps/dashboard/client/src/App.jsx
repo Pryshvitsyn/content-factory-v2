@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api, artifactUrl, decideReview } from './api';
+import { CreativeProduction } from './CreativeProduction';
 
-const NAV = ['Overview', 'New Production', 'Productions', 'Review Queue', 'Brands', 'Providers / Renderers'];
+const NAV = ['Overview', 'Creative Production', 'New Production', 'Productions', 'Review Queue', 'Brands', 'Providers / Renderers'];
 const TERMINAL = new Set(['APPROVED','REJECTED','FAILED','VALIDATION_FAILED','COMPLETED','CANCELLED']);
 
 function commandId() { return globalThis.crypto?.randomUUID?.() || '11111111-1111-4111-8111-111111111111'; }
@@ -350,6 +351,6 @@ function formatDate(value) { return value ? new Intl.DateTimeFormat(undefined, {
 export default function App() {
   const initial = decodeURIComponent(window.location.hash.slice(1)) || 'Overview'; const [page, setPage] = useState(NAV.includes(initial) ? initial : 'Overview'); const [selectedProduction, setSelectedProduction] = useState(null);
   function navigate(next, production = null) { window.location.hash = encodeURIComponent(next); setSelectedProduction(production); setPage(next); }
-  const pages = useMemo(() => ({ Overview: <Overview navigate={navigate} />, 'New Production': <NewProduction onCreated={(production) => navigate('Productions', production)} />, Productions: <Productions initialProduction={selectedProduction} />, 'Review Queue': <ReviewQueue />, Brands: <Brands />, 'Providers / Renderers': <Providers /> }), [page, selectedProduction]);
+  const pages = useMemo(() => ({ Overview: <Overview navigate={navigate} />, 'Creative Production': <CreativeProduction />, 'New Production': <NewProduction onCreated={(production) => navigate('Productions', production)} />, Productions: <Productions initialProduction={selectedProduction} />, 'Review Queue': <ReviewQueue />, Brands: <Brands />, 'Providers / Renderers': <Providers /> }), [page, selectedProduction]);
   return <div className="shell"><aside><div className="brand-mark"><span>CF</span><div><strong>Content Factory</strong><small>V2.7 OPERATOR</small></div></div><nav>{NAV.map((item) => <button aria-label={item === 'Providers / Renderers' ? 'Providers' : item} className={page === item ? 'active' : ''} onClick={() => navigate(item)} key={item}>{item}</button>)}</nav><div className="local-only"><span className="pulse" />LOCAL OPERATOR</div></aside>{pages[page]}</div>;
 }

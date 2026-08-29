@@ -36,6 +36,7 @@ const V292_MIGRATIONS = [
   'migrations/20260828_v2_9_2_2_semantic_recovery_resume.sql',
   'migrations/20260828_v2_9_2_3_legacy_plan_only_recovery.sql',
 ];
+const V210_MIGRATIONS = ['migrations/20260829_v2_10_creative_production.sql'];
 
 function discoverDatabaseUrl(env = process.env) {
   const discovered = discoverLocalDatabase(env);
@@ -124,6 +125,7 @@ async function prepareDatabase(db) {
     for (const relative of V26_MIGRATIONS) await applyMigration(db, relative);
     for (const relative of V27_MIGRATIONS) await applyMigration(db, relative);
     for (const relative of V292_MIGRATIONS) await applyMigration(db, relative);
+    for (const relative of V210_MIGRATIONS) await applyMigration(db, relative);
     return { report: await inspectSchemaCompatibility(db), brands, alreadyCompatible: true };
   }
   await ensureV21(db);
@@ -136,6 +138,7 @@ async function prepareDatabase(db) {
   for (const relative of V26_MIGRATIONS) await applyMigration(db, relative);
   for (const relative of V27_MIGRATIONS) await applyMigration(db, relative);
   for (const relative of V292_MIGRATIONS) await applyMigration(db, relative);
+  for (const relative of V210_MIGRATIONS) await applyMigration(db, relative);
   const report = await inspectSchemaCompatibility(db);
   assertSchemaCompatible(report);
   return { report, brands, alreadyCompatible: false };
@@ -178,6 +181,7 @@ module.exports = {
   V26_MIGRATIONS,
   V27_MIGRATIONS,
   V292_MIGRATIONS,
+  V210_MIGRATIONS,
   applyMigration,
   assertCompatibilityFoundation,
   discoverDatabaseUrl,

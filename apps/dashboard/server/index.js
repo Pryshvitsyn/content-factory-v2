@@ -12,8 +12,11 @@ const { createControlServer } = require('./http-server');
 const { describeProviders } = require('./provider-status');
 const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
+const { CreativeProductionService } = require('../../../src/v2.10/creative-production-service');
+const { V210PostgresRepository } = require('../../../src/v2.10/postgres-repository');
+const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 
-function createDashboardRuntime(env = process.env) {
+function createDashboardRuntime(env = process.env, { previewProvider = null, creativeStarter = null } = {}) {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   const db = new Pool({ connectionString: env.DATABASE_URL, max: 10 });
   const storage = new FilesystemStorageAdapter({
@@ -35,7 +38,9 @@ function createDashboardRuntime(env = process.env) {
   const service = new ControlService({
     repository, reviewService, commandService, storage, providers, providerCatalog, actor, env,
   });
-  return { db, server: createControlServer({ service }) };
+  const creativeService = new CreativeProductionService({ repository: new V210PostgresRepository({ db, storage }),
+    brandRepository: repository, actor, storage, audioInspector: new FfprobeMediaInspector(), previewProvider, starter: creativeStarter });
+  return { db, server: createControlServer({ service, creativeService }) };
 }
 
 if (require.main === module) {

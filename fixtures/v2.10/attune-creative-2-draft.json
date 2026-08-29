@@ -1,0 +1,89 @@
+{
+  "draftVersion": 1,
+  "creativeSchemaVersion": "2.10",
+  "status": "CREATIVE_INCOMPLETE",
+  "brand": "Attune",
+  "title": "Attune Creative #2 — Notice the Moment",
+  "objective": "Show how noticing a subtle emotional shift can replace a damaging assumption with calm attention.",
+  "targetPlatform": "Instagram Reels",
+  "targetDurationSeconds": 15,
+  "hook": "A tiny ambiguous emotional change that could easily be misunderstood.",
+  "coreMessage": "Pause and notice the moment before making an assumption about a partner.",
+  "cta": "Don't guess. Tune in.",
+  "audienceIntent": "Help couples respond to ambiguous emotional moments with attentive curiosity.",
+  "creativeConcept": "A restrained three-beat apartment story moves from uncertainty through a pause to connection.",
+  "visualStyle": "Vertical cinematic realism with observational camera work and natural micro-expressions.",
+  "storyboard": [
+    {
+      "shotId": "attune-2-shot-1", "assetId": "attune-2-video-1", "durationSeconds": 5,
+      "roles": ["HOOK", "TENSION"],
+      "purpose": "Show the tiny ambiguous moment where someone could easily make the wrong assumption.",
+      "subject": "A couple in their early 30s sitting together on a sofa; concrete appearance details await operator input.",
+      "action": "The woman becomes quieter, turns slightly away and looks into the room; her partner notices and pauses before speaking.",
+      "environment": "One warm lived-in apartment living room in the evening with a sofa and practical lamps; concrete layout awaits operator input.",
+      "emotionalIntent": "Subtle ambiguity and attentive concern without theatrical sadness, argument, or melodrama.",
+      "framing": "Vertical cinematic medium-wide at eye level.",
+      "camera": "Restrained observational camera with very subtle natural movement.",
+      "lensComposition": "Natural perspective holding both partners and their spatial relationship in one coherent frame.",
+      "lighting": "Warm practical apartment lamps, believable skin tones, and soft evening contrast.",
+      "continuity": "Establish the same couple, sofa positions, wardrobe, room layout, lamps, and props for all shots.",
+      "negativeGuidance": ["cars", "travel", "streets", "restaurants", "cafes", "outdoor scenes", "phones as focal subject", "app UI", "split-screen", "collages", "generated text", "watermarks", "generated logos", "extra or duplicated people", "malformed hands", "dramatic crying", "anger", "argument", "melodrama", "stock-ad smiling", "fashion-commercial behavior", "sexualized behavior", "hugging", "location changes"],
+      "referencePolicy": "NONE"
+    },
+    {
+      "shotId": "attune-2-shot-2", "assetId": "attune-2-video-2", "durationSeconds": 5,
+      "roles": ["INSIGHT", "ACTION"],
+      "purpose": "Visually demonstrate calm attention instead of assumption.",
+      "subject": "The same couple from shot one, with the exact approved appearance and wardrobe still awaiting operator input.",
+      "action": "Instead of reacting, the partner pauses, softens his posture, turns toward her, gently reaches for her hand, and she looks back.",
+      "environment": "The same sofa and apartment living room established in shot one, with unchanged practical lamps and props.",
+      "emotionalIntent": "Calm attention conveyed through natural micro-expressions, without an exaggerated smile.",
+      "framing": "Closer vertical cinematic medium shot.",
+      "camera": "Restrained observational camera with stable, nearly imperceptible movement.",
+      "lensComposition": "Natural close medium composition emphasizing the pause, softened posture, and hand gesture.",
+      "lighting": "The same warm practical lamp direction, believable skin tones, and soft evening contrast.",
+      "continuity": "Preserve exact identity, appearance, wardrobe, sofa positions, apartment layout, lamps, and props from shot one.",
+      "negativeGuidance": ["exaggerated smile", "argument", "melodrama", "generated text", "location changes", "extra people"],
+      "voiceoverSegment": "Before you assume, notice the moment.", "referencePolicy": "PREVIOUS_SHOT_FRAME"
+    },
+    {
+      "shotId": "attune-2-shot-3", "assetId": "attune-2-video-3", "durationSeconds": 5,
+      "roles": ["RESOLUTION", "CTA"],
+      "purpose": "Resolve the emotional beat and land the product idea without an artificial stock-ad ending.",
+      "subject": "The same exact couple with approved appearance and wardrobe still awaiting operator input.",
+      "action": "They remain sitting close; tension softens and she gives a small authentic relaxed expression without a dramatic embrace.",
+      "environment": "The same unchanged apartment living room, sofa, practical lamps, and established props.",
+      "emotionalIntent": "Quiet relief and authentic connection, restrained and believable.",
+      "framing": "Vertical cinematic medium shot resolving into a slightly closer composition.",
+      "camera": "A restrained slow push-in with no dramatic flourish.",
+      "lensComposition": "Balanced two-person composition that keeps the couple grounded in the established room.",
+      "lighting": "The same warm practical apartment lighting and soft evening contrast.",
+      "continuity": "Preserve exact identity, appearance, wardrobe, apartment layout, lamps, props, and positions from prior shots.",
+      "negativeGuidance": ["dramatic embrace", "stock-ad smiling", "generated text", "generated logos", "location changes", "extra people"],
+      "voiceoverSegment": "Don't guess. Tune in.", "referencePolicy": "PREVIOUS_SHOT_FRAME"
+    }
+  ],
+  "continuity": {
+    "identity": "One consistent couple in their early 30s; exact identity and appearance details require operator input.",
+    "appearance": "CREATIVE INPUT REQUIRED: concrete hair, face, skin tone, and distinguishing appearance for both people.",
+    "wardrobe": "Natural everyday clothing; concrete garment types and colors for both people require operator input.",
+    "environment": "One warm lived-in apartment living room with a sofa and practical lamps; concrete layout and decor require operator input.",
+    "props": "Sofa and practical lamps; concrete stable prop placement requires operator input.",
+    "lightingColorLanguage": "Warm practical apartment lamps, natural believable skin tones, and soft evening contrast.",
+    "cameraLanguage": "Vertical cinematic, eye-level, restrained observational movement, natural perspective, and one restrained final push-in.",
+    "referencePolicy": "PREVIOUS_SHOT_FRAME"
+  },
+  "voice": { "state": "VOICE_SELECTION_REQUIRED", "sourceType": null, "approved": false },
+  "postProduction": {
+    "endTitle": { "enabled": true, "text": "Don't guess. Tune in.", "startTime": 13, "duration": 2 },
+    "brandName": "Attune", "cta": "Don't guess. Tune in."
+  },
+  "publicationPolicy": { "humanApprovalRequired": true, "autoPublish": false },
+  "incompleteReasons": [
+    "Concrete character appearance is not operator-approved.",
+    "Concrete wardrobe colors and garments are not operator-approved.",
+    "Concrete apartment layout, decor, and stable prop placement are not operator-approved.",
+    "Voice selection and exact preview or uploaded narration approval are missing.",
+    "PREVIOUS_SHOT_FRAME capability has not been confirmed for a selected provider/model."
+  ]
+}
