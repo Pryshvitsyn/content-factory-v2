@@ -37,6 +37,14 @@ function createControlServer({ service, creativeService = null, logger = console
     try {
       const url = new URL(request.url, 'http://localhost');
       const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      if (creativeService && request.method === 'GET' && url.pathname === '/api/v2.10/creative-drafts') {
+        return json(response, 200, await creativeService.listDrafts({ brandId: url.searchParams.get('brandId'),
+          limit: url.searchParams.get('limit') || 20 }));
+      }
+      if (creativeService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
+        && segments[2] === 'creative-drafts' && segments.length === 4) {
+        return json(response, 200, await creativeService.getDraft({ id: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
       if (creativeService && request.method === 'POST' && url.pathname === '/api/v2.10/creative-drafts') {
         return json(response, 201, await creativeService.createDraft(await readJson(request)));
       }
