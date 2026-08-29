@@ -208,11 +208,20 @@ async function main() {
     assert.deepEqual(final.externalCalls, { video: 3, speech: 1, semantic: 4, otherEvaluator: 1, maximum: 9 });
     assert.equal(final.externalCalls.maximum,
       final.externalCalls.video + final.externalCalls.speech + final.externalCalls.semantic + final.externalCalls.otherEvaluator,
-      'maximum external calls must be fully explainable by visible accounting categories');
+      'maximum external calls must be fully explainable by accounting categories');
     assert.equal(final.master.profile, 'SOCIAL_VERTICAL');
     assert.equal(final.master.resolution, '1080x1920');
     assert.equal(final.master.fps, 30);
-    assert.equal(final.costStatus, 'VERIFIED');
+    assert.equal(final.videoCostStatus, 'VERIFIED', 'Wan 3 video price record is verified');
+    assert.equal(final.costStatus, 'UNKNOWN', 'total cost cannot be VERIFIED while voice/evaluator pricing is unknown');
+    assert.equal(final.knownCost, null);
+    assert.equal(final.knownCostSubtotal, 1.5, 'known subtotal is the verified 15-second Wan 3 720p video cost');
+    assert.equal(final.pricing.estimatedTotalUsd, null);
+    assert.equal(final.pricing.components.find((item) => item.component === 'VIDEO').status, 'VERIFIED');
+    assert.equal(final.pricing.components.find((item) => item.component === 'VOICE').status, 'UNKNOWN');
+    assert.equal(final.pricing.components.find((item) => item.component === 'SEMANTIC_CRITIC').count, 5,
+      'pricing must account for four semantic calls plus one continuity evaluator call');
+    assert.equal(final.pricing.components.find((item) => item.component === 'SEMANTIC_CRITIC').status, 'UNKNOWN');
     assert.equal(final.humanApprovalRequired, true);
     assert.equal(final.autoPublish, false);
 
@@ -253,7 +262,7 @@ async function main() {
       'exact flow must reuse approval evidence without generating another voice preview');
     assert.equal(starter.providerRuns, 0);
 
-    console.log('V2.10 exact Attune retry -> no-op save -> authoritative preflight -> revision-safe START passed; real provider calls = 0.');
+    console.log('V2.10 exact Attune retry -> no-op save -> authoritative preflight -> revision-safe START with honest total-cost accounting passed; real provider calls = 0.');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_10 CASCADE').catch(() => {});
     await db.end();

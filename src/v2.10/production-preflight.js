@@ -4,6 +4,7 @@ const { canonicalCreativeBrief, fingerprint } = require('./creative-contract');
 const { validateCreativeCompleteness } = require('./creative-completeness');
 const { validateContinuity } = require('./continuity-contract');
 const { validateConsent, validateVoiceTiming } = require('./voice-studio');
+const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
 
 function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voiceRuntime = {}, quality = {}, master = {},
   canonicalPlan = null, canonicalInputFingerprint = null, timingToleranceSeconds = 0 } = {}) {
@@ -48,6 +49,25 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
   const masterResolved = { profile: master.profile || plan.masterAssemblyMode || 'SOCIAL_VERTICAL',
     resolution: master.resolution || '1080x1920', fps: Number(master.fps || 30), durationSeconds: brief.targetDurationSeconds,
     audioStrategy: master.audioStrategy || brief.voice.sourceType || 'NO_VOICE' };
+  const semanticResolved = quality.semanticCriticResolved || { provider: plan.semanticEvaluatorProvider || null,
+    model: plan.semanticEvaluatorModel || null };
+  const pricing = estimateMediaStack({
+    video: authoritative.provider && authoritative.model ? {
+      provider: authoritative.provider, model: authoritative.model,
+      resolution: authoritative.resolvedSettings?.resolution || authoritativeVideo.resolution || null,
+      durationSeconds: brief.storyboard.reduce((sum, shot) => sum + Number(shot.durationSeconds || 0), 0), count: 1,
+    } : null,
+    voice: calls.speech > 0 ? {
+      provider: brief.voice.provider || voiceRuntime.provider || null,
+      model: brief.voice.model || voiceRuntime.model || null,
+      characterCount: approvedSpokenCopy.length, count: calls.speech,
+    } : null,
+    semantic: (calls.semantic + calls.otherEvaluator) > 0 ? {
+      provider: semanticResolved.provider || null, model: semanticResolved.model || null,
+      count: calls.semantic + calls.otherEvaluator,
+    } : null,
+    master: { profile: masterResolved.profile },
+  });
   const result = {
     schemaVersion: '2.10', status: blockers.length ? 'BLOCKED' : 'READY', blockers,
     creative: { storyboardShots: brief.storyboard.length, completeness: creative.status,
@@ -60,11 +80,17 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
       previewApproved: brief.voice.approved, approvedSpokenCopy, expectedTtsCalls: calls.speech,
       timing: voiceTiming, runtime: voiceRuntime },
     quality: { semanticCritic: quality.semanticCritic || plan.semanticEvaluatorModel || 'NONE',
-      semanticCriticResolved: quality.semanticCriticResolved || { provider: plan.semanticEvaluatorProvider || null,
-        model: plan.semanticEvaluatorModel || null }, expectedSemanticCalls: calls.semantic },
+      semanticCriticResolved: semanticResolved, expectedSemanticCalls: calls.semantic,
+      expectedContinuityEvaluatorCalls: calls.otherEvaluator },
     master: masterResolved, externalCalls: calls,
-    knownCost: authoritativeVideo.knownCost ?? null,
-    costStatus: authoritativeVideo.costStatus || (authoritativeVideo.knownCost == null ? 'UNKNOWN' : 'KNOWN'),
+    pricing,
+    knownCost: pricing.estimatedTotalUsd,
+    knownCostSubtotal: pricing.knownSubtotalUsd,
+    costStatus: pricing.status,
+    videoCostStatus: authoritative.costStatus,
+    costNote: pricing.status === 'UNKNOWN'
+      ? 'Total cost is not fully encoded. Known subtotal excludes UNKNOWN voice/evaluator components.'
+      : 'Total estimated cost is fully encoded by the pricing registry.',
     canonicalInputFingerprint: canonicalInputFingerprint || null,
     canonicalReadiness: plan.readiness || null,
     humanApprovalRequired: true, autoPublish: false,
