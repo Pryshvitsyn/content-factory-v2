@@ -81,18 +81,24 @@ async function main() {
 
   const ready = brief();
   ready.voice.approvedConfigurationFingerprint = require('../src/v2.10/voice-studio').voiceConfigurationFingerprint(ready.voice);
-  const input = { brief: ready, video: { provider: 'mock-video', model: 'mock-v1', modelFamily: 'mock', profile: 'quality', capability: 'TEXT_TO_VIDEO', resolution: '1080x1920', capabilities: ['TEXT_TO_VIDEO'] },
-    quality: { semanticCritic: 'mock-semantic', semanticCalls: 2, otherEvaluatorCalls: 0 }, master: { profile: 'reels', resolution: '1080x1920', fps: 30, audioStrategy: 'uploaded-human' } };
+  const authoritativeVideo = { provider: 'mock-video', providerDisplayName: 'Mock Video', providerType: 'DIRECT',
+    vendor: 'mock', model: 'mock-v1', providerModelId: 'mock-v1', modelFamily: 'mock', adapterFamily: 'mock-video',
+    profile: 'QUALITY', capability: 'TEXT_TO_VIDEO', resolution: '1080x1920', capabilities: ['TEXT_TO_VIDEO'],
+    configurationStatus: 'CONFIGURED', availability: 'READY', costStatus: 'UNKNOWN', resolvedSettings: { resolution: '1080p' } };
+  const input = { brief: ready, authoritativeVideo, voiceRuntime: { status:'READY',sourceType:'UPLOADED_AUDIO',externalCalls:0 },
+    quality: { semanticCritic: 'mock-semantic', semanticCalls: 2, otherEvaluatorCalls: 0 },
+    master: { profile: 'reels', resolution: '1080x1920', fps: 30, audioStrategy: 'uploaded-human' } };
   const preflight = buildProductionPreflight(input);
   assert.equal(preflight.status, 'READY'); assert.deepEqual(preflight.externalCalls, { video: 2, speech: 0, semantic: 2, otherEvaluator: 0, maximum: 4 });
-  assert.equal(assertStartAllowed({ preflight, currentInput: input, confirmed: true }), true);
+  assert.equal(assertStartAllowed({ preflight, currentPreflight: preflight, confirmed: true }), true);
   const executionPlan = buildExecutionPlan({ draft: { id: 'draft-1', revision: 1, workspaceId: 'w', brandId: 'b', creativeBrief: ready }, preflight });
   assert.equal(executionPlan.video.shots.length, 2); assert.equal(executionPlan.voice.generationRequired, false);
   assert.match(executionPlan.video.shots[0].prompt, /Appearance: Partner one has short dark curls/);
   let starts = 0; const starter = new V210ProductionStarter({ executor: { async start({ plan }) { starts += 1; return { productionId: `mock-${plan.draftId}` }; } } });
   assert.equal((await starter.start({ draft: { id: 'draft-1', revision: 1, creativeBrief: ready }, preflight })).productionId, 'mock-draft-1'); assert.equal(starts, 1);
   const edited = JSON.parse(JSON.stringify(input)); edited.brief.storyboard[0].action += ' now';
-  assert.throws(() => assertStartAllowed({ preflight, currentInput: edited, confirmed: true }), { code: 'STALE_PREFLIGHT' });
+  const editedPreflight = buildProductionPreflight(edited);
+  assert.throws(() => assertStartAllowed({ preflight, currentPreflight: editedPreflight, confirmed: true }), { code: 'STALE_PREFLIGHT' });
   const prompt = buildShotPrompt(ready, ready.storyboard[0]);
   assert.doesNotMatch(prompt, /Notice the moment today/); assert.match(prompt, /Do not render typography/);
   const ffmpeg = buildFfmpegArgs({ assembly: { durationMs: 10000, clips: [{ kind: 'video', durationMs: 10000, sourceOffsetMs: 0 }] },
