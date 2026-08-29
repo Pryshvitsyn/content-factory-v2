@@ -5,21 +5,23 @@ const { validateCreativeCompleteness } = require('./creative-completeness');
 const { validateContinuity } = require('./continuity-contract');
 const { validateConsent, validateVoiceTiming } = require('./voice-studio');
 
-function buildProductionPreflight({ brief: input, video = {}, quality = {}, master = {}, timingToleranceSeconds = 0 } = {}) {
+function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voiceRuntime = {}, quality = {}, master = {},
+  canonicalPlan = null, canonicalInputFingerprint = null, timingToleranceSeconds = 0 } = {}) {
   const brief = canonicalCreativeBrief(input);
   const creative = validateCreativeCompleteness(brief);
-  const continuity = validateContinuity(brief, video);
+  const continuity = validateContinuity(brief, authoritativeVideo);
   const voiceEnabled = brief.storyboard.some((shot) => shot.voiceoverSegment || shot.dialogue) || Boolean(brief.voice.sourceType);
   const approvedSpokenCopy = brief.storyboard.flatMap((shot) => [shot.dialogue, shot.voiceoverSegment]).filter(Boolean).join(' ').trim();
   const voiceTiming = voiceEnabled ? validateVoiceTiming({ voice: brief.voice, targetDurationSeconds: brief.targetDurationSeconds,
     availableDurationSeconds: master.availableVoiceDurationSeconds ?? brief.targetDurationSeconds, toleranceSeconds: timingToleranceSeconds })
     : { status: 'READY', checks: [], durationSeconds: 0 };
   const consent = validateConsent(brief.voice);
-  const calls = {
-    video: brief.storyboard.length,
-    speech: voiceEnabled && brief.voice.sourceType !== 'UPLOADED_AUDIO' ? 1 : 0,
-    semantic: Number(quality.semanticCalls || 0), otherEvaluator: Number(quality.otherEvaluatorCalls || 0),
-  };
+  const plan = canonicalPlan || {};
+  const videoCalls = Number(plan.expectedVideoGenerations ?? brief.storyboard.length);
+  const speechCalls = Number(plan.expectedAudioGenerations ?? (voiceEnabled && brief.voice.sourceType !== 'UPLOADED_AUDIO' ? 1 : 0));
+  const semanticCalls = Number(plan.expectedSemanticEvaluationCalls ?? plan.expectedQualityEvaluatorCalls ?? quality.semanticCalls ?? 0);
+  const otherEvaluatorCalls = Number(plan.expectedContinuityEvaluationCalls ?? quality.otherEvaluatorCalls ?? 0);
+  const calls = { video: videoCalls, speech: speechCalls, semantic: semanticCalls, otherEvaluator: otherEvaluatorCalls };
   calls.maximum = calls.video + calls.speech + calls.semantic + calls.otherEvaluator;
   const blockers = [];
   if (creative.status === 'FAIL') blockers.push('CREATIVE_COMPLETENESS_FAILED');
@@ -27,33 +29,58 @@ function buildProductionPreflight({ brief: input, video = {}, quality = {}, mast
   if (voiceTiming.status === 'BLOCKED') blockers.push('VOICE_NOT_READY');
   if (voiceEnabled && !approvedSpokenCopy) blockers.push('VOICE_SPOKEN_COPY_MISSING');
   if (consent.status === 'FAIL') blockers.push('VOICE_CONSENT_REQUIRED');
-  if (!video.provider || !video.model || !video.profile) blockers.push('VIDEO_SELECTION_INCOMPLETE');
-  const fingerprintInput = { brief, video, quality, master, timingToleranceSeconds };
+  if (!authoritativeVideo.provider || !authoritativeVideo.model || !authoritativeVideo.profile
+    || authoritativeVideo.configurationStatus !== 'CONFIGURED') blockers.push('VIDEO_SELECTION_INCOMPLETE');
+  if (voiceRuntime.status === 'BLOCKED') blockers.push(voiceRuntime.code || 'VOICE_RUNTIME_NOT_READY');
+  if (plan.readiness === 'BLOCKED') blockers.push('CANONICAL_RUNTIME_BLOCKED');
+  const authoritative = {
+    provider: authoritativeVideo.provider || null, providerDisplayName: authoritativeVideo.providerDisplayName || null,
+    providerType: authoritativeVideo.providerType || null, vendor: authoritativeVideo.vendor || null,
+    modelFamily: authoritativeVideo.modelFamily || null, model: authoritativeVideo.model || null,
+    providerModelId: authoritativeVideo.providerModelId || authoritativeVideo.model || null,
+    modelVersion: authoritativeVideo.modelVersion || null, adapterFamily: authoritativeVideo.adapterFamily || null,
+    profile: authoritativeVideo.profile || null, capability: authoritativeVideo.capability || null,
+    capabilities: [...(authoritativeVideo.capabilities || [])], shotCapabilities: [...(authoritativeVideo.shotCapabilities || [])],
+    resolvedSettings: { ...(authoritativeVideo.resolvedSettings || {}) }, configurationStatus: authoritativeVideo.configurationStatus || null,
+    availability: authoritativeVideo.availability || null, costStatus: authoritativeVideo.costStatus || 'UNKNOWN',
+    experimental: authoritativeVideo.experimental === true,
+  };
+  const masterResolved = { profile: master.profile || plan.masterAssemblyMode || 'SOCIAL_VERTICAL',
+    resolution: master.resolution || '1080x1920', fps: Number(master.fps || 30), durationSeconds: brief.targetDurationSeconds,
+    audioStrategy: master.audioStrategy || brief.voice.sourceType || 'NO_VOICE' };
   const result = {
     schemaVersion: '2.10', status: blockers.length ? 'BLOCKED' : 'READY', blockers,
     creative: { storyboardShots: brief.storyboard.length, completeness: creative.status,
-      storyArc: creative.checks.find((check) => check.name === 'STORY_ARC')?.status, continuity: continuity.status },
-    video: { provider: video.provider || null, modelFamily: video.modelFamily || null, model: video.model || null,
-      profile: video.profile || null, capability: video.capability || null, resolution: video.resolution || null,
-      numberOfGenerations: calls.video },
+      storyArc: creative.checks.find((check) => check.name === 'STORY_ARC')?.status, continuity: continuity.status,
+      checks: creative.checks },
+    video: { ...authoritative, numberOfGenerations: calls.video },
+    authoritativeVideo: authoritative,
     voice: { sourceType: brief.voice.sourceType, provider: brief.voice.provider, model: brief.voice.model,
       voiceId: brief.voice.voiceId, uploadedArtifactId: brief.voice.uploadedArtifactId,
-      previewApproved: brief.voice.approved, approvedSpokenCopy, expectedTtsCalls: calls.speech, timing: voiceTiming },
-    quality: { semanticCritic: quality.semanticCritic || 'NONE', expectedSemanticCalls: calls.semantic },
-    master: { profile: master.profile || null, resolution: master.resolution || null, fps: master.fps || null,
-      durationSeconds: brief.targetDurationSeconds, audioStrategy: master.audioStrategy || null },
-    externalCalls: calls, knownCost: video.knownCost ?? null, costStatus: video.knownCost == null ? 'UNKNOWN' : 'KNOWN',
+      previewApproved: brief.voice.approved, approvedSpokenCopy, expectedTtsCalls: calls.speech,
+      timing: voiceTiming, runtime: voiceRuntime },
+    quality: { semanticCritic: quality.semanticCritic || plan.semanticEvaluatorModel || 'NONE',
+      semanticCriticResolved: quality.semanticCriticResolved || { provider: plan.semanticEvaluatorProvider || null,
+        model: plan.semanticEvaluatorModel || null }, expectedSemanticCalls: calls.semantic },
+    master: masterResolved, externalCalls: calls,
+    knownCost: authoritativeVideo.knownCost ?? null,
+    costStatus: authoritativeVideo.costStatus || (authoritativeVideo.knownCost == null ? 'UNKNOWN' : 'KNOWN'),
+    canonicalInputFingerprint: canonicalInputFingerprint || null,
+    canonicalReadiness: plan.readiness || null,
     humanApprovalRequired: true, autoPublish: false,
   };
-  result.fingerprint = fingerprint(fingerprintInput);
+  result.fingerprint = fingerprint({ brief, authoritativeVideo: authoritative, voiceRuntime, quality: result.quality,
+    master: masterResolved, timingToleranceSeconds, canonicalInputFingerprint: result.canonicalInputFingerprint,
+    canonicalReadiness: result.canonicalReadiness });
   return Object.freeze(result);
 }
 
-function assertStartAllowed({ preflight, currentInput, confirmed }) {
+function assertStartAllowed({ preflight, currentPreflight, confirmed }) {
   if (!confirmed) throw Object.assign(new Error('Explicit START PRODUCTION confirmation is required'), { code: 'EXPLICIT_CONFIRMATION_REQUIRED' });
   if (!preflight || preflight.status !== 'READY') throw Object.assign(new Error('A READY final production preflight is required'), { code: 'PREFLIGHT_BLOCKED' });
-  const current = buildProductionPreflight(currentInput);
-  if (current.fingerprint !== preflight.fingerprint) throw Object.assign(new Error('Production input changed after preflight'), { code: 'STALE_PREFLIGHT' });
+  if (!currentPreflight || currentPreflight.status !== 'READY' || currentPreflight.fingerprint !== preflight.fingerprint) {
+    throw Object.assign(new Error('Authoritative production input changed after preflight'), { code: 'STALE_PREFLIGHT' });
+  }
   return true;
 }
 
