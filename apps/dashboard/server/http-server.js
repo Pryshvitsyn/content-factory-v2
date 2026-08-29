@@ -18,12 +18,12 @@ function safeErrorDetails(error) {
   return { validation, providerExecutions: Number(error.details?.providerExecutions || 0) };
 }
 
-async function readJson(request) {
+async function readJson(request, limit = BODY_LIMIT) {
   let size = 0;
   const chunks = [];
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > BODY_LIMIT) throw new ControlError(413, 'BODY_TOO_LARGE', 'Request body is too large');
+    if (size > limit) throw new ControlError(413, 'BODY_TOO_LARGE', 'Request body is too large');
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
@@ -31,12 +31,28 @@ async function readJson(request) {
   catch { throw new ControlError(400, 'INVALID_JSON', 'Request body must be valid JSON'); }
 }
 
-function createControlServer({ service, logger = console } = {}) {
+function createControlServer({ service, creativeService = null, logger = console } = {}) {
   if (!service) throw new Error('service is required');
   return http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
       const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      if (creativeService && request.method === 'POST' && url.pathname === '/api/v2.10/creative-drafts') {
+        return json(response, 201, await creativeService.createDraft(await readJson(request)));
+      }
+      if (creativeService && request.method === 'PATCH' && segments[0] === 'api' && segments[1] === 'v2.10'
+        && segments[2] === 'creative-drafts' && segments.length === 4) {
+        return json(response, 200, await creativeService.updateDraft({ id: segments[3], ...await readJson(request) }));
+      }
+      if (creativeService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'v2.10'
+        && segments[2] === 'creative-drafts' && segments.length === 5) {
+        const args = { id: segments[3], ...await readJson(request, segments[4] === 'voice-upload' ? 70 * 1024 * 1024 : BODY_LIMIT) };
+        if (segments[4] === 'preflight') return json(response, 200, await creativeService.preflight(args));
+        if (segments[4] === 'voice-preview') return json(response, 200, await creativeService.generateVoicePreview(args));
+        if (segments[4] === 'voice-approve') return json(response, 200, await creativeService.approveVoice(args));
+        if (segments[4] === 'voice-upload') return json(response, 201, await creativeService.uploadVoice(args));
+        if (segments[4] === 'start') return json(response, 202, await creativeService.start(args));
+      }
       if (request.method === 'GET' && url.pathname === '/api/health') return json(response, 200, await service.health());
       if (request.method === 'GET' && url.pathname === '/api/overview') return json(response, 200, await service.overview());
       if (request.method === 'GET' && url.pathname === '/api/brands') return json(response, 200, await service.listBrands());

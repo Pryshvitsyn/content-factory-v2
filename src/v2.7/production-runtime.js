@@ -30,6 +30,22 @@ function planOnlyAdapter(provider, capability, model) {
   });
 }
 
+function uploadedAudioCacheAdapter(model = 'uploaded-audio') {
+  const fail = () => {
+    const error = new Error('Uploaded human narration must already exist as immutable cached media; generation is forbidden');
+    error.code = 'UPLOADED_AUDIO_CACHE_MISSING';
+    throw error;
+  };
+  return Object.freeze({
+    provider: 'operator-upload',
+    supports: ({ capability, model: requestedModel }) => capability === 'speech-generation'
+      && (!requestedModel || requestedModel === model),
+    modelFor: ({ capability } = {}) => capability === 'speech-generation' ? model : null,
+    generate: fail,
+    recover: fail,
+  });
+}
+
 function forbiddenAdapter(provider, capability, model, code) {
   return Object.freeze({
     provider,
@@ -71,7 +87,9 @@ function providerGateway({ config, live, executionPolicy = null, env = process.e
       : planOnlyAdapter(videoProvider, 'video-generation', config.model);
   let voiceAdapter = null;
   if (voiceProvider && voiceProvider !== 'none') {
-    if (policy.speech === 'LIVE') {
+    if (voiceProvider === 'operator-upload') {
+      voiceAdapter = uploadedAudioCacheAdapter(config.audioModel || 'uploaded-audio');
+    } else if (policy.speech === 'LIVE') {
       if (voiceProvider === 'elevenlabs') {
         voiceAdapter = elevenLabsTtsProviderFactory({ apiKey: env.ELEVENLABS_API_KEY, model: config.audioModel });
       } else if (voiceProvider === 'openai-media') {
@@ -100,7 +118,8 @@ function unavailableQualityLane() {
 
 function createProductionRuntime({ db, storage, config, env = process.env, logger = console,
   reviewService = null, mediaInspector = null, adapterFactory = null, visualQualityEvaluator = null,
-  semanticAdapterFactory = createSemanticVisualEvaluatorAdapter, semanticOnly = false } = {}) {
+  semanticAdapterFactory = createSemanticVisualEvaluatorAdapter, semanticOnly = false,
+  mediaExecutorDecorator = null, masterRenderer = null } = {}) {
   if (!db || !storage || !config) throw new Error('db, storage, and config are required');
   const artifactService = new ArtifactService({ storage });
   const reviews = reviewService || new ControlReviewService({ db });
@@ -114,15 +133,18 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     const gateway = providerGateway({ config, live: config.live, env,
       executionPolicy: semanticOnly ? { video: 'FORBIDDEN', speech: config.live ? 'LIVE' : 'PLAN_ONLY' } : null });
     mediaRepository = new PostgresMediaExecutionRepository({ db });
-    const mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
+    let mediaExecutor = new DurableMediaExecutor({ repository: mediaRepository, providerGateway: gateway,
       artifactService, mediaInspector: inspector, assetRepository: new PostgresAssetRepository() });
+    if (mediaExecutorDecorator) mediaExecutor = mediaExecutorDecorator(mediaExecutor, {
+      repository: mediaRepository, artifactService, storage, mediaInspector: inspector,
+    });
     const semanticAdapter = config.semanticVisualQaEnforced === false
       ? new DisabledSemanticVisualEvaluatorAdapter({ enforcementEnabled: false,
         configurationStatus: 'LEGACY_NOT_ENFORCED' })
       : semanticAdapterFactory({ env });
     const evaluator = visualQualityEvaluator || new VisualQualityEvaluator({ semanticAdapter });
     masterOrchestrator = new MasterProductionOrchestrator({ providerGateway: gateway, artifactService,
-      renderer: new FfmpegMasterRenderer(), reviewService: reviews, mediaExecutor,
+      renderer: masterRenderer || new FfmpegMasterRenderer(), reviewService: reviews, mediaExecutor,
       masterProbeValidator: validateMasterProbe, sourceQualityEvaluator: evaluator, finalQualityEvaluator: evaluator });
     qualityLane = new QualityRendererLane({ masterOrchestrator, mediaExecutionRepository: mediaRepository,
       qualityEvaluator: evaluator });
@@ -142,7 +164,8 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     visualQualityEvaluator: masterOrchestrator?.sourceQualityEvaluator,
     semanticAttemptRepository: new PostgresSemanticEvaluationAttemptRepository({ db }), rendererRouter, logger });
   return Object.freeze({ service, rendererRouter, artifactService, reviewService: reviews,
-    mediaExecutionRepository: mediaRepository });
+    mediaExecutionRepository: mediaRepository, mediaExecutor: masterOrchestrator?.mediaExecutor });
 }
 
-module.exports = { EXECUTION_POLICIES, createProductionRuntime, forbiddenAdapter, planOnlyAdapter, providerGateway };
+module.exports = { EXECUTION_POLICIES, createProductionRuntime, forbiddenAdapter, planOnlyAdapter, providerGateway,
+  uploadedAudioCacheAdapter };

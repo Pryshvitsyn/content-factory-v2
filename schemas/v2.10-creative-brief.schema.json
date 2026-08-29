@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://content-factory.local/schemas/v2.10-creative-brief.schema.json",
+  "title": "Content Factory V2.10 Creative Brief",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["creativeSchemaVersion", "title", "objective", "targetPlatform", "targetDurationSeconds", "hook", "coreMessage", "cta", "audienceIntent", "creativeConcept", "visualStyle", "storyboard", "continuity", "voice", "postProduction", "publicationPolicy"],
+  "properties": {
+    "creativeSchemaVersion": { "const": "2.10" },
+    "title": { "$ref": "#/$defs/concreteText" },
+    "objective": { "$ref": "#/$defs/concreteText" },
+    "targetPlatform": { "$ref": "#/$defs/concreteText" },
+    "targetDurationSeconds": { "type": "number", "exclusiveMinimum": 0 },
+    "hook": { "$ref": "#/$defs/concreteText" },
+    "coreMessage": { "$ref": "#/$defs/concreteText" },
+    "cta": { "$ref": "#/$defs/concreteText" },
+    "audienceIntent": { "$ref": "#/$defs/concreteText" },
+    "creativeConcept": { "$ref": "#/$defs/concreteText" },
+    "visualStyle": { "$ref": "#/$defs/concreteText" },
+    "storyboard": { "type": "array", "minItems": 2, "maxItems": 5, "items": { "$ref": "#/$defs/shot" } },
+    "continuity": { "$ref": "#/$defs/continuity" },
+    "voice": { "$ref": "#/$defs/voice" },
+    "postProduction": { "$ref": "#/$defs/postProduction" },
+    "publicationPolicy": {
+      "type": "object", "required": ["humanApprovalRequired", "autoPublish"],
+      "properties": { "humanApprovalRequired": { "const": true }, "autoPublish": { "const": false } }
+    }
+  },
+  "$defs": {
+    "concreteText": { "type": "string", "minLength": 1 },
+    "referencePolicy": { "enum": ["NONE", "PREVIOUS_SHOT_FRAME", "UPLOADED_REFERENCE"] },
+    "shot": {
+      "type": "object",
+      "required": ["shotId", "assetId", "durationSeconds", "roles", "purpose", "subject", "action", "environment", "emotionalIntent", "framing", "camera", "lensComposition", "lighting", "continuity", "negativeGuidance", "referencePolicy"],
+      "properties": {
+        "shotId": { "$ref": "#/$defs/concreteText" }, "assetId": { "$ref": "#/$defs/concreteText" },
+        "durationSeconds": { "type": "number", "exclusiveMinimum": 0 },
+        "roles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["HOOK", "TENSION", "INSIGHT", "ACTION", "RESOLUTION", "CTA"] } },
+        "purpose": { "$ref": "#/$defs/concreteText" }, "subject": { "$ref": "#/$defs/concreteText" },
+        "action": { "$ref": "#/$defs/concreteText" }, "environment": { "$ref": "#/$defs/concreteText" },
+        "emotionalIntent": { "$ref": "#/$defs/concreteText" }, "framing": { "$ref": "#/$defs/concreteText" },
+        "camera": { "$ref": "#/$defs/concreteText" }, "lensComposition": { "$ref": "#/$defs/concreteText" },
+        "lighting": { "$ref": "#/$defs/concreteText" }, "continuity": { "$ref": "#/$defs/concreteText" },
+        "negativeGuidance": { "oneOf": [{ "$ref": "#/$defs/concreteText" }, { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/concreteText" } }] },
+        "dialogue": { "type": ["string", "null"] }, "voiceoverSegment": { "type": ["string", "null"] },
+        "referenceMedia": { "type": ["object", "null"] }, "referencePolicy": { "$ref": "#/$defs/referencePolicy" },
+        "transitionIntent": { "type": ["string", "null"] }
+      }
+    },
+    "continuity": {
+      "type": "object", "required": ["identity", "appearance", "wardrobe", "environment", "props", "lightingColorLanguage", "cameraLanguage", "referencePolicy"],
+      "properties": { "identity": { "$ref": "#/$defs/concreteText" }, "appearance": { "$ref": "#/$defs/concreteText" }, "wardrobe": { "$ref": "#/$defs/concreteText" }, "environment": { "$ref": "#/$defs/concreteText" }, "props": { "$ref": "#/$defs/concreteText" }, "lightingColorLanguage": { "$ref": "#/$defs/concreteText" }, "cameraLanguage": { "$ref": "#/$defs/concreteText" }, "referencePolicy": { "$ref": "#/$defs/referencePolicy" } }
+    },
+    "voice": {
+      "type": "object", "required": ["sourceType", "approved"],
+      "properties": { "sourceType": { "type": ["string", "null"], "enum": ["AI_PRESET", "PROVIDER_CUSTOM", "UPLOADED_AUDIO", null] }, "provider": { "type": ["string", "null"] }, "model": { "type": ["string", "null"] }, "voiceId": { "type": ["string", "null"] }, "displayName": { "type": ["string", "null"] }, "language": { "type": ["string", "null"] }, "instructions": { "type": ["string", "null"] }, "uploadedArtifactId": { "type": ["string", "null"] }, "consent": { "type": ["object", "null"] }, "previewArtifact": { "type": ["object", "null"] }, "approved": { "type": "boolean" } }
+    },
+    "postProduction": {
+      "type": "object", "required": ["endTitle"],
+      "properties": { "endTitle": { "type": "object", "required": ["enabled", "text", "startTime", "duration"], "properties": { "enabled": { "type": "boolean" }, "text": { "type": "string" }, "startTime": { "type": "number", "minimum": 0 }, "duration": { "type": "number", "minimum": 0 } } }, "brandName": { "type": ["string", "null"] }, "cta": { "type": ["string", "null"] } }
+    }
+  }
+}

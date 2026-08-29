@@ -28,6 +28,7 @@ async function main() {
     await runProcess('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', audioPath]);
     const assembly = {
       durationMs: 2000,
+      postProduction: { endTitle: { enabled: true, text: "Don't guess. Tune in.", startTime: 1, duration: 1 }, brandName: 'Attune' },
       clips: [
         { ...assemblyContract.clips[0], media: { bytes: await fs.readFile(imagePath), contentType: 'image/png' } },
         { ...assemblyContract.clips[1], media: { bytes: await fs.readFile(audioPath), contentType: 'audio/wav' } },

@@ -5,6 +5,8 @@
   "main": "index.js",
   "directories": { "test": "tests" },
   "scripts": {
+    "test:v2.10": "node tests/v2.10-creative-production-test.js && node tests/v2.10-runtime-integration-test.js && vitest run --config apps/dashboard/client/vite.config.js",
+    "test:v2.10:postgres": "node tests/v2.10-postgres-integration-test.js",
     "test:v2.9.2": "node tests/v2.9.2-universal-media-stack-test.js && node tests/v2.9.2.2-capability-recovery-test.js && node tests/v2.9.2.4-recovery-evidence-test.js && node tests/v2.9.2.6-recovery-history-test.js && node tests/v2.9.2-semantic-retry-test.js && npm run test:v2.9.1",
     "test:v2.9.1": "node tests/v2.9.1-real-semantic-visual-evaluator-test.js && npm run test:v2.9",
     "test:v2.9": "node tests/v2.9-world-class-visual-quality-test.js && node tests/v2.8.1-validation-contract-test.js && node tests/v2.8-universal-provider-test.js && vitest run --config apps/dashboard/client/vite.config.js",
