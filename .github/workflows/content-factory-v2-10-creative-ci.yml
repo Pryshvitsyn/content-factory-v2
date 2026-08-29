@@ -56,7 +56,11 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/content_factory_v210_test
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: content_factory_v210_test
       CONTENT_FACTORY_TEST_DATABASE: "1"
     steps:
       - uses: actions/checkout@v5
