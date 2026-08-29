@@ -30,6 +30,15 @@ function baseUrl(value) {
   return parsed.toString().replace(/\/$/, '');
 }
 
+function selectedAudioProviderForInput(input) {
+  if (input == null) return 'openai-media';
+  if (!input.voiceover?.enabled) return 'none';
+  const voiceProvider = String(input.mediaStack?.audio?.voice?.provider || 'openai').toLowerCase();
+  if (voiceProvider === 'operator-upload') return 'operator-upload';
+  if (voiceProvider === 'elevenlabs') return 'elevenlabs';
+  return 'openai-media';
+}
+
 function resolveV25Configuration(env = process.env, input = null) {
   if (!['true','false'].includes(env.LIVE_PAID_GENERATION)) {
     throw new V25ConfigurationError('LIVE_PAID_GATE_REQUIRED', 'LIVE_PAID_GENERATION must be explicitly true or false');
@@ -89,8 +98,7 @@ function resolveV25Configuration(env = process.env, input = null) {
   if ((env.VIDEO_PROVIDER || selectedVideoProvider) !== selectedVideoProvider) {
     throw new V25ConfigurationError('LIVE_PROVIDER_MISMATCH', 'VIDEO_PROVIDER must match the immutable production provider selection');
   }
-  const selectedAudioProvider = input == null ? 'openai-media'
-    : input.voiceover?.enabled ? (input.mediaStack?.audio?.voice?.provider === 'elevenlabs' ? 'elevenlabs' : 'openai-media') : 'none';
+  const selectedAudioProvider = selectedAudioProviderForInput(input);
   if ((env.AUDIO_PROVIDER || selectedAudioProvider) !== selectedAudioProvider) {
     throw new V25ConfigurationError('LIVE_AUDIO_PROVIDER_MISMATCH', 'AUDIO_PROVIDER must match the immutable production voice selection');
   }
@@ -125,11 +133,11 @@ function assertPaidCredentials({ config, input, env = process.env }) {
     throw new V25ConfigurationError(videoProvider === 'replicate' ? 'LIVE_REPLICATE_TOKEN_REQUIRED' : 'CREDENTIALS_MISSING',
       `Credentials are required for explicit ${videoProvider} video execution`);
   }
-  const voiceProvider = input.mediaStack?.audio?.voice?.provider || 'openai';
-  if (input.assetPlan.assets.some((asset) => asset.kind === 'voice')
+  const voiceProvider = String(input.mediaStack?.audio?.voice?.provider || 'openai').toLowerCase();
+  if (input.assetPlan.assets.some((asset) => asset.kind === 'voice') && voiceProvider !== 'operator-upload'
     && !(voiceProvider === 'elevenlabs' ? env.ELEVENLABS_API_KEY : env.OPENAI_API_KEY)) {
     throw new V25ConfigurationError('LIVE_AUDIO_TOKEN_REQUIRED', `${voiceProvider} credentials are required only for explicit paid voice execution`);
   }
 }
 
-module.exports = { V25ConfigurationError, assertPaidCredentials, resolveV25Configuration };
+module.exports = { V25ConfigurationError, assertPaidCredentials, resolveV25Configuration, selectedAudioProviderForInput };
