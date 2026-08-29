@@ -16,19 +16,28 @@ function integratedEnvironment(env, input, live) {
     LIVE_PRODUCTION_WORKER_ID: env.LIVE_PRODUCTION_WORKER_ID || `v2.10:${process.pid}` };
 }
 
-function revisionSafeCanonical({ draft, preflight }) {
-  const canonical = buildCanonicalV210Input({ draft, preflight });
-  const identitySource = { ...canonical.input };
+function revisionSafeProductionKey(draftId, canonicalInput) {
+  if (!draftId || !canonicalInput) throw new V210RuntimeError('V210_EXECUTION_IDENTITY_REQUIRED',
+    'Draft identity and canonical input are required for revision-safe production identity');
+  const identitySource = { ...canonicalInput };
   delete identitySource.fingerprint;
   delete identitySource.productionKey;
   delete identitySource.liveTestKey;
   const executionIdentityFingerprint = stableFingerprint(identitySource);
-  const productionKey = `v210-${draft.id}-${executionIdentityFingerprint.slice(0, 16)}`;
-  const normalized = { ...canonical.input, productionKey, liveTestKey: productionKey };
+  return Object.freeze({
+    productionKey: `v210-${draftId}-${executionIdentityFingerprint.slice(0, 16)}`,
+    executionIdentityFingerprint,
+  });
+}
+
+function revisionSafeCanonical({ draft, preflight }) {
+  const canonical = buildCanonicalV210Input({ draft, preflight });
+  const identity = revisionSafeProductionKey(draft.id, canonical.input);
+  const normalized = { ...canonical.input, productionKey: identity.productionKey, liveTestKey: identity.productionKey };
   delete normalized.fingerprint;
   const input = Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
-  const raw = Object.freeze({ ...canonical.raw, production_key: productionKey });
-  return Object.freeze({ ...canonical, raw, input, productionKey, executionIdentityFingerprint });
+  const raw = Object.freeze({ ...canonical.raw, production_key: identity.productionKey });
+  return Object.freeze({ ...canonical, raw, input, ...identity });
 }
 
 class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
@@ -85,4 +94,4 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
   }
 }
 
-module.exports = { V210IntegratedProductionStarter, integratedEnvironment, revisionSafeCanonical };
+module.exports = { V210IntegratedProductionStarter, integratedEnvironment, revisionSafeCanonical, revisionSafeProductionKey };
