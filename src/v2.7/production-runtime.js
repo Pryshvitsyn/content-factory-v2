@@ -30,6 +30,22 @@ function planOnlyAdapter(provider, capability, model) {
   });
 }
 
+function uploadedAudioCacheAdapter(model = 'uploaded-audio') {
+  const fail = () => {
+    const error = new Error('Uploaded human narration must already exist as immutable cached media; generation is forbidden');
+    error.code = 'UPLOADED_AUDIO_CACHE_MISSING';
+    throw error;
+  };
+  return Object.freeze({
+    provider: 'operator-upload',
+    supports: ({ capability, model: requestedModel }) => capability === 'speech-generation'
+      && (!requestedModel || requestedModel === model),
+    modelFor: ({ capability } = {}) => capability === 'speech-generation' ? model : null,
+    generate: fail,
+    recover: fail,
+  });
+}
+
 function forbiddenAdapter(provider, capability, model, code) {
   return Object.freeze({
     provider,
@@ -71,7 +87,9 @@ function providerGateway({ config, live, executionPolicy = null, env = process.e
       : planOnlyAdapter(videoProvider, 'video-generation', config.model);
   let voiceAdapter = null;
   if (voiceProvider && voiceProvider !== 'none') {
-    if (policy.speech === 'LIVE') {
+    if (voiceProvider === 'operator-upload') {
+      voiceAdapter = uploadedAudioCacheAdapter(config.audioModel || 'uploaded-audio');
+    } else if (policy.speech === 'LIVE') {
       if (voiceProvider === 'elevenlabs') {
         voiceAdapter = elevenLabsTtsProviderFactory({ apiKey: env.ELEVENLABS_API_KEY, model: config.audioModel });
       } else if (voiceProvider === 'openai-media') {
@@ -145,4 +163,5 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     mediaExecutionRepository: mediaRepository });
 }
 
-module.exports = { EXECUTION_POLICIES, createProductionRuntime, forbiddenAdapter, planOnlyAdapter, providerGateway };
+module.exports = { EXECUTION_POLICIES, createProductionRuntime, forbiddenAdapter, planOnlyAdapter, providerGateway,
+  uploadedAudioCacheAdapter };
