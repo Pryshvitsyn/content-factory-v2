@@ -1,42 +1,529 @@
 import React, { useMemo, useState } from 'react';
 import { api } from './api';
+import './CreativeProduction.css';
 
 const ROLES = ['HOOK','TENSION','INSIGHT','ACTION','RESOLUTION','CTA'];
-const SHOT_FIELDS = ['purpose','subject','action','environment','emotionalIntent','framing','camera','lensComposition','lighting','continuity','negativeGuidance'];
 const CONTINUITY_FIELDS = ['identity','appearance','wardrobe','environment','props','lightingColorLanguage','cameraLanguage'];
-const makeShot = (i) => ({ shotId:`shot-${i+1}`,assetId:`video-${i+1}`,durationSeconds:5,roles:i?['RESOLUTION','CTA']:['HOOK','TENSION'],purpose:'',subject:'',action:'',environment:'',emotionalIntent:'',framing:'',camera:'',lensComposition:'',lighting:'',continuity:'',negativeGuidance:'',referencePolicy:'NONE',voiceoverSegment:'' });
-const INITIAL = { title:'',objective:'',targetPlatform:'Instagram Reels',targetDurationSeconds:10,hook:'',coreMessage:'',cta:'',audienceIntent:'',creativeConcept:'',visualStyle:'',storyboard:[makeShot(0),makeShot(1)],continuity:{ ...Object.fromEntries(CONTINUITY_FIELDS.map((f)=>[f,''])),referencePolicy:'NONE' },voice:{sourceType:null,provider:'',model:'',voiceId:'',language:'en',instructions:'',approved:false},postProduction:{endTitle:{enabled:false,text:'',startTime:8,duration:2},brandName:''},publicationPolicy:{humanApprovalRequired:true,autoPublish:false} };
+const VIDEO_CAPABILITIES = ['TEXT_TO_VIDEO','IMAGE_TO_VIDEO','REFERENCE_TO_VIDEO','VIDEO_TO_VIDEO','VIDEO_EXTENSION'];
+const SPEECH_CAPABILITY = 'SPEECH';
+const LEGACY_CANVAS = new Set(['480x854','720x1280','1080x1920']);
+const OPENAI_VOICES = ['alloy','ash','ballad','coral','echo','fable','nova','onyx','sage','shimmer','verse'];
+
+const makeShot = (index) => ({
+  shotId: `shot-${index + 1}`,
+  assetId: `video-${index + 1}`,
+  durationSeconds: 5,
+  roles: index === 0 ? ['HOOK','TENSION'] : ['INSIGHT','ACTION','RESOLUTION','CTA'],
+  purpose: '', subject: '', action: '', environment: '', emotionalIntent: '', framing: '', camera: '',
+  lensComposition: '', lighting: '', continuity: '', negativeGuidance: '', referencePolicy: 'NONE', voiceoverSegment: '',
+});
+
+const initialBrief = () => ({
+  title: '', objective: '', targetPlatform: 'Instagram Reels', targetDurationSeconds: 10,
+  hook: '', coreMessage: '', cta: '', audienceIntent: '', creativeConcept: '', visualStyle: '',
+  storyboard: [makeShot(0), makeShot(1)],
+  continuity: { ...Object.fromEntries(CONTINUITY_FIELDS.map((field) => [field, ''])), referencePolicy: 'NONE' },
+  voice: { sourceType: null, provider: '', model: '', voiceId: '', language: 'en', instructions: '', approved: false },
+  postProduction: { endTitle: { enabled: false, text: '', startTime: 8, duration: 2 }, brandName: '' },
+  publicationPolicy: { humanApprovalRequired: true, autoPublish: false },
+});
+
+const emptyVideo = () => ({ provider: '', model: '', modelFamily: '', profile: '', resolution: null });
 const vague = /exactly as specified|operator(?:'s)? (?:creative )?brief|(?:awaits?|requires?) (?:the )?operator input|creative input required|\b(?:tbd|todo|placeholder)\b/i;
-const specific = (v,n=2) => { const s=String(v||'').trim(); return !vague.test(s)&&s.split(/\s+/).filter(Boolean).length>=n; };
-function validate(b) { const r=new Set(b.storyboard.flatMap((s)=>s.roles)); const pairs=[['SUBJECT SPECIFICITY',b.storyboard.every((s)=>specific(s.subject,3))],['ACTION SPECIFICITY',b.storyboard.every((s)=>specific(s.action,3))],['ENVIRONMENT SPECIFICITY',b.storyboard.every((s)=>specific(s.environment,3))],['EMOTIONAL BEAT',b.storyboard.every((s)=>specific(s.emotionalIntent))],['CAMERA INTENT',b.storyboard.every((s)=>specific(`${s.framing} ${s.camera} ${s.lensComposition}`,5))],['LIGHTING INTENT',b.storyboard.every((s)=>specific(s.lighting))],['SHOT PURPOSE',b.storyboard.length>=2&&b.storyboard.length<=5&&b.storyboard.every((s)=>specific(s.purpose,3))],['STORY ARC',r.has('HOOK')&&(r.has('TENSION')||r.has('INSIGHT'))&&(r.has('ACTION')||r.has('INSIGHT'))&&r.has('RESOLUTION')&&(r.has('CTA')||specific(b.cta))],['CTA RESOLUTION',specific(b.cta)&&(r.has('CTA')||r.has('RESOLUTION'))],['DURATION ALIGNMENT',b.storyboard.reduce((n,s)=>n+Number(s.durationSeconds||0),0)===Number(b.targetDurationSeconds)],['CONTINUITY PLAN',CONTINUITY_FIELDS.every((f)=>specific(b.continuity[f]))]]; return { status:pairs.every(([,p])=>p)?'PASS':'FAIL',checks:pairs.map(([name,p])=>({name,status:p?'PASS':'FAIL'})) }; }
-function Field({label,value,onChange,number=false,area=true}) { const Tag=area?'textarea':'input'; return <label>{label}<Tag aria-label={label} type={number?'number':undefined} value={value??''} onChange={(e)=>onChange(number?Number(e.target.value):e.target.value)}/></label>; }
+const specific = (value, words = 2) => {
+  const text = String(value || '').trim();
+  return !vague.test(text) && text.split(/\s+/).filter(Boolean).length >= words;
+};
+
+function validate(brief) {
+  const roles = new Set(brief.storyboard.flatMap((shot) => shot.roles));
+  const checks = [
+    ['SUBJECT SPECIFICITY', brief.storyboard.every((shot) => specific(shot.subject, 3))],
+    ['ACTION SPECIFICITY', brief.storyboard.every((shot) => specific(shot.action, 3))],
+    ['ENVIRONMENT SPECIFICITY', brief.storyboard.every((shot) => specific(shot.environment, 3))],
+    ['EMOTIONAL BEAT', brief.storyboard.every((shot) => specific(shot.emotionalIntent))],
+    ['CAMERA INTENT', brief.storyboard.every((shot) => specific(`${shot.framing} ${shot.camera} ${shot.lensComposition}`, 5))],
+    ['LIGHTING INTENT', brief.storyboard.every((shot) => specific(shot.lighting))],
+    ['SHOT PURPOSE', brief.storyboard.length >= 2 && brief.storyboard.length <= 5 && brief.storyboard.every((shot) => specific(shot.purpose, 3))],
+    ['STORY ARC', roles.has('HOOK') && (roles.has('TENSION') || roles.has('INSIGHT')) && (roles.has('ACTION') || roles.has('INSIGHT')) && roles.has('RESOLUTION') && (roles.has('CTA') || specific(brief.cta))],
+    ['CTA RESOLUTION', specific(brief.cta) && (roles.has('CTA') || roles.has('RESOLUTION'))],
+    ['DURATION ALIGNMENT', brief.storyboard.reduce((total, shot) => total + Number(shot.durationSeconds || 0), 0) === Number(brief.targetDurationSeconds)],
+    ['CONTINUITY PLAN', CONTINUITY_FIELDS.every((field) => specific(brief.continuity[field]))],
+  ];
+  return { status: checks.every(([, pass]) => pass) ? 'PASS' : 'FAIL', checks: checks.map(([name, pass]) => ({ name, status: pass ? 'PASS' : 'FAIL' })) };
+}
+
+function Field({ label, value, onChange, number = false, area = true, placeholder = '' }) {
+  const Tag = area ? 'textarea' : 'input';
+  return <label>{label}<Tag aria-label={label} type={number ? 'number' : undefined} value={value ?? ''} placeholder={placeholder}
+    onChange={(event) => onChange(number ? Number(event.target.value) : event.target.value)} /></label>;
+}
+
+function SelectField({ label, value, onChange, children, disabled = false, ariaLabel = null }) {
+  return <label>{label}<select aria-label={ariaLabel || label} value={value ?? ''} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{children}</select></label>;
+}
+
+function rowBrief(row) { return row?.creative_brief || row?.creativeBrief || null; }
+function rowProvider(row) { return row?.provider_selection || row?.providerSelection || {}; }
+function statusText(row) { return row?.status || row?.start_state || 'DRAFT'; }
+function editableDraft(row) { return row && row.status !== 'STARTED' && !['RUNNING','NEEDS_RECONCILIATION'].includes(row.start_state); }
+function defaultProfile(model) { const names = Object.keys(model?.profiles || {}); return names.includes('STANDARD') ? 'STANDARD' : names[0] || ''; }
+function resolvedResolution(model, profile) { return model?.profiles?.[profile]?.resolution || null; }
+function normalizePersistedVideo(value = {}) {
+  const profile = String(value.profile || '').toUpperCase() === 'QUALITY' ? 'STANDARD' : String(value.profile || '').toUpperCase();
+  const rawResolution = String(value.resolution || '');
+  return { provider: value.provider || '', model: value.model || '', modelFamily: value.modelFamily || '', profile,
+    resolution: LEGACY_CANVAS.has(rawResolution) ? null : (value.resolution || null) };
+}
+function humanProviderState(provider) { return provider?.configured ? 'CONFIGURED' : 'NOT CONFIGURED'; }
 
 export function CreativeProduction() {
-  const [brief,setBrief]=useState(INITIAL),[brands,setBrands]=useState([]),[brandId,setBrandId]=useState(''),[draft,setDraft]=useState(null),[preflight,setPreflight]=useState(null),[preflightInput,setPreflightInput]=useState(null),[preview,setPreview]=useState(null),[message,setMessage]=useState(null),[advanced,setAdvanced]=useState(false),[uploadedFile,setUploadedFile]=useState(null),[attested,setAttested]=useState(false),[video,setVideo]=useState({provider:'',model:'',modelFamily:'',profile:'QUALITY',capability:'TEXT_TO_VIDEO',resolution:'1080x1920',capabilities:['TEXT_TO_VIDEO']});
-  React.useEffect(()=>{api('/api/brands').then(setBrands).catch(()=>setBrands([]));},[]);
-  const completeness=useMemo(()=>validate(brief),[brief]);
-  const edit=(fn,voice=false)=>{setBrief((current)=>{const next=fn(current);return voice?{...next,voice:{...next.voice,approved:false}}:next;});setPreflight(null);};
-  const setTop=(name,value)=>edit((b)=>({...b,[name]:value}));
-  const setShot=(i,name,value)=>edit((b)=>({...b,storyboard:b.storyboard.map((s,n)=>n===i?{...s,[name]:value}:s)}));
-  const move=(i,d)=>edit((b)=>{const a=[...b.storyboard],t=i+d;if(t<0||t>=a.length)return b;[a[i],a[t]]=[a[t],a[i]];return{...b,storyboard:a};});
-  const add=()=>brief.storyboard.length<5&&edit((b)=>({...b,storyboard:[...b.storyboard,makeShot(b.storyboard.length)]}));
-  const remove=(i)=>brief.storyboard.length>2&&edit((b)=>({...b,storyboard:b.storyboard.filter((_,n)=>n!==i)}));
-  const duplicate=(i)=>brief.storyboard.length<5&&edit((b)=>{const a=[...b.storyboard],copy={...a[i],shotId:`shot-copy-${Date.now()}`,assetId:`video-copy-${Date.now()}`};a.splice(i+1,0,copy);return{...b,storyboard:a};});
-  async function save(){try{const body={brandId,brief,providerSelection:{},voiceSelection:brief.voice};const value=draft?await api(`/api/v2.10/creative-drafts/${draft.id}`,{method:'PATCH',body:JSON.stringify(body)}):await api('/api/v2.10/creative-drafts',{method:'POST',body:JSON.stringify(body)});setDraft(value);setMessage('Draft saved. External calls: 0.');}catch(e){setMessage(e.message);}}
-  async function generatePreview(){const previewText=brief.storyboard.map((s)=>s.voiceoverSegment).filter(Boolean).join(' ');if(!window.confirm(`GENERATE VOICE PREVIEW\nProvider: ${brief.voice.provider}\nModel: ${brief.voice.model}\nVoice: ${brief.voice.voiceId}\nPreview text: ${previewText}\nKnown cost: UNKNOWN\nExternal calls: 1`))return;try{const value=await api(`/api/v2.10/creative-drafts/${draft.id}/voice-preview`,{method:'POST',body:JSON.stringify({brandId,voice:brief.voice,previewText,confirmation:true})});setPreview(value.artifact);setMessage(value.reused?'Cached preview reused. External calls: 0.':'Preview generated. External calls: 1.');}catch(e){setMessage(e.message);}}
-  async function runPreflight(){const input={brief,video,quality:{semanticCritic:'configured-semantic-critic',semanticCalls:1,otherEvaluatorCalls:0},master:{profile:'SOCIAL_VERTICAL',resolution:'1080x1920',fps:30,audioStrategy:brief.voice.sourceType}};try{const value=await api(`/api/v2.10/creative-drafts/${draft.id}/preflight`,{method:'POST',body:JSON.stringify({brandId,...input})});setPreflight(value);setPreflightInput(input);}catch(e){setMessage(e.message);}}
-  async function useVoice(){try{const value=await api(`/api/v2.10/creative-drafts/${draft.id}/voice-approve`,{method:'POST',body:JSON.stringify({brandId,voice:brief.voice,previewArtifact:preview})});setDraft(value);setBrief(value.creative_brief||value.creativeBrief);setMessage('Exact voice configuration and preview approved.');}catch(e){setMessage(e.message);}}
-  async function uploadVoice(){if(!uploadedFile||!attested)return;const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(uploadedFile);});try{const artifact=await api(`/api/v2.10/creative-drafts/${draft.id}/voice-upload`,{method:'POST',body:JSON.stringify({brandId,contentBase64:data,contentType:uploadedFile.type,operatorAttestation:{confirmed:true,text:'The uploaded narration matches the approved spoken copy.',actor:'dashboard-operator',confirmedAt:new Date().toISOString()}})});const exact={artifactId:artifact.id,durationSeconds:Number(artifact.duration_seconds),contentHash:artifact.content_hash,localUrl:preview?.localUrl};setPreview(exact);edit((b)=>({...b,voice:{...b.voice,sourceType:'UPLOADED_AUDIO',uploadedArtifactId:artifact.id,previewArtifact:exact}}),true);setMessage('Immutable uploaded narration stored and locally previewable. External calls: 0.');}catch(e){setMessage(e.message);}}
-  async function start(){if(!window.confirm(`START PRODUCTION?\nMaximum external calls: ${preflight.externalCalls.maximum}\nKnown cost: ${preflight.costStatus}\nHuman approval: REQUIRED\nAuto publish: NO`))return;try{await api(`/api/v2.10/creative-drafts/${draft.id}/start`,{method:'POST',body:JSON.stringify({brandId,currentInput:preflightInput,confirmation:true})});setMessage('Production start accepted. Human review remains required.');}catch(e){setMessage(e.message);}}
-  return <main><header className="page-header"><span className="eyebrow">V2.10 · ZERO-CALL EDITING</span><h1>Creative Production</h1></header><p className="page-note">Review the resolved advertisement and exact voice before any paid generation.</p>{message&&<div className="notice">{message}</div>}<div className="production-form">
-    <section className="panel"><h2 className="panel-title">CREATIVE BRIEF</h2><div className="form-grid"><label>Brand<select aria-label="Creative brand" value={brandId} onChange={(e)=>{setBrandId(e.target.value);setDraft(null);setPreflight(null);}}><option value="">Choose brand</option>{brands.map((b)=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>{[['title','TITLE'],['objective','OBJECTIVE'],['targetPlatform','TARGET PLATFORM'],['targetDurationSeconds','TARGET DURATION SECONDS'],['hook','HOOK'],['coreMessage','CORE MESSAGE'],['cta','CTA'],['audienceIntent','AUDIENCE INTENT'],['creativeConcept','CREATIVE CONCEPT'],['visualStyle','VISUAL STYLE']].map(([n,l])=><Field key={n} label={l} value={brief[n]} number={n==='targetDurationSeconds'} area={!['title','targetPlatform','targetDurationSeconds'].includes(n)} onChange={(v)=>setTop(n,v)}/>)}</div></section>
-    <section className="panel"><div className="section-head"><h2 className="panel-title">STORYBOARD · {brief.storyboard.length} SHOTS</h2><button className="secondary" type="button" disabled={brief.storyboard.length>=5} onClick={add}>ADD SHOT</button></div>{brief.storyboard.map((s,i)=><article className="shot-card" key={s.shotId}><div className="shot-head"><strong>SHOT {i+1} · {s.durationSeconds} sec</strong><div><button type="button" disabled={!i} onClick={()=>move(i,-1)}>MOVE SHOT UP</button><button type="button" disabled={i===brief.storyboard.length-1} onClick={()=>move(i,1)}>MOVE SHOT DOWN</button><button type="button" disabled={brief.storyboard.length>=5} onClick={()=>duplicate(i)}>DUPLICATE SHOT</button><button type="button" disabled={brief.storyboard.length<=2} onClick={()=>remove(i)}>REMOVE SHOT</button></div></div><div className="role-row"><span>ROLE</span>{ROLES.map((r)=><label key={r}><input type="checkbox" checked={s.roles.includes(r)} onChange={(e)=>setShot(i,'roles',e.target.checked?[...s.roles,r]:s.roles.filter((v)=>v!==r))}/>{r}</label>)}</div><div className="form-grid"><Field label="DURATION SECONDS" number area={false} value={s.durationSeconds} onChange={(v)=>setShot(i,'durationSeconds',v)}/>{SHOT_FIELDS.map((n)=><Field key={n} label={n.replaceAll(/([A-Z])/g,' $1').toUpperCase()} value={s[n]} onChange={(v)=>setShot(i,n,v)}/>)}<label>REFERENCE<select aria-label={`Shot ${i+1} reference`} value={s.referencePolicy} onChange={(e)=>setShot(i,'referencePolicy',e.target.value)}><option>NONE</option><option>PREVIOUS_SHOT_FRAME</option><option>UPLOADED_REFERENCE</option></select></label><Field label="VOICEOVER SEGMENT" value={s.voiceoverSegment} onChange={(v)=>setShot(i,'voiceoverSegment',v)}/></div></article>)}</section>
-    <section className="panel"><h2 className="panel-title">CONTINUITY</h2><div className="form-grid">{CONTINUITY_FIELDS.map((n)=><Field key={n} label={n.replaceAll(/([A-Z])/g,' $1').toUpperCase()} value={brief.continuity[n]} onChange={(v)=>edit((b)=>({...b,continuity:{...b.continuity,[n]:v}}))}/>)}<label>REFERENCE POLICY<select value={brief.continuity.referencePolicy} onChange={(e)=>edit((b)=>({...b,continuity:{...b.continuity,referencePolicy:e.target.value}}))}><option>NONE</option><option>PREVIOUS_SHOT_FRAME</option><option>UPLOADED_REFERENCE</option></select></label></div></section>
-    <section className="panel"><h2 className="panel-title">VOICE STUDIO</h2><div className="form-grid"><label>Source type<select aria-label="Voice source type" value={brief.voice.sourceType||''} onChange={(e)=>edit((b)=>({...b,voice:{...b.voice,sourceType:e.target.value||null}}),true)}><option value="">VOICE SELECTION REQUIRED</option><option>AI_PRESET</option><option>PROVIDER_CUSTOM</option><option>UPLOADED_AUDIO</option></select></label>{['provider','model','voiceId','language','instructions'].map((n)=><Field key={n} label={n.toUpperCase()} value={brief.voice[n]} area={n==='instructions'} onChange={(v)=>edit((b)=>({...b,voice:{...b.voice,[n]:v}}),true)}/>)}<label>UPLOAD AUDIO<input aria-label="Upload audio" type="file" accept="audio/wav,audio/mpeg,audio/mp4" onChange={(e)=>{const file=e.target.files?.[0];if(file){setUploadedFile(file);setPreview({localUrl:URL.createObjectURL(file)});setMessage('Local audio preview ready. External calls: 0. Attestation remains required.');}}}/></label>{brief.voice.sourceType==='PROVIDER_CUSTOM'&&<><label className="check"><input type="checkbox" checked={brief.voice.consent?.confirmed||false} onChange={(e)=>edit((b)=>({...b,voice:{...b.voice,consent:{required:true,confirmed:e.target.checked,ownerRelationship:'SELF',confirmedAt:new Date().toISOString(),actor:'dashboard-operator'}}}),true)}/> I confirm explicit custom/cloned voice consent</label><label>Owner relationship<select value={brief.voice.consent?.ownerRelationship||'SELF'} onChange={(e)=>edit((b)=>({...b,voice:{...b.voice,consent:{...b.voice.consent,required:true,ownerRelationship:e.target.value}}}),true)}><option>SELF</option><option>THIRD_PARTY</option></select></label></>}</div>{preview?.localUrl&&<audio controls src={preview.localUrl}/>}<label className="check"><input type="checkbox" checked={attested} onChange={(e)=>setAttested(e.target.checked)}/> The uploaded narration matches the approved spoken copy.</label><div className="actions"><button type="button" className="secondary" disabled={!draft||!brief.voice.provider||!brief.voice.model||!brief.voice.voiceId} onClick={generatePreview}>GENERATE VOICE PREVIEW</button><button type="button" className="secondary" disabled={!draft||!uploadedFile||!attested} onClick={uploadVoice}>UPLOAD AUDIO AS IMMUTABLE EVIDENCE</button><button type="button" className="secondary" disabled={!preview||!draft||Boolean(uploadedFile&&!brief.voice.uploadedArtifactId)} onClick={useVoice}>USE THIS VOICE</button></div><p className="boundary">Voice changes invalidate approval. Custom voices require consent; uploaded narration requires explicit spoken-copy attestation.</p></section>
-    <section className="panel"><h2 className="panel-title">POST PRODUCTION</h2><label className="check"><input type="checkbox" checked={brief.postProduction.endTitle.enabled} onChange={(e)=>edit((b)=>({...b,postProduction:{...b.postProduction,endTitle:{...b.postProduction.endTitle,enabled:e.target.checked}}}))}/> End title enabled</label><div className="form-grid">{['text','startTime','duration'].map((n)=><Field key={n} label={`END TITLE ${n.toUpperCase()}`} area={false} number={n!=='text'} value={brief.postProduction.endTitle[n]} onChange={(v)=>edit((b)=>({...b,postProduction:{...b.postProduction,endTitle:{...b.postProduction.endTitle,[n]:v}}}))}/>)}<Field label="BRAND NAME" area={false} value={brief.postProduction.brandName} onChange={(v)=>edit((b)=>({...b,postProduction:{...b.postProduction,brandName:v}}))}/></div><p>Approved text is rendered only by FFmpeg and excluded from paid video prompts.</p></section>
-    <section className="panel"><h2 className="panel-title">CREATIVE VALIDATION</h2><div className="validation-grid">{completeness.checks.map((c)=><div key={c.name}><span>{c.name}</span><strong className={c.status.toLowerCase()}>{c.status}</strong></div>)}</div></section>
-    <div className="actions"><button type="button" className="primary" disabled={!brandId} onClick={save}>SAVE DRAFT</button><button type="button" className="primary" disabled={!draft} onClick={runPreflight}>FINAL PRODUCTION PREFLIGHT</button></div>
-    <section className="panel"><h2 className="panel-title">PRODUCTION PREFLIGHT</h2><div className="form-grid"><Field label="VIDEO PROVIDER" area={false} value={video.provider} onChange={(value)=>{setVideo({...video,provider:value});setPreflight(null);}}/><Field label="VIDEO MODEL" area={false} value={video.model} onChange={(value)=>{setVideo({...video,model:value});setPreflight(null);}}/><Field label="VIDEO MODEL FAMILY" area={false} value={video.modelFamily} onChange={(value)=>{setVideo({...video,modelFamily:value});setPreflight(null);}}/><Field label="VIDEO PROFILE" area={false} value={video.profile} onChange={(value)=>{setVideo({...video,profile:value});setPreflight(null);}}/><label className="check"><input type="checkbox" checked={video.capabilities.includes('IMAGE_TO_VIDEO')} onChange={(e)=>{setVideo({...video,capabilities:e.target.checked?['TEXT_TO_VIDEO','IMAGE_TO_VIDEO']:['TEXT_TO_VIDEO']});setPreflight(null);}}/> Provider/model supports image-to-video continuity</label></div>{preflight?<><div className="plan-grid"><div className="key-value"><span>CREATIVE</span><p>{preflight.creative.storyboardShots} shots · {preflight.creative.completeness} · arc {preflight.creative.storyArc}</p></div><div className="key-value"><span>EXTERNAL CALL ACCOUNTING</span><p>Video {preflight.externalCalls.video} · Speech {preflight.externalCalls.speech} · Semantic {preflight.externalCalls.semantic} · Maximum {preflight.externalCalls.maximum}</p></div><div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {preflight.costStatus}</p></div></div><button className="start" onClick={start} disabled={preflight.status!=='READY'||completeness.status==='FAIL'||!brief.voice.approved}>START PRODUCTION</button></>:<p>No current preflight. Creative, provider, storyboard, or voice edits invalidate its fingerprint.</p>}</section>
-    <button type="button" className="advanced-toggle" onClick={()=>setAdvanced(!advanced)}>Advanced / Technical {advanced?'−':'+'}</button>{advanced&&<pre className="canonical">{JSON.stringify(brief,null,2)}</pre>}
-  </div></main>;
+  const [brief, setBrief] = useState(initialBrief);
+  const [brands, setBrands] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [brandId, setBrandId] = useState('');
+  const [drafts, setDrafts] = useState([]);
+  const [draft, setDraft] = useState(null);
+  const [preflight, setPreflight] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [message, setMessage] = useState(null);
+  const [advanced, setAdvanced] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [attested, setAttested] = useState(false);
+  const [video, setVideo] = useState(emptyVideo);
+  const [busy, setBusy] = useState(null);
+
+  React.useEffect(() => {
+    api('/api/brands').then(setBrands).catch((error) => setMessage(error.message));
+  }, []);
+
+  const completeness = useMemo(() => validate(brief), [brief]);
+  const videoProviders = useMemo(() => providers.filter((provider) => Array.isArray(provider.models)
+    && provider.models.some((model) => model.capabilities?.includes('TEXT_TO_VIDEO'))), [providers]);
+  const selectedProvider = videoProviders.find((provider) => provider.id === video.provider) || null;
+  const videoModels = (selectedProvider?.models || []).filter((model) => model.capabilities?.includes('TEXT_TO_VIDEO') && model.selectable !== false);
+  const selectedModel = videoModels.find((model) => model.modelId === video.model) || null;
+  const profiles = Object.keys(selectedModel?.profiles || {});
+  const effectiveResolution = resolvedResolution(selectedModel, video.profile);
+  const continuityRequested = brief.storyboard.some((shot) => shot.referencePolicy !== 'NONE');
+  const continuitySupported = !continuityRequested || Boolean(selectedModel?.capabilities?.some((capability) => ['IMAGE_TO_VIDEO','REFERENCE_TO_VIDEO'].includes(capability)));
+  const routeReady = Boolean(selectedProvider?.configured && selectedModel && video.profile && profiles.includes(video.profile));
+  const voiceProviders = providers.filter((provider) => Array.isArray(provider.models)
+    && provider.models.some((model) => model.capabilities?.includes(SPEECH_CAPABILITY)));
+  const selectedVoiceProvider = voiceProviders.find((provider) => provider.id === brief.voice.provider) || null;
+  const voiceModels = (selectedVoiceProvider?.models || []).filter((model) => model.capabilities?.includes(SPEECH_CAPABILITY) && model.selectable !== false);
+  const voiceNeedsApproval = Boolean(brief.voice.sourceType);
+  const voiceReady = !voiceNeedsApproval || brief.voice.approved === true;
+
+  const invalidate = () => setPreflight(null);
+  const edit = (fn, voiceChange = false) => {
+    setBrief((current) => {
+      const next = fn(current);
+      return voiceChange ? { ...next, voice: { ...next.voice, approved: false } } : next;
+    });
+    invalidate();
+  };
+  const setTop = (name, value) => edit((current) => ({ ...current, [name]: value }));
+  const setShot = (index, name, value) => edit((current) => ({ ...current,
+    storyboard: current.storyboard.map((shot, shotIndex) => shotIndex === index ? { ...shot, [name]: value } : shot) }));
+
+  function resetEditor() {
+    setDraft(null); setBrief(initialBrief()); setVideo(emptyVideo()); setPreflight(null); setPreview(null);
+    setUploadedFile(null); setAttested(false); setMessage('New draft. External calls: 0.');
+  }
+
+  function loadDraft(row, providerRows = providers) {
+    const loaded = rowBrief(row);
+    if (!loaded) return;
+    const persisted = normalizePersistedVideo(rowProvider(row));
+    const eligibleProviders = providerRows.filter((item) => Array.isArray(item.models) && item.models.some((model) => model.capabilities?.includes('TEXT_TO_VIDEO')));
+    const provider = eligibleProviders.find((item) => item.id === persisted.provider);
+    const model = provider?.models?.find((item) => item.modelId === persisted.model);
+    const profile = persisted.profile && model?.profiles?.[persisted.profile] ? persisted.profile : defaultProfile(model);
+    setDraft(row);
+    setBrief(loaded);
+    setVideo({ provider: persisted.provider, model: persisted.model, modelFamily: model?.modelFamily || persisted.modelFamily || '',
+      profile, resolution: resolvedResolution(model, profile) || persisted.resolution || null });
+    setPreflight(row.final_preflight || row.finalPreflight || null);
+    setPreview(loaded.voice?.previewArtifact || null);
+    setUploadedFile(null); setAttested(false);
+    setMessage(`Resumed ${statusText(row)} draft · revision ${row.revision || 1}. External calls: 0.`);
+  }
+
+  async function refreshDrafts(nextBrandId, preferredId = null, providerRows = providers) {
+    if (!nextBrandId) { setDrafts([]); return; }
+    try {
+      const rows = await api(`/api/v2.10/creative-drafts?brandId=${encodeURIComponent(nextBrandId)}`);
+      setDrafts(rows);
+      const preferred = preferredId ? rows.find((row) => row.id === preferredId) : null;
+      const candidate = preferred || rows.find(editableDraft);
+      if (candidate) loadDraft(candidate, providerRows); else resetEditor();
+    } catch (error) {
+      setDrafts([]); resetEditor();
+      setMessage(`Could not resume drafts: ${error.message}`);
+    }
+  }
+
+  async function chooseBrand(nextBrandId) {
+    setBrandId(nextBrandId); setDraft(null); setPreflight(null); setPreview(null);
+    if (!nextBrandId) { setDrafts([]); setBrief(initialBrief()); setVideo(emptyVideo()); return; }
+    try {
+      let catalog = providers;
+      if (!catalog.length) {
+        catalog = await api('/api/providers');
+        setProviders(catalog);
+      }
+      await refreshDrafts(nextBrandId, null, catalog);
+    } catch (error) { setMessage(error.message); }
+  }
+
+  function chooseProvider(providerId) {
+    const provider = videoProviders.find((item) => item.id === providerId);
+    const model = provider?.models?.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
+    const profile = defaultProfile(model);
+    setVideo({ provider: providerId, model: model?.modelId || '', modelFamily: model?.modelFamily || '', profile,
+      resolution: resolvedResolution(model, profile) });
+    invalidate();
+  }
+
+  function chooseModel(modelId) {
+    const model = videoModels.find((item) => item.modelId === modelId);
+    const profile = defaultProfile(model);
+    setVideo((current) => ({ ...current, model: modelId, modelFamily: model?.modelFamily || '', profile,
+      resolution: resolvedResolution(model, profile) }));
+    invalidate();
+  }
+
+  function chooseProfile(profile) {
+    setVideo((current) => ({ ...current, profile, resolution: resolvedResolution(selectedModel, profile) }));
+    invalidate();
+  }
+
+  function setVoiceSource(sourceType) {
+    const configuredSpeech = voiceProviders.find((provider) => provider.configured) || voiceProviders[0];
+    const firstModel = configuredSpeech?.models?.find((model) => model.capabilities?.includes(SPEECH_CAPABILITY) && model.selectable !== false);
+    edit((current) => ({ ...current, voice: sourceType ? {
+      ...current.voice, sourceType,
+      ...(sourceType === 'UPLOADED_AUDIO' ? { provider: '', model: '', voiceId: '' } : {
+        provider: current.voice.provider || configuredSpeech?.id || '',
+        model: current.voice.model || firstModel?.modelId || '',
+        voiceId: current.voice.voiceId || (configuredSpeech?.id === 'openai' ? 'alloy' : ''),
+      }),
+    } : { sourceType: null, provider: '', model: '', voiceId: '', language: 'en', instructions: '', approved: false } }), true);
+    setPreview(null); setUploadedFile(null); setAttested(false);
+  }
+
+  function chooseVoiceProvider(providerId) {
+    const provider = voiceProviders.find((item) => item.id === providerId);
+    const model = provider?.models?.find((item) => item.capabilities?.includes(SPEECH_CAPABILITY) && item.selectable !== false);
+    edit((current) => ({ ...current, voice: { ...current.voice, provider: providerId, model: model?.modelId || '',
+      voiceId: providerId === 'openai' ? (current.voice.voiceId || 'alloy') : '' } }), true);
+    setPreview(null);
+  }
+
+  function move(index, delta) {
+    edit((current) => {
+      const storyboard = [...current.storyboard]; const target = index + delta;
+      if (target < 0 || target >= storyboard.length) return current;
+      [storyboard[index], storyboard[target]] = [storyboard[target], storyboard[index]];
+      return { ...current, storyboard };
+    });
+  }
+  const add = () => brief.storyboard.length < 5 && edit((current) => ({ ...current, storyboard: [...current.storyboard, makeShot(current.storyboard.length)] }));
+  const remove = (index) => brief.storyboard.length > 2 && edit((current) => ({ ...current, storyboard: current.storyboard.filter((_, shotIndex) => shotIndex !== index) }));
+  const duplicate = (index) => brief.storyboard.length < 5 && edit((current) => {
+    const storyboard = [...current.storyboard]; const stamp = Date.now();
+    storyboard.splice(index + 1, 0, { ...storyboard[index], shotId: `shot-${stamp}`, assetId: `video-${stamp}` });
+    return { ...current, storyboard };
+  });
+
+  function copyContinuityToShots() {
+    const summary = [brief.continuity.identity, brief.continuity.appearance, brief.continuity.wardrobe,
+      brief.continuity.environment, brief.continuity.props, brief.continuity.lightingColorLanguage, brief.continuity.cameraLanguage]
+      .filter(Boolean).join(' ');
+    if (!summary) { setMessage('Complete the Continuity section first.'); return; }
+    edit((current) => ({ ...current, storyboard: current.storyboard.map((shot) => ({ ...shot,
+      continuity: shot.continuity || summary,
+      lighting: shot.lighting || current.continuity.lightingColorLanguage,
+      camera: shot.camera || current.continuity.cameraLanguage,
+    })) }));
+    setMessage('Continuity copied into empty shot fields. External calls: 0.');
+  }
+
+  function currentProviderSelection() {
+    return routeReady ? { provider: video.provider, model: video.model, modelFamily: selectedModel?.modelFamily || null,
+      profile: video.profile, resolution: effectiveResolution || null } : {};
+  }
+
+  async function persistDraft({ announce = true } = {}) {
+    if (!brandId) throw new Error('Choose a brand first');
+    const body = { brandId, brief, providerSelection: currentProviderSelection(), voiceSelection: brief.voice };
+    const value = draft ? await api(`/api/v2.10/creative-drafts/${draft.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+      : await api('/api/v2.10/creative-drafts', { method: 'POST', body: JSON.stringify(body) });
+    setDraft(value);
+    if (announce) setMessage('Draft saved. External calls: 0.');
+    return value;
+  }
+
+  async function save() {
+    setBusy('save');
+    try { const value = await persistDraft(); await refreshDrafts(brandId, value.id); }
+    catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function runPreflight() {
+    if (completeness.status !== 'PASS') { setMessage('Creative Validation must be PASS before final preflight.'); return; }
+    if (!routeReady) { setMessage('Choose a configured video provider, model and profile.'); return; }
+    if (!continuitySupported) { setMessage('Selected model does not support the reference policy used by the storyboard.'); return; }
+    setBusy('preflight'); setPreflight(null);
+    try {
+      const saved = await persistDraft({ announce: false });
+      const value = await api(`/api/v2.10/creative-drafts/${saved.id}/preflight`, { method: 'POST',
+        body: JSON.stringify({ brandId, video: currentProviderSelection() }) });
+      setPreflight(value);
+      setMessage(value.status === 'READY' ? 'Final preflight READY. No production has started.' : `Preflight BLOCKED: ${(value.blockers || []).join(', ')}`);
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function generatePreview() {
+    const previewText = brief.storyboard.map((shot) => shot.voiceoverSegment).filter(Boolean).join(' ');
+    if (!draft) { setMessage('Save the draft before generating a voice preview.'); return; }
+    if (!window.confirm(`GENERATE VOICE PREVIEW\nProvider: ${brief.voice.provider}\nModel: ${brief.voice.model}\nVoice: ${brief.voice.voiceId}\nPreview text: ${previewText}\nKnown cost: UNKNOWN\nExternal calls: 1`)) return;
+    setBusy('preview');
+    try {
+      const value = await api(`/api/v2.10/creative-drafts/${draft.id}/voice-preview`, { method: 'POST',
+        body: JSON.stringify({ brandId, voice: brief.voice, previewText, confirmation: true }) });
+      setPreview(value.artifact);
+      setMessage(value.reused ? 'Cached preview reused. External calls: 0.' : 'Voice preview generated. External calls: 1.');
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function useVoice() {
+    setBusy('voice-approve');
+    try {
+      const value = await api(`/api/v2.10/creative-drafts/${draft.id}/voice-approve`, { method: 'POST',
+        body: JSON.stringify({ brandId, voice: brief.voice, previewArtifact: preview }) });
+      setDraft(value); setBrief(rowBrief(value)); setMessage('Exact voice configuration approved.'); setPreflight(null);
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function uploadVoice() {
+    if (!uploadedFile || !attested || !draft) return;
+    setBusy('upload');
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(uploadedFile);
+    });
+    try {
+      const artifact = await api(`/api/v2.10/creative-drafts/${draft.id}/voice-upload`, { method: 'POST', body: JSON.stringify({
+        brandId, contentBase64: data, contentType: uploadedFile.type,
+        operatorAttestation: { confirmed: true, text: 'The uploaded narration matches the approved spoken copy.', actor: 'dashboard-operator', confirmedAt: new Date().toISOString() },
+      }) });
+      const exact = { artifactId: artifact.id, durationSeconds: Number(artifact.duration_seconds), contentHash: artifact.content_hash, localUrl: preview?.localUrl };
+      setPreview(exact);
+      edit((current) => ({ ...current, voice: { ...current.voice, sourceType: 'UPLOADED_AUDIO', uploadedArtifactId: artifact.id, previewArtifact: exact } }), true);
+      setMessage('Immutable uploaded narration stored. External calls: 0. Click USE THIS VOICE to approve it.');
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function start() {
+    if (!preflight || preflight.status !== 'READY') return;
+    if (!window.confirm(`START PRODUCTION?\nProvider: ${preflight.video?.providerDisplayName || preflight.video?.provider}\nModel: ${preflight.video?.model}\nProfile: ${preflight.video?.profile}\nMaximum external calls: ${preflight.externalCalls.maximum}\nKnown cost: ${preflight.costStatus}\nHuman approval: REQUIRED\nAuto publish: NO`)) return;
+    setBusy('start');
+    try {
+      const value = await api(`/api/v2.10/creative-drafts/${draft.id}/start`, { method: 'POST', body: JSON.stringify({ brandId, confirmation: true }) });
+      setMessage(`Production ${value.productionId} accepted. Human review remains required.`);
+      await refreshDrafts(brandId, draft.id);
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  return <main>
+    <header className="page-header"><span className="eyebrow">V2.10 · OPERATOR CREATIVE</span><h1>Creative Production</h1></header>
+    <p className="page-note">Write the ad, choose only valid catalog options, review voice and exact preflight, then explicitly start.</p>
+    {message ? <div className="notice">{message}</div> : null}
+
+    <div className="production-form creative-v210">
+      <section className="panel operator-strip">
+        <div className="form-grid">
+          <SelectField label="BRAND" value={brandId} onChange={chooseBrand}>
+            <option value="">Choose brand</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+          </SelectField>
+          <SelectField label="DRAFT" value={draft?.id || ''} disabled={!brandId} onChange={(id) => id ? loadDraft(drafts.find((row) => row.id === id)) : resetEditor()}>
+            <option value="">New draft</option>{drafts.map((row) => <option key={row.id} value={row.id}>{rowBrief(row)?.title || 'Untitled'} · {statusText(row)} · r{row.revision || 1}</option>)}
+          </SelectField>
+        </div>
+        <div className="operator-summary">
+          <span>{draft ? `Draft ${draft.id.slice(0, 8)} · ${statusText(draft)} · revision ${draft.revision || 1}` : 'Unsaved draft'}</span>
+          <button type="button" className="secondary" onClick={resetEditor} disabled={!brandId}>NEW DRAFT</button>
+        </div>
+      </section>
+
+      <section className="panel"><h2 className="panel-title">CREATIVE BRIEF</h2><div className="form-grid">
+        <Field label="TITLE" value={brief.title} area={false} onChange={(value) => setTop('title', value)} />
+        <Field label="TARGET PLATFORM" value={brief.targetPlatform} area={false} onChange={(value) => setTop('targetPlatform', value)} />
+        <Field label="TARGET DURATION SECONDS" value={brief.targetDurationSeconds} number area={false} onChange={(value) => setTop('targetDurationSeconds', value)} />
+        <Field label="OBJECTIVE" value={brief.objective} onChange={(value) => setTop('objective', value)} />
+        <Field label="HOOK" value={brief.hook} onChange={(value) => setTop('hook', value)} />
+        <Field label="CORE MESSAGE" value={brief.coreMessage} onChange={(value) => setTop('coreMessage', value)} />
+        <Field label="CTA" value={brief.cta} onChange={(value) => setTop('cta', value)} />
+        <Field label="AUDIENCE INTENT" value={brief.audienceIntent} onChange={(value) => setTop('audienceIntent', value)} />
+        <Field label="CREATIVE CONCEPT" value={brief.creativeConcept} onChange={(value) => setTop('creativeConcept', value)} />
+        <Field label="VISUAL STYLE" value={brief.visualStyle} onChange={(value) => setTop('visualStyle', value)} />
+      </div></section>
+
+      <section className="panel"><div className="section-head"><h2 className="panel-title">STORYBOARD · {brief.storyboard.length} SHOTS</h2><div>
+        <button className="secondary" type="button" onClick={copyContinuityToShots}>COPY CONTINUITY TO SHOTS</button>
+        <button className="secondary" type="button" disabled={brief.storyboard.length >= 5} onClick={add}>ADD SHOT</button>
+      </div></div>
+      {brief.storyboard.map((shot, index) => {
+        const advancedMissing = !specific(`${shot.framing} ${shot.camera} ${shot.lensComposition}`, 5) || !specific(shot.lighting) || !specific(shot.continuity);
+        return <article className="shot-card" key={shot.shotId}>
+          <div className="shot-head"><strong>SHOT {index + 1} · {shot.durationSeconds} sec</strong><div>
+            <button type="button" aria-label="MOVE SHOT UP" disabled={!index} onClick={() => move(index, -1)}>↑</button>
+            <button type="button" aria-label="MOVE SHOT DOWN" disabled={index === brief.storyboard.length - 1} onClick={() => move(index, 1)}>↓</button>
+            <button type="button" aria-label="DUPLICATE SHOT" disabled={brief.storyboard.length >= 5} onClick={() => duplicate(index)}>DUPLICATE</button>
+            <button type="button" aria-label="REMOVE SHOT" disabled={brief.storyboard.length <= 2} onClick={() => remove(index)}>REMOVE</button>
+          </div></div>
+          <div className="role-row"><span>ROLE</span>{ROLES.map((role) => <label key={role}><input type="checkbox" checked={shot.roles.includes(role)}
+            onChange={(event) => setShot(index, 'roles', event.target.checked ? [...shot.roles, role] : shot.roles.filter((value) => value !== role))} />{role}</label>)}</div>
+          <div className="form-grid">
+            <Field label="DURATION SECONDS" value={shot.durationSeconds} number area={false} onChange={(value) => setShot(index, 'durationSeconds', value)} />
+            <Field label="PURPOSE" value={shot.purpose} onChange={(value) => setShot(index, 'purpose', value)} />
+            <Field label="SUBJECT" value={shot.subject} onChange={(value) => setShot(index, 'subject', value)} />
+            <Field label="ACTION" value={shot.action} onChange={(value) => setShot(index, 'action', value)} />
+            <Field label="ENVIRONMENT" value={shot.environment} onChange={(value) => setShot(index, 'environment', value)} />
+            <Field label="EMOTIONAL INTENT" value={shot.emotionalIntent} onChange={(value) => setShot(index, 'emotionalIntent', value)} />
+            <Field label="VOICEOVER SEGMENT" value={shot.voiceoverSegment} onChange={(value) => setShot(index, 'voiceoverSegment', value)} />
+          </div>
+          <details className="shot-advanced" open={advancedMissing}><summary>Visual direction {advancedMissing ? '· REQUIRED FIELDS MISSING' : '· COMPLETE'}</summary>
+            <div className="form-grid">
+              <Field label="FRAMING" value={shot.framing} onChange={(value) => setShot(index, 'framing', value)} />
+              <Field label="CAMERA" value={shot.camera} onChange={(value) => setShot(index, 'camera', value)} />
+              <Field label="LENS COMPOSITION" value={shot.lensComposition} onChange={(value) => setShot(index, 'lensComposition', value)} />
+              <Field label="LIGHTING" value={shot.lighting} onChange={(value) => setShot(index, 'lighting', value)} />
+              <Field label="CONTINUITY" value={shot.continuity} onChange={(value) => setShot(index, 'continuity', value)} />
+              <Field label="NEGATIVE GUIDANCE" value={shot.negativeGuidance} onChange={(value) => setShot(index, 'negativeGuidance', value)} />
+              <SelectField label="REFERENCE" value={shot.referencePolicy} onChange={(value) => setShot(index, 'referencePolicy', value)}>
+                <option>NONE</option><option>PREVIOUS_SHOT_FRAME</option><option>UPLOADED_REFERENCE</option>
+              </SelectField>
+            </div>
+          </details>
+        </article>;
+      })}</section>
+
+      <section className="panel"><h2 className="panel-title">CONTINUITY</h2><div className="form-grid">
+        {CONTINUITY_FIELDS.map((field) => <Field key={field} label={field.replaceAll(/([A-Z])/g, ' $1').toUpperCase()} value={brief.continuity[field]}
+          onChange={(value) => edit((current) => ({ ...current, continuity: { ...current.continuity, [field]: value } }))} />)}
+        <SelectField label="REFERENCE POLICY" value={brief.continuity.referencePolicy} onChange={(value) => edit((current) => ({ ...current, continuity: { ...current.continuity, referencePolicy: value } }))}>
+          <option>NONE</option><option>PREVIOUS_SHOT_FRAME</option><option>UPLOADED_REFERENCE</option>
+        </SelectField>
+      </div></section>
+
+      <section className="panel route-panel"><h2 className="panel-title">VIDEO ROUTE</h2>
+        <p className="route-note">Only provider/model/profile combinations registered by the server are selectable. Capabilities and resolution are read-only catalog truth.</p>
+        <div className="form-grid">
+          <SelectField label="VIDEO PROVIDER" value={video.provider} onChange={chooseProvider}>
+            <option value="">Choose configured provider</option>{videoProviders.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.configured}>{provider.displayName} · {humanProviderState(provider)}</option>)}
+          </SelectField>
+          <SelectField label="VIDEO MODEL" value={video.model} disabled={!video.provider} onChange={chooseModel}>
+            <option value="">Choose model</option>{videoModels.map((model) => <option key={model.modelId} value={model.modelId}>{model.displayName} · {model.modelFamily || model.vendor}</option>)}
+          </SelectField>
+          <SelectField label="VIDEO PROFILE" value={video.profile} disabled={!selectedModel} onChange={chooseProfile}>
+            <option value="">Choose profile</option>{profiles.map((profile) => <option key={profile}>{profile}</option>)}
+          </SelectField>
+          <label>RESOLVED OUTPUT<input aria-label="RESOLVED OUTPUT" readOnly value={effectiveResolution ? `${effectiveResolution} source · 9:16 · final master 1080×1920` : ''} /></label>
+        </div>
+        <div className="route-truth-grid">
+          <div><span>MODEL FAMILY</span><strong>{selectedModel?.modelFamily || '—'}</strong></div>
+          <div><span>CAPABILITIES</span><strong>{selectedModel?.capabilities?.filter((capability) => VIDEO_CAPABILITIES.includes(capability)).join(' · ') || '—'}</strong></div>
+          <div><span>CONTINUITY</span><strong className={continuitySupported ? 'pass' : 'fail'}>{continuityRequested ? (continuitySupported ? 'SUPPORTED' : 'BLOCKED') : 'NOT REQUESTED'}</strong></div>
+          <div><span>CONFIGURATION</span><strong className={selectedProvider?.configured ? 'pass' : 'fail'}>{selectedProvider ? humanProviderState(selectedProvider) : '—'}</strong></div>
+        </div>
+      </section>
+
+      <section className="panel"><h2 className="panel-title">VOICE STUDIO</h2>
+        <SelectField label="VOICE" ariaLabel="Voice source type" value={brief.voice.sourceType || ''} onChange={setVoiceSource}>
+          <option value="">No generated/uploaded voice</option><option value="AI_PRESET">AI preset voice</option><option value="PROVIDER_CUSTOM">Custom / cloned provider voice</option><option value="UPLOADED_AUDIO">Uploaded human narration</option>
+        </SelectField>
+        {brief.voice.sourceType && brief.voice.sourceType !== 'UPLOADED_AUDIO' ? <div className="form-grid voice-route">
+          <SelectField label="VOICE PROVIDER" value={brief.voice.provider} onChange={chooseVoiceProvider}>
+            <option value="">Choose configured speech provider</option>{voiceProviders.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.configured}>{provider.displayName} · {humanProviderState(provider)}</option>)}
+          </SelectField>
+          <SelectField label="VOICE MODEL" value={brief.voice.model} disabled={!brief.voice.provider} onChange={(value) => edit((current) => ({ ...current, voice: { ...current.voice, model: value } }), true)}>
+            <option value="">Choose model</option>{voiceModels.map((model) => <option key={model.modelId} value={model.modelId}>{model.displayName}</option>)}
+          </SelectField>
+          {brief.voice.provider === 'openai' ? <SelectField label="VOICE ID" value={brief.voice.voiceId} onChange={(value) => edit((current) => ({ ...current, voice: { ...current.voice, voiceId: value } }), true)}>
+            <option value="">Choose voice</option>{OPENAI_VOICES.map((voice) => <option key={voice}>{voice}</option>)}
+          </SelectField> : <Field label="VOICE ID" value={brief.voice.voiceId} area={false} onChange={(value) => edit((current) => ({ ...current, voice: { ...current.voice, voiceId: value } }), true)} />}
+          <Field label="LANGUAGE" value={brief.voice.language} area={false} onChange={(value) => edit((current) => ({ ...current, voice: { ...current.voice, language: value } }), true)} />
+          <Field label="INSTRUCTIONS" value={brief.voice.instructions} onChange={(value) => edit((current) => ({ ...current, voice: { ...current.voice, instructions: value } }), true)} />
+          {brief.voice.sourceType === 'PROVIDER_CUSTOM' ? <label className="check"><input type="checkbox" checked={brief.voice.consent?.confirmed || false}
+            onChange={(event) => edit((current) => ({ ...current, voice: { ...current.voice, consent: { required: true, confirmed: event.target.checked, ownerRelationship: current.voice.consent?.ownerRelationship || 'SELF', confirmedAt: new Date().toISOString(), actor: 'dashboard-operator' } } }), true)} /> I confirm explicit custom/cloned voice consent</label> : null}
+        </div> : null}
+        {brief.voice.sourceType === 'UPLOADED_AUDIO' ? <div className="voice-upload-box">
+          <label>UPLOAD AUDIO<input aria-label="Upload audio" type="file" accept="audio/wav,audio/mpeg,audio/mp4" onChange={(event) => {
+            const file = event.target.files?.[0]; if (file) { setUploadedFile(file); setPreview({ localUrl: URL.createObjectURL(file) }); setMessage('Local audio preview ready. External calls: 0.'); }
+          }} /></label>
+          <label className="check"><input type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} /> The uploaded narration matches the approved spoken copy.</label>
+        </div> : null}
+        {preview?.localUrl ? <audio controls src={preview.localUrl} /> : null}
+        {brief.voice.sourceType ? <div className="voice-status-line"><span>VOICE APPROVAL</span><strong className={brief.voice.approved ? 'pass' : 'fail'}>{brief.voice.approved ? 'APPROVED' : 'REQUIRED'}</strong></div> : null}
+        <div className="actions">
+          {brief.voice.sourceType && brief.voice.sourceType !== 'UPLOADED_AUDIO' ? <button type="button" aria-label="GENERATE VOICE PREVIEW" className="secondary" disabled={!draft || busy || !brief.voice.provider || !brief.voice.model || !brief.voice.voiceId} onClick={generatePreview}>GENERATE VOICE PREVIEW · 1 CALL</button> : null}
+          {brief.voice.sourceType === 'UPLOADED_AUDIO' ? <button type="button" className="secondary" disabled={!draft || busy || !uploadedFile || !attested} onClick={uploadVoice}>STORE UPLOAD · 0 CALLS</button> : null}
+          {brief.voice.sourceType ? <button type="button" className="secondary" disabled={!preview || !draft || busy || Boolean(uploadedFile && !brief.voice.uploadedArtifactId)} onClick={useVoice}>USE THIS VOICE</button> : null}
+        </div>
+        <p className="boundary">Editing provider, model, voice, language or instructions invalidates voice approval. Nothing in this section calls a provider until GENERATE VOICE PREVIEW is explicitly confirmed.</p>
+      </section>
+
+      <section className="panel"><h2 className="panel-title">POST PRODUCTION</h2>
+        <label className="check"><input type="checkbox" checked={brief.postProduction.endTitle.enabled} onChange={(event) => edit((current) => ({ ...current, postProduction: { ...current.postProduction, endTitle: { ...current.postProduction.endTitle, enabled: event.target.checked } } }))} /> End title enabled</label>
+        {brief.postProduction.endTitle.enabled ? <div className="form-grid">
+          <Field label="END TITLE TEXT" area={false} value={brief.postProduction.endTitle.text} onChange={(value) => edit((current) => ({ ...current, postProduction: { ...current.postProduction, endTitle: { ...current.postProduction.endTitle, text: value } } }))} />
+          <Field label="END TITLE START" area={false} number value={brief.postProduction.endTitle.startTime} onChange={(value) => edit((current) => ({ ...current, postProduction: { ...current.postProduction, endTitle: { ...current.postProduction.endTitle, startTime: value } } }))} />
+          <Field label="END TITLE DURATION" area={false} number value={brief.postProduction.endTitle.duration} onChange={(value) => edit((current) => ({ ...current, postProduction: { ...current.postProduction, endTitle: { ...current.postProduction.endTitle, duration: value } } }))} />
+          <Field label="BRAND NAME" area={false} value={brief.postProduction.brandName} onChange={(value) => edit((current) => ({ ...current, postProduction: { ...current.postProduction, brandName: value } }))} />
+        </div> : null}
+        <p>Approved end-title text is rendered locally by FFmpeg and is never inserted into paid video prompts.</p>
+      </section>
+
+      <section className="panel"><h2 className="panel-title">CREATIVE VALIDATION</h2>
+        <div className="validation-grid">{completeness.checks.map((check) => <div key={check.name}><span>{check.name}</span><strong className={check.status.toLowerCase()}>{check.status}</strong></div>)}</div>
+        <div className="ready-summary">
+          <div><span>CREATIVE</span><strong className={completeness.status.toLowerCase()}>{completeness.status}</strong></div>
+          <div><span>VIDEO ROUTE</span><strong className={routeReady ? 'pass' : 'fail'}>{routeReady ? 'READY' : 'SELECT ROUTE'}</strong></div>
+          <div><span>REFERENCE SUPPORT</span><strong className={continuitySupported ? 'pass' : 'fail'}>{continuitySupported ? 'READY' : 'BLOCKED'}</strong></div>
+          <div><span>VOICE</span><strong className={voiceReady ? 'pass' : 'fail'}>{voiceReady ? 'READY' : 'APPROVAL REQUIRED'}</strong></div>
+        </div>
+        <div className="actions"><button type="button" className="secondary" disabled={!brandId || busy} onClick={save}>{busy === 'save' ? 'SAVING…' : 'SAVE DRAFT · 0 CALLS'}</button>
+          <button type="button" className="primary" disabled={!brandId || busy || completeness.status !== 'PASS' || !routeReady || !continuitySupported} onClick={runPreflight}>{busy === 'preflight' ? 'CHECKING…' : 'FINAL PRODUCTION PREFLIGHT · 0 CALLS'}</button></div>
+      </section>
+
+      <section className={`panel preflight ${preflight?.status === 'READY' ? 'preflight-ready' : ''}`}><h2 className="panel-title">PRODUCTION PREFLIGHT</h2>
+        {preflight ? <>
+          <div className="preflight-status"><span>STATUS</span><strong className={preflight.status === 'READY' ? 'pass' : 'fail'}>{preflight.status}</strong>{preflight.blockers?.length ? <code>{preflight.blockers.join(' · ')}</code> : null}</div>
+          <div className="plan-grid">
+            <div className="key-value"><span>VIDEO</span><p>{preflight.video?.providerDisplayName || preflight.video?.provider} · {preflight.video?.model} · {preflight.video?.profile} · {preflight.video?.resolvedSettings?.resolution || 'provider default'}</p></div>
+            <div className="key-value"><span>CREATIVE</span><p>{preflight.creative.storyboardShots} shots · {preflight.creative.completeness} · continuity {preflight.creative.continuity}</p></div>
+            <div className="key-value"><span>VOICE</span><p>{preflight.voice?.sourceType || 'NO VOICE'} · {preflight.voice?.previewApproved ? 'APPROVED' : 'NO APPROVAL REQUIRED / PENDING'}</p></div>
+            <div className="key-value"><span>EXTERNAL CALLS</span><p>Video {preflight.externalCalls.video} · Speech {preflight.externalCalls.speech} · Semantic {preflight.externalCalls.semantic} · Maximum {preflight.externalCalls.maximum}</p></div>
+            <div className="key-value"><span>MASTER</span><p>{preflight.master?.profile} · {preflight.master?.resolution} · {preflight.master?.fps} fps</p></div>
+            <div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {preflight.costStatus}</p></div>
+          </div>
+          <button className="start" onClick={start} disabled={preflight.status !== 'READY' || completeness.status === 'FAIL' || !voiceReady || busy}>{busy === 'start' ? 'STARTING…' : 'START PRODUCTION'}</button>
+        </> : <p>No final preflight yet. Editing creative, route or voice invalidates the previous fingerprint.</p>}
+      </section>
+
+      <button type="button" className="advanced-toggle" onClick={() => setAdvanced(!advanced)}>Advanced / Technical {advanced ? '−' : '+'}</button>
+      {advanced ? <pre className="canonical">{JSON.stringify({ draftId: draft?.id || null, brief, requestedVideo: currentProviderSelection(), selectedModel: selectedModel ? {
+        provider: video.provider, modelId: selectedModel.modelId, modelFamily: selectedModel.modelFamily, profiles: selectedModel.profiles,
+        capabilities: selectedModel.capabilities, configured: selectedProvider?.configured,
+      } : null, preflight }, null, 2)}</pre> : null}
+    </div>
+  </main>;
 }
