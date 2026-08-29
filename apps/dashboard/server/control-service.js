@@ -5,7 +5,7 @@ const { partialMediaPlan, reusableSemanticPass, retryPlan,
   sourceArtifactFromExecution } = require('../../../src/v2.9/semantic-evaluation-retry');
 const { operatorInputFromRaw } = require('../../../src/v2.7/production-command-service');
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRODUCTION_STATUSES = new Set(['DRAFT','RUNNING','COMPLETED','FAILED','CANCELLED']);
 const RENDER_MODES = new Set(['FAST','QUALITY']);
 
