@@ -47,6 +47,11 @@ class V210PostgresRepository {
     const result = await this.db.query('SELECT * FROM v2_10.voice_preview_artifacts WHERE workspace_id=$1 AND brand_id=$2 AND preview_fingerprint=$3', [workspaceId, brandId, fingerprint]);
     return result.rows[0] || null;
   }
+  async getVoicePreview({ id, workspaceId, brandId }) {
+    const result = await this.db.query(`SELECT * FROM v2_10.voice_preview_artifacts
+      WHERE id=$1 AND workspace_id=$2 AND brand_id=$3`, [id, workspaceId, brandId]);
+    return result.rows[0] || null;
+  }
   async storeVoicePreview(value) {
     if (!this.storage || !Buffer.isBuffer(value.bytes)) throw new Error('Immutable preview storage and generated audio bytes are required');
     const contentHash = crypto.createHash('sha256').update(value.bytes).digest('hex');
