@@ -67,18 +67,30 @@ function validateVoiceTiming({ voice, targetDurationSeconds, availableDurationSe
 }
 
 class VoicePreviewService {
-  constructor({ repository, providerGateway }) { this.repository = repository; this.providerGateway = providerGateway; }
+  constructor({ repository, providerGateway, mediaInspector = null }) {
+    this.repository = repository; this.providerGateway = providerGateway; this.mediaInspector = mediaInspector;
+  }
   async generate({ workspaceId, brandId, voice, previewText, confirmed }) {
     if (!confirmed) throw Object.assign(new Error('Explicit preview confirmation is required'), { code: 'EXPLICIT_CONFIRMATION_REQUIRED' });
     const normalized = canonicalVoice(voice);
-    if (normalized.sourceType === 'UPLOADED_AUDIO') throw new Error('Uploaded audio uses local preview and makes no speech call');
+    if (normalized.sourceType === 'UPLOADED_AUDIO') throw Object.assign(new Error('Uploaded audio uses local preview and makes no speech call'), { code: 'UPLOADED_AUDIO_LOCAL_PREVIEW' });
     if (validateConsent(normalized).status === 'FAIL') throw Object.assign(new Error('Voice consent is incomplete'), { code: 'VOICE_CONSENT_REQUIRED' });
-    const key = previewFingerprint(normalized, previewText);
+    const text = String(previewText || '').trim();
+    if (!text) throw Object.assign(new Error('Voice preview text is required'), { code: 'VOICE_PREVIEW_TEXT_REQUIRED' });
+    const key = previewFingerprint(normalized, text);
     const existing = await this.repository.findVoicePreview({ workspaceId, brandId, fingerprint: key });
     if (existing) return Object.freeze({ artifact: normalizePreviewArtifact(existing), externalCalls: 0, reused: true });
-    const generated = await this.providerGateway.generatePreview({ voice: normalized, text: previewText, idempotencyKey: key });
+    let generated = await this.providerGateway.generatePreview({ voice: normalized, text, idempotencyKey: key });
+    if (!Buffer.isBuffer(generated?.bytes) || !generated.bytes.length) throw Object.assign(new Error('Voice preview provider returned no durable audio bytes'), { code: 'VOICE_PREVIEW_INVALID' });
+    if (!(Number(generated.durationSeconds) > 0)) {
+      if (!this.mediaInspector) throw Object.assign(new Error('Voice preview duration cannot be certified'), { code: 'VOICE_PREVIEW_INSPECTOR_REQUIRED' });
+      const probe = await this.mediaInspector.inspect({ bytes: generated.bytes, contentType: generated.contentType || 'audio/mpeg', kind: 'voice' });
+      if (!probe?.hasAudio || !(Number(probe.durationMs) > 0)) throw Object.assign(new Error('Voice preview is not decodable audio'), { code: 'VOICE_PREVIEW_INVALID' });
+      generated = { ...generated, durationSeconds: Number(probe.durationMs) / 1000,
+        provenance: { ...(generated.provenance || {}), previewProbe: probe } };
+    }
     const artifact = await this.repository.storeVoicePreview({ workspaceId, brandId, fingerprint: key, voice: normalized,
-      previewTextHash: crypto.createHash('sha256').update(String(previewText)).digest('hex'), ...generated });
+      previewTextHash: crypto.createHash('sha256').update(text).digest('hex'), ...generated });
     return Object.freeze({ artifact: normalizePreviewArtifact(artifact), externalCalls: 1, reused: false });
   }
 }
