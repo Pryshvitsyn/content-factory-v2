@@ -1,0 +1,41 @@
+.quality-recovery-console {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 90;
+  width: min(420px, calc(100vw - 44px));
+  max-height: min(70vh, 680px);
+  overflow: auto;
+  border: 1px solid rgba(132, 204, 22, .32);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(10, 16, 20, .96);
+  box-shadow: 0 22px 70px rgba(0,0,0,.38);
+  backdrop-filter: blur(18px);
+}
+
+.quality-recovery-console__head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.quality-recovery-console__head div { display:grid; gap:3px; }
+.quality-recovery-console__head span { font-size:10px; letter-spacing:.12em; opacity:.66; }
+.quality-recovery-console__head strong { font-size:16px; }
+.quality-recovery-console__zero { padding:6px 8px; border-radius:999px; background:rgba(132,204,22,.12); color:#c8f27b; white-space:nowrap; }
+.quality-recovery-console > p { margin:10px 0 14px; font-size:12px; line-height:1.5; opacity:.75; }
+.quality-recovery-console__message { margin:0 0 12px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.06); font-size:12px; line-height:1.45; }
+.quality-recovery-console__list { display:grid; gap:10px; }
+.quality-recovery-console__item { display:grid; gap:10px; padding:12px; border-radius:13px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.07); }
+.quality-recovery-console__item > div:first-child { display:grid; gap:2px; }
+.quality-recovery-console__item small { opacity:.62; }
+.quality-recovery-console__item code { font-size:10px; opacity:.54; }
+.quality-recovery-console__item dl { margin:0; display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.quality-recovery-console__item dl div { min-width:0; }
+.quality-recovery-console__item dt { font-size:9px; letter-spacing:.08em; text-transform:uppercase; opacity:.5; }
+.quality-recovery-console__item dd { margin:2px 0 0; font-size:11px; overflow-wrap:anywhere; }
+.quality-recovery-console__item button { width:100%; min-height:40px; border-radius:10px; font-weight:700; }
+.quality-recovery-console__recovered { padding:9px 10px; border-radius:10px; background:rgba(132,204,22,.09); color:#d7f7a0; font-size:11px; line-height:1.4; }
+
+/* When free evidence recovery exists, visually de-emphasize paid shot regeneration until the operator resolves evidence first. */
+.quality-recovery-available .shot-inspector > .regenerate { opacity:.38; filter:saturate(.45); }
+
+@media (max-width: 720px) {
+  .quality-recovery-console { left:12px; right:12px; bottom:12px; width:auto; max-height:58vh; }
+}
