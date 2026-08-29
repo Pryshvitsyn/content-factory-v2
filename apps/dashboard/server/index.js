@@ -5,11 +5,12 @@ const path = require('node:path');
 const { Pool } = require('pg');
 const { FilesystemStorageAdapter } = require('../../../src/storage/storage-adapter');
 const { ControlReviewService } = require('../../../src/v2.3/control-review-service');
-const { ProductionCommandService } = require('../../../src/v2.7/production-command-service');
+const { ProductionCommandError, ProductionCommandService } = require('../../../src/v2.7/production-command-service');
 const { ControlRepository } = require('./control-repository');
 const { ControlService } = require('./control-service');
 const { createControlServer } = require('./http-server');
 const { describeProviders } = require('./provider-status');
+const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
 
 function createDashboardRuntime(env = process.env) {
@@ -18,12 +19,19 @@ function createDashboardRuntime(env = process.env) {
   const storage = new FilesystemStorageAdapter({
     root: env.CONTENT_FACTORY_STORAGE_ROOT || path.resolve(process.cwd(), '.artifacts'),
   });
-  const repository = new ControlRepository({ db });
+  const repository = installSemanticRetryState(new ControlRepository({ db }));
   const reviewService = new ControlReviewService({ db });
   const providers = describeProviders(env);
   const providerCatalog = new ProviderCatalog({ env, repository: new PostgresProviderCatalogRepository({ db }) });
   const actor = env.DASHBOARD_ACTOR || 'local-operator';
   const commandService = new ProductionCommandService({ repository, storage, providers, providerCatalog, env, actor });
+  const semanticPreflight = commandService.preflightSemanticRetry.bind(commandService);
+  commandService.preflightSemanticRetry = async (args) => {
+    const active = await repository.activeSemanticRetryAttempt(args.productionId, args.brandId, null);
+    if (active) throw new ProductionCommandError(409, 'SEMANTIC_RETRY_ALREADY_RUNNING',
+      `Semantic recovery attempt ${active.attempt} is already running for this production`);
+    return semanticPreflight(args);
+  };
   const service = new ControlService({
     repository, reviewService, commandService, storage, providers, providerCatalog, actor, env,
   });
