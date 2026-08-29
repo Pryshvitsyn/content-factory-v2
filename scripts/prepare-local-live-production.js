@@ -36,7 +36,10 @@ const V292_MIGRATIONS = [
   'migrations/20260828_v2_9_2_2_semantic_recovery_resume.sql',
   'migrations/20260828_v2_9_2_3_legacy_plan_only_recovery.sql',
 ];
-const V210_MIGRATIONS = ['migrations/20260829_v2_10_creative_production.sql'];
+const V210_MIGRATIONS = [
+  'migrations/20260829_v2_10_creative_production.sql',
+  'migrations/20260829_v2_10_completion.sql',
+];
 
 function discoverDatabaseUrl(env = process.env) {
   const discovered = discoverLocalDatabase(env);
