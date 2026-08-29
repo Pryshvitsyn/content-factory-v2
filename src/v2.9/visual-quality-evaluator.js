@@ -4,6 +4,23 @@ const { combineResults, normalizeTier, qualityCheck, qualityResult, REASON_CODES
 const { deterministicTemporalChecks, deterministicVisualChecks } = require('./deterministic-visual-evaluator');
 const { DisabledSemanticVisualEvaluatorAdapter } = require('./semantic-visual-evaluator');
 const { FfmpegFrameSampler } = require('./frame-sampler');
+const { reconcileVisualEvidence, RECONCILIATION_VERSION } = require('../v2.10.1/quality-evidence-reconciliation');
+
+function effectiveVisualGate({ evaluationClass, tier, deterministicVisual, temporal, semantic, metadata = {} }) {
+  const rawEvaluation = combineResults({ qualityClass: `${evaluationClass}_VISUAL_RAW_EVIDENCE`, tier,
+    results: [deterministicVisual, temporal, semantic], metadata: { evaluatorVersion: 'v2.10.1-raw-evidence' } });
+  const reconciliation = reconcileVisualEvidence({ deterministic: deterministicVisual, temporal, semantic,
+    qualityTier: tier });
+  const result = qualityResult({ qualityClass: `${evaluationClass}_VISUAL_GATE`, tier,
+    checks: reconciliation.checks, metadata: {
+      ...metadata,
+      evaluatorVersion: 'v2.10.1',
+      reconciliationVersion: RECONCILIATION_VERSION,
+      disposition: reconciliation.disposition,
+      rawStatus: rawEvaluation.status,
+    } });
+  return Object.freeze({ ...result, disposition: reconciliation.disposition, reconciliation, rawEvaluation });
+}
 
 class VisualQualityEvaluator {
   constructor({ frameSampler = new FfmpegFrameSampler(), semanticAdapter = new DisabledSemanticVisualEvaluatorAdapter() } = {}) {
@@ -42,22 +59,22 @@ class VisualQualityEvaluator {
       })], metadata: { configured: this.semanticAdapter.configured === true, evaluated: false,
         provider: this.semanticAdapter.provider, model: this.semanticAdapter.model, externalCalls: 0,
         evaluationType: 'semantic_visual_evaluation' } });
-    const result = combineResults({ qualityClass: `${evaluationClass}_VISUAL_GATE`, tier,
-      results: [deterministicVisual, temporal, semantic], metadata: {
-        evaluatorVersion: 'v2.9', provider, model, generationSettings,
-        semanticProvider: this.semanticAdapter.provider, semanticModel: this.semanticAdapter.model,
-        semanticExternalCalls: semantic.metadata?.externalCalls || 0,
-        semanticEvaluationRequired: semanticRequired,
-      } });
-    return Object.freeze({ ...result, deterministicVisual, temporal, semantic, sampledFrames: Object.freeze(frames) });
+    const result = effectiveVisualGate({ evaluationClass, tier, deterministicVisual, temporal, semantic, metadata: {
+      provider, model, generationSettings,
+      semanticProvider: this.semanticAdapter.provider, semanticModel: this.semanticAdapter.model,
+      semanticExternalCalls: semantic.metadata?.externalCalls || 0,
+      semanticEvaluationRequired: semanticRequired,
+    } });
+    return Object.freeze({ ...result, deterministicVisual, temporal, semantic,
+      sampledFrames: Object.freeze(frames) });
   }
 
   async retrySemantic({ priorEvaluation, frames, creativePlan = null, negativeIntent = null,
     expectedAspectRatio = '9:16', intendedContentType = 'cinematic', qualityTier = 'STANDARD',
     provider = null, model = null, generationSettings = {}, evaluationClass = 'SOURCE' } = {}) {
     const tier = normalizeTier(qualityTier);
-    if (priorEvaluation?.deterministicVisual?.status !== 'PASS' || priorEvaluation?.temporal?.status !== 'PASS') {
-      const error = new Error('Semantic-only retry requires prior deterministic and temporal PASS evidence');
+    if (priorEvaluation?.deterministicVisual?.status === 'FAIL' || priorEvaluation?.temporal?.status === 'FAIL') {
+      const error = new Error('Semantic-only retry requires prior deterministic and temporal evidence without FAIL');
       error.code = 'SEMANTIC_RETRY_PREREQUISITES_FAILED';
       throw error;
     }
@@ -72,9 +89,9 @@ class VisualQualityEvaluator {
     const semantic = await this.semanticAdapter.evaluate({ frames: semanticFrames, creativePlan, negativeIntent,
       expectedAspectRatio, intendedContentType, qualityTier: tier, provider, model, generationSettings,
       evaluationClass });
-    const result = combineResults({ qualityClass: `${evaluationClass}_VISUAL_GATE`, tier,
-      results: [priorEvaluation.deterministicVisual, priorEvaluation.temporal, semantic], metadata: {
-        evaluatorVersion: 'v2.9.2', provider, model, generationSettings,
+    const result = effectiveVisualGate({ evaluationClass, tier,
+      deterministicVisual: priorEvaluation.deterministicVisual, temporal: priorEvaluation.temporal, semantic, metadata: {
+        provider, model, generationSettings,
         semanticProvider: this.semanticAdapter.provider, semanticModel: this.semanticAdapter.model,
         semanticExternalCalls: semantic.metadata?.externalCalls || 0,
         semanticEvaluationRequired: true, semanticOnlyRetry: true,
@@ -89,4 +106,4 @@ class VisualQualityEvaluator {
   }
 }
 
-module.exports = { VisualQualityEvaluator };
+module.exports = { VisualQualityEvaluator, effectiveVisualGate };
