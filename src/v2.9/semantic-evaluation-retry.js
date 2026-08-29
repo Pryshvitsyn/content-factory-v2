@@ -51,6 +51,14 @@ function reusableSemanticPass({ attempt, sourceArtifact, previousEvidenceArtifac
     attempt: reusable ? attempt.attempt : null, evaluation: reusable ? attempt.result_evidence : null });
 }
 
+function reusableSemanticPassFromHistory({ attempts = [], sourceArtifact, previousEvidenceArtifact, evaluator } = {}) {
+  for (const attempt of attempts) {
+    const candidate = reusableSemanticPass({ attempt, sourceArtifact, previousEvidenceArtifact, evaluator });
+    if (candidate.reusable) return candidate;
+  }
+  return Object.freeze({ reusable: false, attemptId: null, attempt: null, evaluation: null });
+}
+
 function partialMediaPlan({ input, sourceAssetId, executions = [] } = {}) {
   const byAsset = new Map(executions.map((row) => [String(row.asset_id || row.assetId), row]));
   const assets = input?.assetPlan?.assets || [];
@@ -141,21 +149,46 @@ class PostgresSemanticEvaluationAttemptRepository {
     return result.rows[0] || null;
   }
 
+  async history({ workspaceId, brandId, productionId, assetId, limit = 25 }) {
+    const bounded = Math.max(1, Math.min(100, Number(limit) || 25));
+    const result = await this.db.query(`/* v2.9.2.6:semantic-retry-history */
+      SELECT * FROM v2_9.semantic_evaluation_attempts
+      WHERE workspace_id=$1 AND brand_id=$2 AND production_id=$3 AND asset_id=$4
+      ORDER BY attempt DESC LIMIT $5`, [workspaceId, brandId, productionId, assetId, bounded]);
+    return result.rows;
+  }
+
+  async active({ workspaceId, brandId, productionId, assetId }) {
+    const result = await this.db.query(`/* v2.9.2.6:active-semantic-retry */
+      SELECT * FROM v2_9.semantic_evaluation_attempts
+      WHERE workspace_id=$1 AND brand_id=$2 AND production_id=$3 AND asset_id=$4 AND status='RUNNING'
+      ORDER BY attempt DESC LIMIT 1`, [workspaceId, brandId, productionId, assetId]);
+    return result.rows[0] || null;
+  }
+
   async start({ workspaceId, brandId, productionId, jobId, assetId, sourceArtifact, previousEvidence, evaluator,
     mediaPlan = {}, expectedSemanticCalls = 1, reusedSemanticAttemptId = null,
     recoveryPhase = expectedSemanticCalls === 0 ? 'SEMANTIC_PASSED' : 'BEFORE_SEMANTIC' }) {
-    const result = await this.db.query(`/* v2.9.2:start-semantic-retry */
-      INSERT INTO v2_9.semantic_evaluation_attempts
-        (workspace_id,brand_id,production_id,job_id,asset_id,attempt,status,source_artifact,previous_evidence,
-         evaluator_provider,evaluator_model,expected_semantic_calls,possible_post_pass_speech_calls,
-         reused_video_assets,reused_speech_assets,reused_semantic_attempt_id,recovery_phase)
-      SELECT $1,$2,$3,$4,$5,coalesce(max(attempt),0)+1,'RUNNING',$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15
-      FROM v2_9.semantic_evaluation_attempts WHERE production_id=$3 AND asset_id=$5 RETURNING *`,
-    [workspaceId, brandId, productionId, jobId, assetId, JSON.stringify(sourceArtifact),
-      JSON.stringify(previousEvidence), evaluator.provider, evaluator.model, expectedSemanticCalls,
-      mediaPlan.possiblePostPassSpeechGenerations || 0, mediaPlan.reusedVideoAssets || 0, 0,
-      reusedSemanticAttemptId, recoveryPhase]);
-    return result.rows[0];
+    try {
+      const result = await this.db.query(`/* v2.9.2:start-semantic-retry */
+        INSERT INTO v2_9.semantic_evaluation_attempts
+          (workspace_id,brand_id,production_id,job_id,asset_id,attempt,status,source_artifact,previous_evidence,
+           evaluator_provider,evaluator_model,expected_semantic_calls,possible_post_pass_speech_calls,
+           reused_video_assets,reused_speech_assets,reused_semantic_attempt_id,recovery_phase)
+        SELECT $1,$2,$3,$4,$5,coalesce(max(attempt),0)+1,'RUNNING',$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15
+        FROM v2_9.semantic_evaluation_attempts WHERE production_id=$3 AND asset_id=$5 RETURNING *`,
+      [workspaceId, brandId, productionId, jobId, assetId, JSON.stringify(sourceArtifact),
+        JSON.stringify(previousEvidence), evaluator.provider, evaluator.model, expectedSemanticCalls,
+        mediaPlan.possiblePostPassSpeechGenerations || 0, mediaPlan.reusedVideoAssets || 0, 0,
+        reusedSemanticAttemptId, recoveryPhase]);
+      return result.rows[0];
+    } catch (error) {
+      if (error.code === '23505') {
+        throw new SemanticRetryError('SEMANTIC_RETRY_ALREADY_RUNNING',
+          'Another semantic recovery attempt is already running for this production and source asset');
+      }
+      throw error;
+    }
   }
 
   async finish({ id, status, resultEvidence = null, error = null, actualSemanticCalls = 1,
@@ -254,10 +287,16 @@ class SemanticEvaluationRetryService {
     try {
       const sourceMedia = await this.mediaExecutor.loadExisting({ workspaceId: production.workspaceId,
         productionId: production.id, brandId: production.brandId, workerId, asset: sourceAsset });
-      const latestAttempt = typeof this.repository.latest === 'function' ? await this.repository.latest({
-        workspaceId: production.workspaceId, brandId: production.brandId, productionId: production.id,
-        assetId: plan.assetId }) : null;
-      const reusable = reusableSemanticPass({ attempt: latestAttempt, sourceArtifact: sourceMedia.artifact,
+      let attemptHistory = [];
+      if (typeof this.repository.history === 'function') {
+        attemptHistory = await this.repository.history({ workspaceId: production.workspaceId, brandId: production.brandId,
+          productionId: production.id, assetId: plan.assetId });
+      } else if (typeof this.repository.latest === 'function') {
+        const latestAttempt = await this.repository.latest({ workspaceId: production.workspaceId,
+          brandId: production.brandId, productionId: production.id, assetId: plan.assetId });
+        if (latestAttempt) attemptHistory = [latestAttempt];
+      }
+      const reusable = reusableSemanticPassFromHistory({ attempts: attemptHistory, sourceArtifact: sourceMedia.artifact,
         previousEvidenceArtifact: plan.previousEvidenceArtifact, evaluator: this.evaluator.semanticAdapter });
       attempt = await this.repository.start({ workspaceId: production.workspaceId, brandId: production.brandId,
         productionId: production.id, jobId: production.jobId, assetId: plan.assetId,
@@ -289,8 +328,6 @@ class SemanticEvaluationRetryService {
           'Semantic retry did not PASS; master assembly remains blocked', { evaluation: durableEvaluation });
       }
 
-      // Materialize and hash-verify the exact persisted frame evidence before any post-PASS paid media call.
-      // JSON-round-tripped Buffer objects from older attempts are deliberately ignored; artifact storage is authoritative.
       const masterEvaluation = await materializeEvaluationFrames(this.storage, durableEvaluation);
 
       failurePhase = 'POST_PASS_MEDIA_FAILED';
@@ -354,6 +391,6 @@ class SemanticEvaluationRetryService {
 
 module.exports = { AMBIGUOUS_MEDIA_STATUSES, RETRYABLE_SEMANTIC_CODES, SemanticRetryError,
   artifactIdentityMatches, durableArtifactRecorded, durableSemanticEvaluation, evidenceLineageMatches,
-  materializeEvaluationFrames, partialMediaPlan, retryPlan, reusableSemanticPass, semanticFrameDescriptor,
-  sourceArtifactFromExecution, validSemanticPass,
+  materializeEvaluationFrames, partialMediaPlan, retryPlan, reusableSemanticPass, reusableSemanticPassFromHistory,
+  semanticFrameDescriptor, sourceArtifactFromExecution, validSemanticPass,
   PostgresSemanticEvaluationAttemptRepository, SemanticEvaluationRetryService, loadVerifiedFrames };
