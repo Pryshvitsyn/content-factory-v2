@@ -267,15 +267,15 @@ class ControlService {
       brandId: requiredUuid('brandId', brandId), requestId: requiredUuid('requestId', requestId), reason });
   }
 
-  async preflightShotRegeneration({ productionId, brandId, shotId, requestId, instruction }) {
+  async preflightShotRegeneration({ productionId, brandId, shotId, requestId, instruction, recoveryReason }) {
     return this.requireCommands().preflightShotRegeneration({ productionId: requiredUuid('productionId', productionId),
-      brandId: requiredUuid('brandId', brandId), shotId, requestId: requiredUuid('requestId', requestId), instruction });
+      brandId: requiredUuid('brandId', brandId), shotId, requestId: requiredUuid('requestId', requestId), instruction, recoveryReason });
   }
 
-  async regenerateShot({ productionId, brandId, shotId, requestId, instruction, preflightId, confirmation }) {
+  async regenerateShot({ productionId, brandId, shotId, requestId, instruction, preflightId, confirmation, recoveryReason }) {
     return this.requireCommands().regenerateShot({ productionId: requiredUuid('productionId', productionId),
       brandId: requiredUuid('brandId', brandId), shotId, requestId: requiredUuid('requestId', requestId),
-      instruction, preflightId, confirmation });
+      instruction, preflightId, confirmation, recoveryReason });
   }
 
   async artifactContent({ sourceId, artifactId, version, brandId }) {

@@ -45,6 +45,20 @@ export function QualityRecoveryConsole() {
     try {
       const path = `/api/productions/${item.id}/quality-recovery`;
       const plan = await api(`${path}/preflight`, { method: 'POST', body: JSON.stringify({ brandId: item.brandId }) });
+      if (plan.action === 'REGENERATE_SHOT') {
+        const requestId = globalThis.crypto?.randomUUID?.() || '11111111-1111-4111-8111-111111111111';
+        const instruction = 'V2.10.2 deterministic source-geometry recovery; preserve approved creative and established continuity.';
+        const shotPath = `/api/productions/${item.id}/shots/${encodeURIComponent(plan.shotId)}`;
+        const shotPlan = await api(`${shotPath}/preflight`, { method: 'POST', body: JSON.stringify({
+          brandId: item.brandId, requestId, instruction, recoveryReason: 'SOURCE_GEOMETRY' }) });
+        const approved = window.confirm(`SOURCE GEOMETRY FAILED\n${plan.actualWidth || '?'}×${plan.actualHeight || '?'}\nExpected ${plan.expectedAspectRatio}\n\nRecovery:\nREGENERATE FAILED SHOT\n\nEstimated new video generations: ${shotPlan.expectedVideoGenerations}\nExisting good assets reused: yes\nExisting semantic evidence reused: no (replacement is revalidated)\nMaximum automatic geometry attempts: 1\nRequires paid provider confirmation: yes\n\nExternal calls: ${shotPlan.expectedExternalCalls}\nCost: ${shotPlan.costStatus || 'UNKNOWN'}`);
+        if (!approved) { setMessage('Geometry recovery cancelled before any provider call.'); return; }
+        const result = await api(`${shotPath}/regenerate`, { method: 'POST', body: JSON.stringify({
+          brandId: item.brandId, requestId, instruction, recoveryReason: 'SOURCE_GEOMETRY',
+          preflightId: shotPlan.preflightId, confirmation: true }) });
+        setMessage(`Failed ${plan.assetId} replacement accepted as ${result.replacementAssetId}. Shot 1 and audio remain immutable and reused.`);
+        await load(); return;
+      }
       const semantic = plan.semanticEvidence === 'REUSED' ? 'REUSED · 0 calls' : `${plan.semanticEvaluations || 0} external call(s)`;
       const approved = window.confirm(`Re-evaluate existing immutable source?\n\nSOURCE\n${plan.assetId} · ${plan.existingMedia}\n\nVIDEO REGENERATION\n0\n\nSEMANTIC\n${semantic}\n\nTOTAL EXTERNAL CALLS\n${plan.expectedExternalCalls || 0}\n\nEVIDENCE\n${plan.evidenceVersionFrom || 'previous'} → ${plan.evidenceVersionTo}\n\nNo video provider call will be made by this recovery action.`);
       if (!approved) { setMessage('Quality recovery cancelled. No external call was made.'); return; }
@@ -75,16 +89,18 @@ export function QualityRecoveryConsole() {
 
   if (!visible || !items.length) return null;
   return <aside className="quality-recovery-console" aria-label="Quality evidence recovery">
-    <div className="quality-recovery-console__head"><div><span>V2.10.1 · SAFE RECOVERY</span><strong>Paid asset protection</strong></div><span className="quality-recovery-console__zero">VIDEO REGEN · 0</span></div>
-    <p>Re-evaluate persisted media before paying to regenerate it. Recovery never starts a video provider call.</p>
+    <div className="quality-recovery-console__head"><div><span>V2.10.2 · SAFE RECOVERY</span><strong>Source recovery & paid asset protection</strong></div><span className="quality-recovery-console__zero">BOUNDED · EXPLICIT</span></div>
+    <p>Evidence-only issues reuse immutable media. Objective geometry failures offer one confirmed failed-shot replacement and preserve good assets.</p>
     {message ? <div className="quality-recovery-console__message">{message}</div> : null}
     <div className="quality-recovery-console__list">{items.map((item) => {
       const recovery = item.qualityRecovery || {};
       return <article key={item.id} className="quality-recovery-console__item">
         <div><small>{item.brandName}</small><strong>{item.title || item.name}</strong><code>{item.id.slice(0, 8)}</code></div>
         <dl><div><dt>Source</dt><dd>{recovery.assetId || recovery.evidence?.artifactId || 'immutable media'}</dd></div><div><dt>Media</dt><dd>{recovery.existingMedia || 'REUSED'}</dd></div><div><dt>Semantic</dt><dd>{recovery.semanticEvidence || (recovery.recovered ? 'RECORDED' : '—')}</dd></div><div><dt>Disposition</dt><dd>{recovery.disposition || recoveryLabel(item)}</dd></div></dl>
-        {recovery.eligible ? <button disabled={busy === item.id} onClick={() => recover(item)}>RE-EVALUATE EXISTING ASSET · 0 VIDEO CALLS</button>
-          : recovery.recovered ? <><div className="quality-recovery-console__recovered">✓ Existing source re-evaluated · exact V2.10 identity preserved</div><button disabled={busy === `continue:${item.id}`} onClick={() => continueSameExecution(item)}>CONTINUE SAME EXECUTION</button></>
+        {recovery.eligible ? <button disabled={busy === item.id} onClick={() => recover(item)}>{recovery.action === 'REGENERATE_SHOT' ? 'REGENERATE FAILED SHOT · 1 VIDEO' : 'RE-EVALUATE EXISTING ASSET · 0 VIDEO CALLS'}</button>
+          : recovery.recovered ? <><div className="quality-recovery-console__recovered">{recovery.recoveryKind === 'SOURCE_GEOMETRY'
+            ? '✓ Failed source replaced immutably · exact production identity preserved'
+            : '✓ Existing source re-evaluated · exact V2.10 identity preserved'}</div><button disabled={busy === `continue:${item.id}`} onClick={() => continueSameExecution(item)}>CONTINUE SAME EXECUTION</button></>
             : <div className="quality-recovery-console__recovered">Recovery is not currently available.</div>}
       </article>;
     })}</div>

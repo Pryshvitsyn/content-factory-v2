@@ -110,10 +110,12 @@ class PostgresMediaExecutionRepository {
     return result.rows[0] || null;
   }
 
-  async markBoundary({ id, workerId }) {
+  async markBoundary({ id, workerId, requestEvidence = null }) {
     const result = await this.db.query(`/* v2.5:mark-media-provider-boundary */
-      UPDATE v2_5.media_executions SET status='MAY_HAVE_STARTED',provider_boundary_at=now(),updated_at=now()
-      WHERE id=$1 AND worker_id=$2 AND status='RUNNING' RETURNING *`, [id, workerId]);
+      UPDATE v2_5.media_executions SET status='MAY_HAVE_STARTED',provider_boundary_at=now(),
+        provenance=coalesce(provenance,'{}'::jsonb)||$3::jsonb,updated_at=now()
+      WHERE id=$1 AND worker_id=$2 AND status='RUNNING' RETURNING *`,
+    [id, workerId, JSON.stringify(requestEvidence ? { preProviderRequestEvidence: requestEvidence } : {})]);
     if (!result.rows[0]) throw new DurableMediaError('MEDIA_EXECUTION_FENCED', 'Media execution ownership was lost before provider boundary');
     return result.rows[0];
   }
@@ -147,7 +149,8 @@ class PostgresMediaExecutionRepository {
     await this.db.query(`/* v2.5:fail-media-execution */
       UPDATE v2_5.media_executions SET status=$3,worker_id=NULL,error=$4::jsonb,updated_at=now()
       WHERE id=$1 AND ($2::text IS NULL OR worker_id=$2 OR worker_id IS NULL)`,
-    [id, workerId || null, status, JSON.stringify({ code: error.code || 'MEDIA_EXECUTION_FAILED', message: error.message })]);
+    [id, workerId || null, status, JSON.stringify({ code: error.code || 'MEDIA_EXECUTION_FAILED', message: error.message,
+      details: error.details || null })]);
   }
 }
 
@@ -157,7 +160,7 @@ function parseProvenanceArtifact(artifact) {
 }
 
 class DurableMediaExecutor {
-  constructor({ repository, providerGateway, artifactService, mediaInspector, assetRepository = null } = {}) {
+  constructor({ repository, providerGateway, artifactService, mediaInspector, assetRepository = null, outputValidator = null } = {}) {
     if (!repository) throw new Error('repository is required');
     if (!providerGateway) throw new Error('providerGateway is required');
     if (!artifactService) throw new Error('artifactService is required');
@@ -167,6 +170,7 @@ class DurableMediaExecutor {
     this.artifactService = artifactService;
     this.mediaInspector = mediaInspector;
     this.assetRepository = assetRepository;
+    this.outputValidator = outputValidator;
   }
 
   selection(asset) {
@@ -247,7 +251,14 @@ class DurableMediaExecutor {
       } else {
         row = await this.repository.claim({ id: row.id, workerId });
         if (!row) throw new DurableMediaError('MEDIA_EXECUTION_NOT_CLAIMED', `Asset ${asset.asset_id} is already claimed or terminal`);
-        row = await this.repository.markBoundary({ id: row.id, workerId });
+        row = await this.repository.markBoundary({ id: row.id, workerId, requestEvidence: {
+          capability: asset.generation_requirements?.capability || capabilityForAssetKind(asset.kind),
+          canonicalAspectRatio: asset.generation_requirements?.aspect_ratio || null,
+          referencePolicy: asset.generation_requirements?.v210_reference?.policy || 'NONE',
+          referenceGeometry: asset.generation_requirements?.v210_reference_evidence || null,
+          resolvedSettings: asset.generation_requirements?.resolved_settings || {},
+          seed: asset.generation_requirements?.seed ?? null,
+        } });
         boundaryCrossed = true;
         media = await generateMediaAsset({
           providerGateway: this.providerGateway, asset, productionId, brandId, workerId,
@@ -265,6 +276,17 @@ class DurableMediaExecutor {
       }
       const probe = await this.mediaInspector.inspect({ bytes: media.bytes, contentType: media.contentType, kind: asset.kind,
         expectedDurationMs: asset.generation_requirements?.target_clip_duration_ms || null });
+      if (this.outputValidator) {
+        try { await this.outputValidator({ workspaceId, productionId, brandId, workerId, asset, media, probe, row }); }
+        catch (error) {
+          const rejectedArtifact = await this.artifactService.createVersion({ artifactId: `${identities.artifactId}:rejected`,
+            type: 'binary', content: media.bytes, idempotencyKey: `${identities.idempotencyKey}:rejected`,
+            provider: media.provider, model: media.model, validationStatus: 'rejected_provider_output' });
+          error.details = { ...(error.details || {}), rejectedArtifact: { artifactId: rejectedArtifact.artifactId,
+            version: rejectedArtifact.version, storageKey: rejectedArtifact.storageKey, contentHash: rejectedArtifact.contentHash } };
+          throw error;
+        }
+      }
       const artifact = await this.artifactService.createVersion({
         artifactId: identities.artifactId, type: 'binary', content: media.bytes, idempotencyKey: identities.idempotencyKey,
         provider: media.provider, model: media.model, validationStatus: 'validated_media',
@@ -282,7 +304,8 @@ class DurableMediaExecutor {
       await this.registerAsset({ productionId, asset, media: resolved, workerId, identities, probe });
       return Object.freeze({ ...resolved, durableExecutionId: row.id });
     } catch (error) {
-      const terminal = /PREDICTION_(FAILED|CANCELED)/.test(error.code || '');
+      const terminal = /PREDICTION_(FAILED|CANCELED)/.test(error.code || '')
+        || error.code === 'PROVIDER_OUTPUT_GEOMETRY_MISMATCH';
       await this.repository.markFailure({ id: row.id, workerId, error, boundaryCrossed, terminal }).catch(() => {});
       throw error;
     }

@@ -8,6 +8,11 @@ const { persistVisualQualityEvidence } = require('../../worker/v2.1-master-produ
 
 const QUALITY_RECOVERY_VERSION = 'v2.10.1';
 const RECOVERABLE_ERROR = 'SOURCE_QUALITY_VALIDATION_FAILED';
+const DIRECT_HARD_MEDIA_ERRORS = Object.freeze(new Set(['PROVIDER_OUTPUT_GEOMETRY_MISMATCH']));
+const HARD_MEDIA_FAILURE_CODES = Object.freeze(new Set([
+  'WRONG_ORIENTATION','SOURCE_MEDIA_READABLE','SOURCE_RESOLUTION_BELOW_POLICY','FRAME_CORRUPTION',
+  'PROVIDER_OUTPUT_GEOMETRY_MISMATCH','MEDIA_UNREADABLE','MEDIA_VIDEO_STREAM_MISSING',
+]));
 
 class QualityRecoveryError extends Error {
   constructor(status, code, message, details = null) {
@@ -28,8 +33,28 @@ function candidateFromProduction(production) {
   const sourceQuality = production?.jobError?.details?.sourceQuality || null;
   const shots = Array.isArray(sourceQuality?.shots) ? sourceQuality.shots : [];
   const failed = shots.filter((shot) => shot?.status === 'FAIL');
-  if (failed.length !== 1) return null;
-  return failed[0];
+  if (failed.length === 1) return failed[0];
+  const direct = production?.jobError;
+  if (!DIRECT_HARD_MEDIA_ERRORS.has(direct?.code) || !direct?.details?.assetId) return null;
+  return Object.freeze({ assetId: direct.details.assetId, status: 'FAIL',
+    sourceProbe: Object.freeze({ width: direct.details.actualWidth || null, height: direct.details.actualHeight || null }),
+    deterministicVisual: Object.freeze({ status: 'FAIL', hardFailure: true, checks: Object.freeze([Object.freeze({
+      code: direct.code, status: 'FAIL', hardFailure: true, evidence: Object.freeze({
+        width: direct.details.actualWidth || null, height: direct.details.actualHeight || null,
+        expectedAspectRatio: direct.details.requestedAspectRatio || null,
+      }),
+    })]) }),
+  });
+}
+
+function hardMediaFailures(candidate) {
+  return (candidate?.deterministicVisual?.checks || []).filter((check) => check.status === 'FAIL'
+    && HARD_MEDIA_FAILURE_CODES.has(check.code)).map((check) => check.code);
+}
+
+function shotIdForAsset(production, assetId) {
+  return production?.jobPayload?.canonicalRawInput?.scenes?.flatMap((scene) => scene.shots || [])
+    .find((shot) => String(shot.asset_id) === String(assetId))?.shot_id || null;
 }
 
 function semanticEvidenceReusable(candidate, env = process.env) {
@@ -133,20 +158,58 @@ class QualityRecoveryService {
   async inspect({ productionId, brandId, production = null } = {}) {
     const item = production || await this.load(productionId, brandId);
     const recovered = item.jobPayload?.qualityRecovery;
+    const geometryRecovered = item.jobPayload?.geometryRecovery;
+    if (item.jobStatus === 'RETRYING' && geometryRecovered?.status === 'SUCCEEDED') {
+      return Object.freeze({ eligible: false, recovered: true, action: 'CONTINUE_SAME_EXECUTION',
+        status: 'READY_TO_CONTINUE', recoveryKind: 'SOURCE_GEOMETRY',
+        assetId: geometryRecovered.sourceAssetId, replacementAssetId: geometryRecovered.replacementAssetId,
+        existingMedia: 'SUPERSEDED_IMMUTABLY', videoRegenerations: 1, semanticEvaluations: 0,
+        expectedExternalCalls: 0, disposition: 'REPLACED', evidence: geometryRecovered.quality || null });
+    }
     if (item.jobStatus === 'RETRYING' && recovered?.status === 'SUCCEEDED') {
       return Object.freeze({ eligible: false, recovered: true, action: 'CONTINUE_SAME_EXECUTION',
         status: 'READY_TO_CONTINUE', videoRegenerations: 0, semanticEvaluations: recovered.semanticExternalCalls || 0,
         evidence: recovered.evidence || null, disposition: recovered.disposition || null });
     }
-    if (item.jobStatus !== 'FAILED' || item.jobError?.code !== RECOVERABLE_ERROR) {
+    if (item.jobStatus !== 'FAILED' || (item.jobError?.code !== RECOVERABLE_ERROR
+      && !DIRECT_HARD_MEDIA_ERRORS.has(item.jobError?.code))) {
       return Object.freeze({ eligible: false, recovered: false, action: null, status: 'NOT_APPLICABLE' });
     }
     const candidate = candidateFromProduction(item);
     if (!candidate?.assetId) return Object.freeze({ eligible: false, recovered: false, action: null,
       status: 'BLOCKED', reason: 'A single failed source asset could not be identified from durable quality evidence.' });
-    const safety = await this.repository.executionSafety(item.id);
+    const safety = typeof this.repository.executionSafety === 'function'
+      ? await this.repository.executionSafety(item.id) : { ambiguousExecutions: 0 };
     if (safety.ambiguousExecutions > 0) return Object.freeze({ eligible: false, recovered: false,
       action: 'RECONCILE_EXTERNAL_EXECUTION', status: 'BLOCKED', reason: 'Ambiguous provider execution must be reconciled first.' });
+    const hardFailures = hardMediaFailures(candidate);
+    if (hardFailures.length) {
+      const prior = typeof this.repository.latestSuccessfulGeometryRecovery === 'function'
+        ? await this.repository.latestSuccessfulGeometryRecovery(item.id, item.brandId, candidate.assetId) : null;
+      if (prior) return Object.freeze({ eligible: false, recovered: true, action: 'CONTINUE_SAME_EXECUTION',
+        status: 'READY_TO_CONTINUE', assetId: candidate.assetId, shotId: prior.shotId || prior.shot_id,
+        replacementAssetId: prior.replacementAssetId || prior.replacement_asset_id,
+        recoveryKind: 'SOURCE_GEOMETRY', hardFailureCodes: hardFailures, existingMedia: 'SUPERSEDED_IMMUTABLY',
+        videoRegenerations: 1, semanticEvaluations: 0, expectedExternalCalls: 0,
+        evidence: prior.result?.quality?.evidenceArtifact || null, disposition: 'REPLACED' });
+      const attempts = typeof this.repository.countGeometryRecoveries === 'function'
+        ? await this.repository.countGeometryRecoveries(item.id, candidate.assetId, item.brandId) : 0;
+      const orientation = (candidate.deterministicVisual?.checks || []).find((check) => check.code === 'WRONG_ORIENTATION')?.evidence || {};
+      return Object.freeze({ eligible: attempts < 1, recovered: false, action: 'REGENERATE_SHOT',
+        status: attempts < 1 ? 'READY' : 'BLOCKED', reason: attempts < 1
+          ? 'Objective source geometry cannot be repaired by re-evaluating the same immutable bytes.'
+          : 'The one automatic geometry replacement allowance has already been used; explicit operator escalation is required.',
+        assetId: candidate.assetId, shotId: shotIdForAsset(item, candidate.assetId), recoveryKind: 'SOURCE_GEOMETRY',
+        hardFailureCodes: hardFailures, actualWidth: orientation.width || candidate.sourceProbe?.width || null,
+        actualHeight: orientation.height || candidate.sourceProbe?.height || null,
+        expectedAspectRatio: orientation.expectedAspectRatio || item.jobPayload?.canonicalRawInput?.aspect_ratio || '9:16',
+        existingMedia: 'FAILED_IMMUTABLE_V1_PRESERVED', existingGoodAssetsReused: true,
+        videoRegenerations: 1, newVideoGenerations: 1, semanticEvidence: 'NOT_REUSED_FOR_REPLACEMENT',
+        semanticEvaluations: 1, expectedExternalCalls: 2, maximumExternalCalls: 2,
+        requiresPaidProviderConfirmation: true,
+        automaticGeometryAttemptsUsed: attempts, automaticGeometryAttemptsMaximum: 1,
+        nextActionAfterRecovery: 'CONTINUE_SAME_EXECUTION' });
+    }
     const executions = await this.repository.semanticRetryMediaExecutions(item.id, item.brandId);
     const row = executions.find((entry) => String(entry.asset_id) === String(candidate.assetId));
     if (!durableMedia(row)) return Object.freeze({ eligible: false, recovered: false, action: 'REGENERATE_SHOT',
@@ -185,6 +248,8 @@ class QualityRecoveryService {
       return Object.freeze({ accepted: false, reused: true, ...production.jobPayload.qualityRecovery });
     }
     const plan = await this.inspect({ productionId, brandId, production });
+    if (plan.action === 'REGENERATE_SHOT') throw new QualityRecoveryError(409, 'QUALITY_RECOVERY_REGENERATION_REQUIRED',
+      'This objective source failure requires the explicit REGENERATE FAILED SHOT action; the same immutable bytes will not be re-evaluated', plan);
     if (!plan.eligible) throw new QualityRecoveryError(409, 'QUALITY_RECOVERY_UNAVAILABLE',
       plan.reason || 'Quality evidence recovery is not available for this production', plan);
     const candidate = candidateFromProduction(production);
@@ -279,4 +344,7 @@ module.exports = {
   durableMedia,
   recoverySemanticAdapter,
   semanticEvidenceReusable,
+  HARD_MEDIA_FAILURE_CODES,
+  hardMediaFailures,
+  shotIdForAsset,
 };

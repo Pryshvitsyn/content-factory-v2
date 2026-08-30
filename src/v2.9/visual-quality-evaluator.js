@@ -50,8 +50,19 @@ class VisualQualityEvaluator {
     const temporal = deterministicTemporalChecks({ frames, qualityTier: tier, motionExpected });
     const semanticFrames = frames.map((frame) => ({ ratio: frame.ratio, timestampMs: frame.timestampMs,
       contentType: 'image/jpeg', bytes: frame.jpeg, analysisHash: frame.analysisHash }));
-    const semanticRequired = semanticEvaluationRequired !== false;
-    const semantic = semanticRequired
+    const semanticRequested = semanticEvaluationRequired !== false;
+    const deterministicBlock = deterministicVisual.hardFailure === true;
+    const semanticRequired = semanticRequested && !deterministicBlock;
+    const semantic = deterministicBlock
+      ? qualityResult({ qualityClass: 'SEMANTIC_VISUAL', tier, checks: [qualityCheck({
+        code: REASON_CODES.NOT_EVALUATED_DUE_TO_DETERMINISTIC_BLOCK, status: 'PASS',
+        qualityClass: 'SEMANTIC_VISUAL', hardFailure: false,
+        reason: 'Paid semantic evaluation was skipped because deterministic source evidence already contains a non-negotiable technical block.',
+      })], metadata: { configured: this.semanticAdapter.configured === true, evaluated: false,
+        skipped: true, skipReason: REASON_CODES.NOT_EVALUATED_DUE_TO_DETERMINISTIC_BLOCK,
+        provider: this.semanticAdapter.provider, model: this.semanticAdapter.model, externalCalls: 0,
+        evaluationType: 'semantic_visual_evaluation' } })
+      : semanticRequired
       ? await this.semanticAdapter.evaluate({ frames: semanticFrames, creativePlan, negativeIntent,
         expectedAspectRatio, intendedContentType, qualityTier: tier, provider, model, generationSettings,
         evaluationClass })
@@ -66,7 +77,8 @@ class VisualQualityEvaluator {
       provider, model, generationSettings,
       semanticProvider: this.semanticAdapter.provider, semanticModel: this.semanticAdapter.model,
       semanticExternalCalls: semantic.metadata?.externalCalls || 0,
-      semanticEvaluationRequired: semanticRequired,
+      semanticEvaluationRequired: semanticRequired, semanticEvaluationRequested: semanticRequested,
+      semanticSkippedDueToDeterministicBlock: deterministicBlock,
     } });
     return Object.freeze({ ...result, deterministicVisual, temporal, semantic,
       sampledFrames: Object.freeze(frames) });

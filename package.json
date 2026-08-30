@@ -5,6 +5,8 @@
   "main": "index.js",
   "directories": { "test": "tests" },
   "scripts": {
+    "test:v2.10.2": "node tests/v2.10.2-reference-geometry-recovery-test.js",
+    "test:v2.10.2:postgres": "node tests/v2.10.2-reference-geometry-postgres-test.js",
     "test:v2.10.1": "node tests/v2.10.1-quality-evidence-reconciliation-test.js && node tests/v2.10.1-quality-recovery-test.js && node tests/v2.10.1-external-call-accounting-test.js",
     "test:v2.10": "node tests/v2.10-creative-production-test.js && node tests/v2.10-runtime-integration-test.js && node tests/v2.10-operator-draft-browser-test.js && vitest run --config apps/dashboard/client/vite.config.js",
     "test:v2.10:postgres": "node tests/v2.10-postgres-integration-test.js",
