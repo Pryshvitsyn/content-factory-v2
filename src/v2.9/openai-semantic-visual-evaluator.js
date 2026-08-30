@@ -4,7 +4,7 @@ const { SemanticVisualEvaluatorAdapter } = require('./semantic-visual-evaluator'
 const { REASON_CODES, qualityCheck, qualityResult, normalizeTier } = require('./quality-contract');
 
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
-const EVALUATOR_VERSION = 'v2.9.1';
+const EVALUATOR_VERSION = 'v2.10.3';
 const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504]);
 const ALLOWED_CODES = Object.freeze(Object.values(REASON_CODES));
 const REQUIRED_SOURCE_GROUPS = Object.freeze([
@@ -21,12 +21,15 @@ const REQUIRED_SOURCE_GROUPS = Object.freeze([
     REASON_CODES.OBJECT_DISAPPEARANCE]),
 ]);
 const REQUIRED_CONTINUITY_GROUPS = Object.freeze([
-  Object.freeze([REASON_CODES.VISUAL_IDENTITY_CONTINUITY, REASON_CODES.CONTINUITY_FAILURE,
-    REASON_CODES.IDENTITY_DRIFT]),
-  Object.freeze([REASON_CODES.WARDROBE_CONTINUITY]),
-  Object.freeze([REASON_CODES.LOCATION_CONTINUITY]),
-  Object.freeze([REASON_CODES.PROP_CONTINUITY]),
-  Object.freeze([REASON_CODES.LIGHTING_COLOR_CONTINUITY]),
+  Object.freeze([REASON_CODES.VISUAL_IDENTITY_CONTINUITY, REASON_CODES.CHARACTER_IDENTITY_DRIFT,
+    REASON_CODES.CONTINUITY_FAILURE, REASON_CODES.IDENTITY_DRIFT]),
+  Object.freeze([REASON_CODES.WARDROBE_CONTINUITY, REASON_CODES.WARDROBE_CONTINUITY_DRIFT]),
+  Object.freeze([REASON_CODES.LOCATION_CONTINUITY, REASON_CODES.ENVIRONMENT_CONTINUITY_DRIFT]),
+  Object.freeze([REASON_CODES.PROP_CONTINUITY, REASON_CODES.PROP_CONTINUITY_DRIFT]),
+  Object.freeze([REASON_CODES.LIGHTING_COLOR_CONTINUITY, REASON_CODES.LIGHTING_COLOR_CONTINUITY_DRIFT]),
+  Object.freeze([REASON_CODES.VISUAL_STYLE_CONTINUITY, REASON_CODES.VISUAL_STYLE_CONTINUITY_DRIFT]),
+  Object.freeze([REASON_CODES.CROSS_SHOT_REALISM_CONTINUITY, REASON_CODES.CROSS_SHOT_REALISM_DRIFT]),
+  Object.freeze([REASON_CODES.ACTING_STYLE_CONTINUITY, REASON_CODES.ACTING_STYLE_CONTINUITY_DRIFT]),
 ]);
 
 const SOURCE_FAMILY_PROPERTIES = Object.freeze({
@@ -39,11 +42,24 @@ const SOURCE_FAMILY_PROPERTIES = Object.freeze({
   temporalConsistency: REQUIRED_SOURCE_GROUPS[6],
 });
 const CONTINUITY_FAMILY_PROPERTIES = Object.freeze({
-  visualIdentity: REQUIRED_CONTINUITY_GROUPS[0],
+  characterIdentity: REQUIRED_CONTINUITY_GROUPS[0],
   wardrobe: REQUIRED_CONTINUITY_GROUPS[1],
-  location: REQUIRED_CONTINUITY_GROUPS[2],
+  environment: REQUIRED_CONTINUITY_GROUPS[2],
   props: REQUIRED_CONTINUITY_GROUPS[3],
   lightingColor: REQUIRED_CONTINUITY_GROUPS[4],
+  visualStyle: REQUIRED_CONTINUITY_GROUPS[5],
+  realism: REQUIRED_CONTINUITY_GROUPS[6],
+  actingMotion: REQUIRED_CONTINUITY_GROUPS[7],
+});
+const CONTINUITY_DRIFT_CODE_BY_FAMILY = Object.freeze({
+  characterIdentity: REASON_CODES.CHARACTER_IDENTITY_DRIFT,
+  wardrobe: REASON_CODES.WARDROBE_CONTINUITY_DRIFT,
+  environment: REASON_CODES.ENVIRONMENT_CONTINUITY_DRIFT,
+  props: REASON_CODES.PROP_CONTINUITY_DRIFT,
+  lightingColor: REASON_CODES.LIGHTING_COLOR_CONTINUITY_DRIFT,
+  visualStyle: REASON_CODES.VISUAL_STYLE_CONTINUITY_DRIFT,
+  realism: REASON_CODES.CROSS_SHOT_REALISM_DRIFT,
+  actingMotion: REASON_CODES.ACTING_STYLE_CONTINUITY_DRIFT,
 });
 
 const CRITIC_INSTRUCTIONS = `You are a strict production visual-quality critic. Judge only visible evidence in the ordered frames and the supplied creative contract. Do not rewrite the brief, generate prompts, compliment the work, assume defects, or fabricate certainty. Be strict about visible production defects, but do not invent defects that are not visible. Use WARN for ambiguous or minor defects and FAIL for obvious material defects. Respect explicitly requested split-screen, panels, text, logos, UI, phones, or stylization. Return every required semantic family even when no defect is visible. A clean family must explicitly return PASS with a concrete reason and evidence arrays; never omit a family. Return only the required structured result.`;
@@ -126,7 +142,9 @@ function validateStructuredResult(value, qualityClass, tier) {
       throw Object.assign(new Error('Evaluator check failed local schema validation'),
         { code: REASON_CODES.SEMANTIC_VISUAL_EVALUATOR_MALFORMED_RESPONSE });
     }
-    return qualityCheck({ code: check.code, status: check.status, confidence: check.confidence,
+    const code = qualityClass === 'CONTINUITY_QUALITY' && check.status !== 'PASS'
+      ? (CONTINUITY_DRIFT_CODE_BY_FAMILY[familyName] || check.code) : check.code;
+    return qualityCheck({ code, status: check.status, confidence: check.confidence,
       qualityClass, reason: check.reason.trim(), evidence });
   });
   const normalized = qualityResult({ qualityClass, tier, checks });
@@ -216,7 +234,8 @@ class OpenAISemanticVisualEvaluatorAdapter extends SemanticVisualEvaluatorAdapte
   contentForFrames(frames) {
     const content = [];
     for (const [index, frame] of frames.entries()) {
-      content.push({ type: 'input_text', text: `Ordered frame ${index + 1}${frame.shotIndex == null ? '' : ` from shot ${frame.shotIndex + 1}`}: ratio ${frame.ratio}, timestamp ${frame.timestampMs}ms.` });
+      const shotLabel = frame.shotId || (frame.shotIndex == null ? null : `shot ${frame.shotIndex + 1}`);
+      content.push({ type: 'input_text', text: `Ordered frame ${index + 1}${shotLabel ? ` from ${shotLabel}` : ''}: ratio ${frame.ratio}, timestamp ${frame.timestampMs}ms.` });
       content.push({ type: 'input_image', image_url: `data:${frame.contentType || 'image/jpeg'};base64,${Buffer.from(frame.bytes || frame.jpeg).toString('base64')}`, detail: 'high' });
     }
     return content;
@@ -237,17 +256,17 @@ class OpenAISemanticVisualEvaluatorAdapter extends SemanticVisualEvaluatorAdapte
     });
     const schema = strictSchema(qualityClass);
     const criteria = continuity
-      ? 'Judge cross-shot identity, wardrobe, hair/appearance, location, key props, lighting/color language, and overall visual identity.'
+      ? 'Judge whether this is convincingly the same film across shots: same character identity/facial structure/apparent age/hair/skin/build, wardrobe identity, environment/layout/props, lighting/color language, overall rendering and realism level, and acting/motion style. Respect the creative plan: intentional framing, camera-distance, angle, lens, blocking, and emotional-progression changes are allowed and must not be mislabeled as identity drift by themselves.'
       : 'Judge coherent composition and unexpected panels; text-like artifacts without relying on transcription; severe human defects; creative/subject/environment/action/framing/emotion/style/negative-intent compliance; requested realism; prohibited logos/UI/phones/watermarks; and temporal identity, duplication, object, and environment consistency.';
     const content = [{ type: 'input_text', text: `${criteria}\nEvaluation class: ${evaluationClass}.\nExpected aspect ratio: ${expectedAspectRatio || 'unspecified'}.\nIntended content: ${intendedContentType || 'unspecified'}.\nCreative plan: ${JSON.stringify(creativePlan || {})}\nCanonical negative intent: ${JSON.stringify(negativeIntent || {})}` },
       ...this.contentForFrames(frames || [])];
     let requested;
     try {
-      requested = await this.request({ model: this.model, store: false, max_output_tokens: 2400,
+      requested = await this.request({ model: this.model, store: false, max_output_tokens: 3000,
         instructions: CRITIC_INSTRUCTIONS,
         input: [{ role: 'user', content }],
         text: { format: { type: 'json_schema', name: continuity
-          ? 'visual_continuity_quality_v2_9_1' : 'semantic_visual_quality_v2_9_1', strict: true, schema } },
+          ? 'visual_continuity_quality_v2_10_3' : 'semantic_visual_quality_v2_9_1', strict: true, schema } },
       });
       if (requested.response?.status && requested.response.status !== 'completed') {
         throw Object.assign(new Error(`Evaluator response status was ${requested.response.status}`),
@@ -283,16 +302,22 @@ class OpenAISemanticVisualEvaluatorAdapter extends SemanticVisualEvaluatorAdapte
       code: 'CONTINUITY_NOT_APPLICABLE', status: 'PASS', qualityClass: 'CONTINUITY_QUALITY', hardFailure: false,
       reason: 'Cross-shot continuity is not applicable to a single-shot production.' })], metadata: {
       configured: true, provider: this.provider, model: this.model, evaluatorVersion: EVALUATOR_VERSION,
-      externalCalls: 0, attempts: 0, shotCount: shots.length, evaluationType: 'continuity_evaluation',
+      externalCalls: 0, attempts: 0, shotCount: shots.length, comparedShots: shots.map((shot) => ({
+        shotId: shot.shotId || null, assetId: shot.assetId || null, artifactId: shot.artifactId || null,
+        artifactVersion: shot.artifactVersion || null, artifactContentHash: shot.artifactContentHash || null })),
+      evaluationType: 'continuity_evaluation',
     } });
     const frames = shots.flatMap((shot, shotIndex) => (shot.evaluation?.sampledFrames || []).filter((_frame, index, all) => (
       index === 0 || index === all.length - 1)).map((frame) => ({ ...frame,
       bytes: frame.bytes || frame.jpeg, ratio: frame.ratio, timestampMs: frame.timestampMs,
-      shotIndex, analysisHash: frame.analysisHash })));
+      shotIndex, shotId: shot.shotId || null, assetId: shot.assetId || null, analysisHash: frame.analysisHash })));
     const result = await this.evaluateStructured({ frames, creativePlan: input.creativePlan, negativeIntent: null,
       expectedAspectRatio: null, intendedContentType: 'cross-shot-continuity', qualityTier: tier,
       evaluationClass: 'CONTINUITY', qualityClass: 'CONTINUITY_QUALITY', continuity: true });
-    return Object.freeze({ ...result, metadata: Object.freeze({ ...result.metadata, shotCount: shots.length }) });
+    return Object.freeze({ ...result, metadata: Object.freeze({ ...result.metadata, shotCount: shots.length,
+      comparedShots: shots.map((shot) => ({ shotId: shot.shotId || null, assetId: shot.assetId || null,
+        artifactId: shot.artifactId || null, artifactVersion: shot.artifactVersion || null,
+        artifactContentHash: shot.artifactContentHash || null })) }) });
   }
 }
 
@@ -302,6 +327,7 @@ module.exports = {
   EVALUATOR_VERSION,
   OPENAI_RESPONSES_ENDPOINT,
   OpenAISemanticVisualEvaluatorAdapter,
+  CONTINUITY_DRIFT_CODE_BY_FAMILY,
   CONTINUITY_FAMILY_PROPERTIES,
   REQUIRED_CONTINUITY_GROUPS,
   REQUIRED_SOURCE_GROUPS,
