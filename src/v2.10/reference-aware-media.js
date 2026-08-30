@@ -49,13 +49,14 @@ class V210ReferenceAwareMediaExecutor {
     }
     if (!this.repository.db?.query) return null;
     try {
-      const result = await this.repository.db.query(`/* v2.10.2:latest-geometry-replacement */
-        SELECT me.*,sr.source_asset_id,sr.replacement_asset_id,sr.revision_no,sr.retry_reason,
+      const result = await this.repository.db.query(`/* v2.10.3:latest-accepted-shot-replacement */
+        SELECT me.*,sr.source_asset_id,sr.replacement_asset_id,sr.revision_no,sr.retry_reason,sr.recovery_kind,
           sr.id AS regeneration_id FROM v2_7.shot_regenerations sr
         JOIN v2_5.media_executions me ON me.production_id=sr.production_id
           AND me.asset_id=sr.replacement_asset_id AND me.status='SUCCEEDED' AND me.brand_id=sr.brand_id
         JOIN v2_1.productions p ON p.id=sr.production_id
-        WHERE sr.production_id=$1 AND sr.source_asset_id=$2 AND sr.recovery_kind='SOURCE_GEOMETRY'
+        WHERE sr.production_id=$1 AND sr.source_asset_id=$2
+          AND sr.recovery_kind IN ('SOURCE_GEOMETRY','SOURCE_CONTINUITY')
           AND sr.status='SUCCEEDED' AND p.brand_id=$3 AND sr.brand_id=$3
           AND me.workspace_id=p.workspace_id ORDER BY sr.revision_no DESC LIMIT 1`,
       [productionId, assetId, brandId]);
@@ -81,12 +82,13 @@ class V210ReferenceAwareMediaExecutor {
     return { bytes: frame.jpeg, contentType: 'image/jpeg', source: {
       artifactId: row.artifact_id || `brand:${brandId}:asset:${reference.previousAssetId}`,
       version: row.artifact_version || 1, contentHash: row.artifact_content_hash,
-    }, evidence: {
+    }, sourceVideo: { bytes, contentType: row.content_type || 'video/mp4', probe }, evidence: {
       policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: reference.previousAssetId,
       resolvedPreviousAssetId: replacement?.replacement_asset_id || reference.previousAssetId,
       sourceArtifactVersion: row.artifact_version || 1, supersedesAssetId: replacement?.source_asset_id || null,
       sourceArtifactStorageKey: row.artifact_storage_key, sourceArtifactContentHash: row.artifact_content_hash,
       timestampMs: frame.timestampMs, analysisHash: frame.analysisHash, referenceHash: hash(frame.jpeg),
+      recoveryKind: replacement?.recovery_kind || null,
     } };
   }
   async materializeUploaded(reference) {
@@ -116,8 +118,13 @@ class V210ReferenceAwareMediaExecutor {
     let normalized;
     try {
       if (reference.policy === 'PREVIOUS_SHOT_FRAME') {
-        normalized = await this.geometryNormalizer.normalize({ bytes: materialized.bytes,
-          contentType: materialized.contentType, expectedAspectRatio, resolution });
+        const normalizePrevious = typeof this.geometryNormalizer.normalizePreviousShot === 'function'
+          ? this.geometryNormalizer.normalizePreviousShot.bind(this.geometryNormalizer)
+          : this.geometryNormalizer.normalize.bind(this.geometryNormalizer);
+        normalized = await normalizePrevious({ bytes: materialized.bytes,
+          contentType: materialized.contentType, expectedAspectRatio, resolution,
+          sourceVideoBytes: materialized.sourceVideo?.bytes || null,
+          sourceVideoContentType: materialized.sourceVideo?.contentType || 'video/mp4' });
       } else {
         const actual = await this.geometryNormalizer.probe(materialized.bytes, materialized.contentType);
         if (!compatible(actual, expectedAspectRatio)) throw new ReferenceGeometryError('REFERENCE_GEOMETRY_MISMATCH',
@@ -159,12 +166,16 @@ class V210ReferenceAwareMediaExecutor {
         referenceHash: reference.referenceHash || null, providerRequestId: media.requestId || null,
       });
   }
+  withExecutionContext(media, args) {
+    return Object.freeze({ ...media, productionId: args.productionId, brandId: args.brandId,
+      workspaceId: args.workspaceId || null, assetId: args.asset?.asset_id || media.assetId });
+  }
   async execute(args) {
     const replacement = await this.latestReplacement({ productionId: args.productionId, brandId: args.brandId,
       assetId: args.asset?.asset_id });
     if (replacement) {
       const bytes = await this.readVerified(replacement.artifact_storage_key, replacement.artifact_content_hash,
-        'GEOMETRY_REPLACEMENT_EVIDENCE_MISSING');
+        'SHOT_REPLACEMENT_EVIDENCE_MISSING');
       const artifact = Object.freeze({ artifactId: replacement.artifact_id, version: replacement.artifact_version,
         storageKey: replacement.artifact_storage_key, contentHash: replacement.artifact_content_hash,
         content: bytes, validationStatus: 'validated_media' });
@@ -172,20 +183,23 @@ class V210ReferenceAwareMediaExecutor {
         contentType: replacement.content_type || 'video/mp4', mediaProbe: replacement.media_probe,
         provider: replacement.provider, model: replacement.model, requestId: replacement.provider_request_id,
         artifact, provenanceArtifact: null, durableExecutionId: replacement.id };
-      return Object.freeze({ ...media, assetId: args.asset.asset_id, provenance: Object.freeze({ ...(media.provenance || {}),
-        source: 'v2.10.2-geometry-replacement', supersedesAssetId: args.asset.asset_id,
+      return this.withExecutionContext({ ...media, provenance: Object.freeze({ ...(media.provenance || {}),
+        source: 'v2.10.3-accepted-shot-replacement', supersedesAssetId: args.asset.asset_id,
         replacementAssetId: replacement.replacement_asset_id, artifactVersion: replacement.artifact_version,
-        retryReason: replacement.retry_reason, regenerationId: replacement.regeneration_id }) });
+        retryReason: replacement.retry_reason, recoveryKind: replacement.recovery_kind,
+        regenerationId: replacement.regeneration_id }) }, args);
     }
     const asset = await this.materializeAsset(args);
-    return this.delegate.execute({ ...args, asset });
+    const media = await this.delegate.execute({ ...args, asset });
+    return this.withExecutionContext(media, args);
   }
   async loadExisting(args) {
     const replacement = await this.latestReplacement({ productionId: args.productionId, brandId: args.brandId,
       assetId: args.asset?.asset_id });
     if (replacement) return this.execute(args);
     const asset = await this.materializeAsset(args);
-    return this.delegate.loadExisting({ ...args, asset });
+    const media = await this.delegate.loadExisting({ ...args, asset });
+    return this.withExecutionContext(media, args);
   }
 }
 
