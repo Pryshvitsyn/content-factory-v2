@@ -3,6 +3,7 @@
 const http = require('node:http');
 const { URL } = require('node:url');
 const { ControlError } = require('./control-service');
+const { continuationPreflight, continueRecoveredV210 } = require('./v210-quality-resume');
 
 const BODY_LIMIT = 16 * 1024;
 
@@ -84,6 +85,21 @@ function createControlServer({ service, creativeService = null, logger = console
         const args = { productionId: segments[2], shotId: segments[4], ...body };
         if (segments[5] === 'preflight') return json(response, 200, await service.preflightShotRegeneration(args));
         return json(response, 202, await service.regenerateShot(args));
+      }
+      if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
+        && segments[3] === 'quality-recovery' && segments.length === 6 && segments[4] === 'continue'
+        && segments[5] === 'preflight') {
+        if (!creativeService) throw new ControlError(503, 'V210_RESUME_UNAVAILABLE', 'V2.10 production service is unavailable');
+        const body = await readJson(request);
+        return json(response, 200, await continuationPreflight({ service, creativeService,
+          productionId: segments[2], brandId: body.brandId }));
+      }
+      if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
+        && segments[3] === 'quality-recovery' && segments.length === 5 && segments[4] === 'continue') {
+        if (!creativeService) throw new ControlError(503, 'V210_RESUME_UNAVAILABLE', 'V2.10 production service is unavailable');
+        const body = await readJson(request);
+        return json(response, 202, await continueRecoveredV210({ service, creativeService,
+          productionId: segments[2], brandId: body.brandId, confirmation: body.confirmation }));
       }
       if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
         && segments[3] === 'quality-recovery' && segments.length === 5 && segments[4] === 'preflight') {
