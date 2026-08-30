@@ -19,16 +19,20 @@ function result(code, status, reason, qualityClass = 'SEMANTIC_VISUAL', confiden
     temporalConsistency: check(REASON_CODES.TEMPORAL_SEMANTIC_CONSISTENCY, 'PASS', 'Ordered frames remain semantically coherent.', qualityClass),
   };
   const continuity = {
-    visualIdentity: check(REASON_CODES.VISUAL_IDENTITY_CONTINUITY, 'PASS', 'Character appearance remains plausible.', qualityClass),
+    characterIdentity: check(REASON_CODES.VISUAL_IDENTITY_CONTINUITY, 'PASS', 'The same character identity remains plausible.', qualityClass),
     wardrobe: check(REASON_CODES.WARDROBE_CONTINUITY, 'PASS', 'Wardrobe remains plausible.', qualityClass),
-    location: check(REASON_CODES.LOCATION_CONTINUITY, 'PASS', 'Location remains plausible.', qualityClass),
+    environment: check(REASON_CODES.LOCATION_CONTINUITY, 'PASS', 'Environment and room layout remain plausible.', qualityClass),
     props: check(REASON_CODES.PROP_CONTINUITY, 'PASS', 'Key props remain plausible.', qualityClass),
     lightingColor: check(REASON_CODES.LIGHTING_COLOR_CONTINUITY, 'PASS', 'Lighting and color language remain plausible.', qualityClass),
+    visualStyle: check(REASON_CODES.VISUAL_STYLE_CONTINUITY, 'PASS', 'Cinematography and rendering language remain plausible.', qualityClass),
+    realism: check(REASON_CODES.CROSS_SHOT_REALISM_CONTINUITY, 'PASS', 'Perceived realism remains consistent between shots.', qualityClass),
+    actingMotion: check(REASON_CODES.ACTING_STYLE_CONTINUITY, 'PASS', 'Acting and motion style remain consistent with the planned progression.', qualityClass),
   };
   const checks = qualityClass === 'CONTINUITY_QUALITY' ? continuity : source;
+  const continuityAliases = [REASON_CODES.CONTINUITY_FAILURE, REASON_CODES.IDENTITY_DRIFT,
+    REASON_CODES.CHARACTER_IDENTITY_DRIFT, REASON_CODES.VISUAL_IDENTITY_CONTINUITY];
   const family = qualityClass === 'CONTINUITY_QUALITY'
-    ? code === REASON_CODES.CONTINUITY_FAILURE ? [REASON_CODES.VISUAL_IDENTITY_CONTINUITY, REASON_CODES.CONTINUITY_FAILURE, REASON_CODES.IDENTITY_DRIFT]
-      : [code]
+    ? continuityAliases.includes(code) ? continuityAliases : [code]
     : code === REASON_CODES.TRIPTYCH_DETECTED ? [REASON_CODES.SINGLE_COHERENT_COMPOSITION, REASON_CODES.TRIPTYCH_DETECTED]
       : code === REASON_CODES.SEVERE_ANATOMY_DEFORMATION ? [REASON_CODES.HUMAN_VISUAL_INTEGRITY, REASON_CODES.SEVERE_ANATOMY_DEFORMATION]
         : [code];
@@ -47,8 +51,8 @@ const SEMANTIC_FIXTURES = Object.freeze({
   humanDeformation: result(REASON_CODES.SEVERE_ANATOMY_DEFORMATION, 'FAIL', 'A prominent subject has visibly fused limbs.'),
   creativeMismatch: result(REASON_CODES.CREATIVE_PLAN_MISMATCH, 'FAIL', 'The requested couple and home environment are absent.'),
   warning: result(REASON_CODES.REALISM_QUALITY, 'WARN', 'A minor ambiguous hand artifact is visible.', 'SEMANTIC_VISUAL', 0.67),
-  continuityPass: result(REASON_CODES.VISUAL_IDENTITY_CONTINUITY, 'PASS', 'Character and location identity remain plausible.', 'CONTINUITY_QUALITY'),
-  continuityFail: result(REASON_CODES.CONTINUITY_FAILURE, 'FAIL', 'The primary character changes identity between shots.', 'CONTINUITY_QUALITY'),
+  continuityPass: result(REASON_CODES.VISUAL_IDENTITY_CONTINUITY, 'PASS', 'Character and environment identity remain plausible.', 'CONTINUITY_QUALITY'),
+  continuityFail: result(REASON_CODES.CHARACTER_IDENTITY_DRIFT, 'FAIL', 'The primary character changes identity between shots.', 'CONTINUITY_QUALITY'),
 });
 
 module.exports = { SEMANTIC_FIXTURES, result };
