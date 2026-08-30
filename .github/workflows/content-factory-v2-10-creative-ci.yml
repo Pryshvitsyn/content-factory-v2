@@ -32,6 +32,8 @@ jobs:
         run: npm run test:v2.10
       - name: V2.10.1 quality evidence reconciliation and paid asset recovery
         run: npm run test:v2.10.1
+      - name: V2.10.1 exact-identity recovered continuation
+        run: node tests/v2.10.1-v210-resume-identity-test.js
       - name: Real LiveProductionService collision guard
         run: node tests/v2.10-live-production-collision-guard-test.js
       - name: Real local FFmpeg end-title renderer
