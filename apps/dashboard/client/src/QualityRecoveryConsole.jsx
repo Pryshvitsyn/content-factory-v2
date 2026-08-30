@@ -50,8 +50,24 @@ export function QualityRecoveryConsole() {
       if (!approved) { setMessage('Quality recovery cancelled. No external call was made.'); return; }
       const result = await api(path, { method: 'POST', body: JSON.stringify({ brandId: item.brandId, confirmation: true }) });
       setMessage(result.accepted
-        ? `Existing ${result.assetId} preserved and re-evaluated. Disposition: ${result.disposition}. Video regeneration: 0. Continue the same execution separately when ready.`
+        ? `Existing ${result.assetId} preserved and re-evaluated. Disposition: ${result.disposition}. Video regeneration: 0.`
         : `Recovery reused existing result. Disposition: ${result.disposition || 'recorded'}.`);
+      await load();
+    } catch (error) { setMessage(error.message || String(error)); }
+    finally { setBusy(null); }
+  }
+
+  async function continueSameExecution(item) {
+    setBusy(`continue:${item.id}`); setMessage(null);
+    try {
+      const path = `/api/productions/${item.id}/quality-recovery/continue`;
+      const plan = await api(`${path}/preflight`, { method: 'POST', body: JSON.stringify({ brandId: item.brandId }) });
+      const approved = window.confirm(`Continue this exact V2.10 execution?\n\nCANONICAL IDENTITY\nVERIFIED\n\nPRESERVED SOURCE MEDIA\n${plan.existingSourceMedia}\n\nREMAINING VIDEO GENERATIONS\n${plan.remainingVideoGenerations}\n${(plan.remainingVideoAssetIds || []).join(', ') || 'none'}\n\nREMAINING SPEECH GENERATIONS\n${plan.remainingSpeechGenerations}\n\nVIDEO ROUTE\n${plan.provider || 'provider'} · ${plan.model || 'model'} · ${plan.profile || 'profile'} · ${plan.resolution || 'resolution'}\n\nEVALUATOR CALLS PLANNED\n${plan.evaluatorCallsPlanned}\n\nCOST\n${plan.costStatus || 'UNKNOWN'}\n\nExisting paid media will be reused. No automatic regeneration of an existing video asset is allowed. Human approval remains required.`);
+      if (!approved) { setMessage('Same-execution continuation cancelled before any new provider execution.'); return; }
+      const result = await api(path, { method: 'POST', body: JSON.stringify({ brandId: item.brandId, confirmation: true }) });
+      setMessage(result.accepted
+        ? 'Exact V2.10 continuation accepted. Existing paid media is preserved; watch the production state and do not click again.'
+        : 'Continuation was not accepted. No new execution was started.');
       await load();
     } catch (error) { setMessage(error.message || String(error)); }
     finally { setBusy(null); }
@@ -68,7 +84,8 @@ export function QualityRecoveryConsole() {
         <div><small>{item.brandName}</small><strong>{item.title || item.name}</strong><code>{item.id.slice(0, 8)}</code></div>
         <dl><div><dt>Source</dt><dd>{recovery.assetId || recovery.evidence?.artifactId || 'immutable media'}</dd></div><div><dt>Media</dt><dd>{recovery.existingMedia || 'REUSED'}</dd></div><div><dt>Semantic</dt><dd>{recovery.semanticEvidence || (recovery.recovered ? 'RECORDED' : '—')}</dd></div><div><dt>Disposition</dt><dd>{recovery.disposition || recoveryLabel(item)}</dd></div></dl>
         {recovery.eligible ? <button disabled={busy === item.id} onClick={() => recover(item)}>RE-EVALUATE EXISTING ASSET · 0 VIDEO CALLS</button>
-          : <div className="quality-recovery-console__recovered">✓ Existing source re-evaluated · use CONTINUE SAME EXECUTION in production detail</div>}
+          : recovery.recovered ? <><div className="quality-recovery-console__recovered">✓ Existing source re-evaluated · exact V2.10 identity preserved</div><button disabled={busy === `continue:${item.id}`} onClick={() => continueSameExecution(item)}>CONTINUE SAME EXECUTION</button></>
+            : <div className="quality-recovery-console__recovered">Recovery is not currently available.</div>}
       </article>;
     })}</div>
   </aside>;
