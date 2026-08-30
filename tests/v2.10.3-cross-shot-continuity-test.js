@@ -8,6 +8,7 @@ const { FunctionSemanticVisualEvaluatorAdapter } = require('../src/v2.9/semantic
 const { REASON_CODES, qualityCheck, qualityResult } = require('../src/v2.9/quality-contract');
 const { semanticEvaluationPlan } = require('../src/v2.9/semantic-evaluation-policy');
 const { buildProductionQuality } = require('../src/v2.9/audio-editorial-quality');
+const { QualityRecoveryService, continuityFailures } = require('../src/v2.10.1/quality-recovery-service');
 
 function qualityFrame(index) {
   return Object.freeze({ ratio: index / 6, timestampMs: index * 700,
@@ -152,6 +153,25 @@ function accountingTests() {
     'early continuity failure must remain visible in durable external-call accounting');
 }
 
+async function recoveryRoutingTests() {
+  const continuity = continuityResult('STANDARD', true);
+  const candidate = Object.freeze({ assetId: 'video-2', status: 'FAIL', sourceProbe: { width: 720, height: 1280 },
+    deterministicVisual: { status: 'PASS', checks: [] }, temporal: { status: 'PASS', checks: [] },
+    semantic: sourcePass('STANDARD'), continuity,
+    checks: [...sourcePass('STANDARD').checks, ...continuity.checks] });
+  assert.deepEqual(continuityFailures(candidate), [REASON_CODES.CHARACTER_IDENTITY_DRIFT]);
+  const production = { id: 'prod-recovery', brandId: 'brand-1', jobStatus: 'FAILED',
+    jobError: { code: 'SOURCE_QUALITY_VALIDATION_FAILED', details: { sourceQuality: { shots: [candidate] } } },
+    jobPayload: { canonicalRawInput: { aspect_ratio: '9:16', scenes: [{ shots: [{ shot_id: 'shot-2', asset_id: 'video-2' }] }] } } };
+  const service = new QualityRecoveryService({ repository: { async executionSafety() { return { ambiguousExecutions: 0 }; } },
+    storage: {}, commandService: {}, semanticAdapterFactory: () => { throw new Error('continuity drift must not instantiate semantic-only recovery'); } });
+  const plan = await service.inspect({ productionId: production.id, brandId: production.brandId, production });
+  assert.equal(plan.action, 'REGENERATE_SHOT');
+  assert.equal(plan.recoveryKind, 'SOURCE_CONTINUITY');
+  assert.equal(plan.operatorAuthorizationRequiredForEveryContinuityReplacement, true);
+  assert.equal(plan.automaticContinuityAttemptsMaximum, 0, 'no automatic paid continuity retry loop is permitted');
+}
+
 function callerOrderingContractTest() {
   const worker = fs.readFileSync(require.resolve('../worker/v2.1-master-production'), 'utf8');
   const failureGate = worker.indexOf("if (persisted.status === 'FAIL')");
@@ -164,6 +184,7 @@ async function main() {
   await geometryPolicyTests();
   await continuityGateTests();
   accountingTests();
+  await recoveryRoutingTests();
   callerOrderingContractTest();
   console.log('V2.10.3 cross-shot continuity gate tests passed; real external calls = 0');
 }
