@@ -32,6 +32,10 @@ jobs:
         run: npm run test:v2.10
       - name: V2.10.1 quality evidence reconciliation and paid asset recovery
         run: npm run test:v2.10.1
+      - name: V2.10.2 reference geometry and bounded source recovery
+        run: npm run test:v2.10.2
+      - name: V2.10.3 incremental cross-shot continuity and safe reference orientation
+        run: npm run test:v2.10.3
       - name: V2.10.1 exact-identity recovered continuation
         run: node tests/v2.10.1-v210-resume-identity-test.js
       - name: Real LiveProductionService collision guard
@@ -77,3 +81,5 @@ jobs:
       - run: npm ci
       - name: V2.10 PostgreSQL ownership, immutability, idempotency, fingerprint, isolation
         run: npm run test:v2.10:postgres
+      - name: V2.10.2 PostgreSQL immutable lineage, retry bound, and exact-job continuation
+        run: npm run test:v2.10.2:postgres

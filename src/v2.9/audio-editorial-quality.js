@@ -58,12 +58,17 @@ function buildProductionQuality({ tier, preExecution, sourceQuality, audioQualit
   const results = [preExecution, sourceQuality, audioQuality, editorialQuality, masterTechnical, finalQuality].filter(Boolean);
   const sourceTechnicalFailed = (sourceQuality?.checks || []).some((check) => check.status === 'FAIL'
     && (check.qualityClass === 'SOURCE_TECHNICAL' || check.code === REASON_CODES.FRAME_CORRUPTION));
-  const creativeStatuses = [sourceQuality?.semantic?.status, sourceQuality?.continuity?.status].filter(Boolean);
+  const incrementalContinuity = (sourceQuality?.shots || []).map((shot) => shot?.continuity).filter(Boolean);
+  const continuityStatuses = sourceQuality?.continuity?.status
+    ? [sourceQuality.continuity.status] : incrementalContinuity.map((item) => item.status);
+  const creativeStatuses = [sourceQuality?.semantic?.status, ...continuityStatuses].filter(Boolean);
   const creativeStatus = creativeStatuses.includes('FAIL') ? 'FAIL' : creativeStatuses.includes('WARN') ? 'WARN'
     : creativeStatuses.length ? 'PASS' : 'NOT_STARTED';
   const sourceSemanticCalls = (sourceQuality?.shots || []).reduce((sum, shot) => (
     sum + Number(shot.semantic?.metadata?.externalCalls || 0)), 0);
-  const continuityCalls = Number(sourceQuality?.continuity?.metadata?.externalCalls || 0);
+  const continuityCalls = sourceQuality?.continuity
+    ? Number(sourceQuality.continuity.metadata?.externalCalls || 0)
+    : incrementalContinuity.reduce((sum, item) => sum + Number(item.metadata?.externalCalls || 0), 0);
   const finalSemanticCalls = Number(finalQuality?.semantic?.metadata?.externalCalls || 0);
   const externalCallAccounting = Object.freeze({
     semanticVisualEvaluations: sourceSemanticCalls + finalSemanticCalls,

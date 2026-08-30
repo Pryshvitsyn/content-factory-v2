@@ -190,6 +190,11 @@ async function main() {
       assert.equal(sha256(bytes), previousHash);
       return [{ jpeg: frameBytes, timestampMs: 4900, analysisHash: 'analysis-frame-1' }];
     } },
+    geometryNormalizer: { async normalize({ bytes }) { return { bytes, contentType: 'image/jpeg',
+      before: { width:720,height:1280,aspectRatio:0.5625,orientation:'PORTRAIT' },
+      after: { width:720,height:1280,aspectRatio:0.5625,orientation:'PORTRAIT' },
+      normalizationApplied:false,normalizationVersion:'test-v1',policy:'VERIFY_ONLY' }; },
+    async probe() { return { width:720,height:1280,aspectRatio:0.5625,orientation:'PORTRAIT' }; } },
   });
   const materialized = await referenceExecutor.materializeAsset({
     workspaceId: 'workspace-1', brandId: BRAND_ID, productionId: 'production-1', asset: secondAsset,
@@ -203,6 +208,8 @@ async function main() {
     delegate,
     storage: { async get() { return Buffer.from('mutated-bytes'); } },
     frameSampler: { async sample() { throw new Error('must not sample corrupt evidence'); } },
+    geometryNormalizer: { async normalize() { throw new Error('must not normalize corrupt evidence'); },
+      async probe() { throw new Error('must not probe corrupt evidence'); } },
   });
   await assert.rejects(
     () => corruptExecutor.materializeAsset({

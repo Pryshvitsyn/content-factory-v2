@@ -9,7 +9,8 @@ function semanticEvaluationPlan({ qualityTier = 'STANDARD', videoCount = 0, mast
   const authorized = semanticAdapter?.paidExecutionAuthorized === true;
   const operational = configured && authorized;
   const sourceEvaluations = operational ? videoCount : 0;
-  const continuityEvaluations = operational && videoCount > 1 ? 1 : 0;
+  // Continuity is an incremental acceptance gate: every dependent shot is compared before the next shot can execute.
+  const continuityEvaluations = operational ? Math.max(0, videoCount - 1) : 0;
   const finalRequired = tier === 'PREMIUM' || masterVisualTransforms === true;
   const finalEvaluations = operational && finalRequired ? 1 : 0;
   const semanticEvaluations = sourceEvaluations + finalEvaluations;

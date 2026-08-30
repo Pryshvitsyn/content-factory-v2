@@ -7,7 +7,8 @@ function revisionAssetId(sourceAssetId, requestId) {
   return `${sourceAssetId}-rev-${requestId.replaceAll('-', '').slice(0, 12)}`;
 }
 
-function buildShotRevision(raw, { shotId, requestId, instruction = null, revisionNo = 1 } = {}) {
+function buildShotRevision(raw, { shotId, requestId, instruction = null, revisionNo = 1, recoveryKind = null,
+  retryReason = null } = {}) {
   const updated = structuredClone(raw);
   const shots = updated.scenes.flatMap((scene) => scene.shots);
   const shot = shots.find((item) => item.shot_id === shotId);
@@ -26,9 +27,30 @@ function buildShotRevision(raw, { shotId, requestId, instruction = null, revisio
     planned.generationPrompt = shot.video.prompt;
     planned.seed = shot.video.seed;
     planned.revision = revisionNo;
+    planned.supersedesAssetId = sourceAssetId;
+    planned.retryReason = retryReason;
+    planned.recoveryKind = recoveryKind;
   }
   const base = buildProductionInput(updated);
-  const normalized = { ...base, productionNamespace: 'v2.7-operator' };
+  const plannedShots = updated.creative_plan?.shots || [];
+  const assets = base.assetPlan.assets.map((asset) => {
+    if (asset.kind !== 'video') return asset;
+    const plan = plannedShots.find((item) => item.assetId === asset.asset_id || item.shotId === base.shotPlan.shots
+      .find((candidate) => candidate.required_assets?.includes(asset.asset_id))?.shot_id);
+    if (!plan || plan.referencePolicy === 'NONE') return asset;
+    const index = plannedShots.indexOf(plan);
+    const reference = plan.referencePolicy === 'PREVIOUS_SHOT_FRAME'
+      ? { policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: plannedShots[index - 1]?.assetId || null }
+      : { policy: 'UPLOADED_REFERENCE', artifact: plan.referenceMedia };
+    const replacement = asset.asset_id === replacementAssetId;
+    return Object.freeze({ ...asset, generation_requirements: Object.freeze({ ...asset.generation_requirements,
+      v210_reference: Object.freeze(reference),
+      ...(replacement ? { retry_reason: retryReason, recovery_kind: recoveryKind,
+        supersedes_asset_id: sourceAssetId, revision_no: revisionNo } : {}) }) });
+  });
+  const normalized = { ...base, assetPlan: Object.freeze({ ...base.assetPlan, assets: Object.freeze(assets) }),
+    productionNamespace: 'v2.7-operator', geometryRecovery: recoveryKind === 'SOURCE_GEOMETRY'
+      ? Object.freeze({ sourceAssetId, replacementAssetId, retryReason, revisionNo, automaticAttempt: 1 }) : null };
   delete normalized.fingerprint;
   const input = Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
   return Object.freeze({ raw: updated, input, sourceAssetId, replacementAssetId, revisionNo });

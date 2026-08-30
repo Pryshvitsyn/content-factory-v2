@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App, { NewProduction, ProductionDetail, ReviewQueue, Providers } from '../src/App';
 import { CreativeProduction } from '../src/CreativeProduction';
+import { QualityRecoveryConsole } from '../src/QualityRecoveryConsole';
 
 const brandId = '11111111-1111-4111-8111-111111111111';
 const review = {
@@ -107,6 +108,36 @@ describe('V2.3 dashboard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'REGENERATE' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/productions/${review.productionId}/regenerate`,
       expect.objectContaining({ method: 'POST', body: expect.stringContaining('Try a quieter ending') })));
+  });
+});
+
+describe('V2.10.2 geometry recovery dashboard', () => {
+  beforeEach(() => { window.location.hash = '#Productions'; vi.stubGlobal('fetch', vi.fn()); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('offers one explicit failed-shot regeneration and never presents byte re-evaluation as the repair', async () => {
+    const productionId='22222222-2222-4222-8222-222222222222';
+    const calls=[];vi.spyOn(window,'confirm').mockImplementation((message)=>{
+      expect(message).toContain('SOURCE GEOMETRY FAILED\n1280×720\nExpected 9:16');
+      expect(message).toContain('Estimated new video generations: 1');
+      expect(message).toContain('Existing good assets reused: yes');
+      expect(message).toContain('Maximum automatic geometry attempts: 1');return true;
+    });
+    fetch.mockImplementation((url,options={})=>{
+      calls.push([url,options]);
+      if(url==='/api/productions?failed=true')return response([{id:productionId,brandId}]);
+      if(url===`/api/productions/${productionId}?brandId=${brandId}`)return response({id:productionId,brandId,brandName:'Attune',title:'Notice the Moment',qualityRecovery:{eligible:true,action:'REGENERATE_SHOT',assetId:'shot-2',shotId:'shot-2',actualWidth:1280,actualHeight:720,expectedAspectRatio:'9:16',existingMedia:'FAILED_IMMUTABLE_V1_PRESERVED'}});
+      if(url===`/api/productions/${productionId}/quality-recovery/preflight`)return response({action:'REGENERATE_SHOT',assetId:'shot-2',shotId:'shot-2',actualWidth:1280,actualHeight:720,expectedAspectRatio:'9:16'});
+      if(url===`/api/productions/${productionId}/shots/shot-2/preflight`)return response({preflightId:'fp',expectedVideoGenerations:1,expectedExternalCalls:2,costStatus:'UNKNOWN'});
+      if(url===`/api/productions/${productionId}/shots/shot-2/regenerate`)return response({replacementAssetId:'shot-2-v2'});
+      throw new Error(`Unexpected ${url}`);
+    });
+    const view=render(<QualityRecoveryConsole/>);
+    const button=await screen.findByRole('button',{name:'REGENERATE FAILED SHOT · 1 VIDEO'});
+    expect(screen.queryByRole('button',{name:/RE-EVALUATE EXISTING ASSET/})).toBeNull();fireEvent.click(button);
+    await waitFor(()=>expect(calls.some(([url,options])=>url.endsWith('/shots/shot-2/regenerate')
+      && JSON.parse(options.body).recoveryReason==='SOURCE_GEOMETRY')).toBe(true));
+    expect(await screen.findByText(/Shot 1 and audio remain immutable and reused/)).toBeTruthy();view.unmount();
   });
 });
 

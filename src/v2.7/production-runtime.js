@@ -164,7 +164,8 @@ function createProductionRuntime({ db, storage, config, env = process.env, logge
     visualQualityEvaluator: masterOrchestrator?.sourceQualityEvaluator,
     semanticAttemptRepository: new PostgresSemanticEvaluationAttemptRepository({ db }), rendererRouter, logger });
   return Object.freeze({ service, rendererRouter, artifactService, reviewService: reviews,
-    mediaExecutionRepository: mediaRepository, mediaExecutor: masterOrchestrator?.mediaExecutor });
+    mediaExecutionRepository: mediaRepository, mediaExecutor: masterOrchestrator?.mediaExecutor,
+    visualQualityEvaluator: masterOrchestrator?.sourceQualityEvaluator || null });
 }
 
 module.exports = { EXECUTION_POLICIES, createProductionRuntime, forbiddenAdapter, planOnlyAdapter, providerGateway,

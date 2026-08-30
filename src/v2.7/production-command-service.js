@@ -10,7 +10,23 @@ const { brandMediaPreferences, resolveMediaStack } = require('../v2.9.2/media-st
 const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
 const { partialMediaPlan, reusableSemanticPass, retryPlan,
   sourceArtifactFromExecution } = require('../v2.9/semantic-evaluation-retry');
+const { V210ReferenceAwareMediaExecutor } = require('../v2.10/reference-aware-media');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function geometryFailureForShot(source, raw, shotId) {
+  const shot = raw.scenes.flatMap((scene) => scene.shots).find((item) => item.shot_id === shotId);
+  const qualityCandidate = source.jobError?.details?.sourceQuality?.shots?.find((item) => item.assetId === shot?.asset_id);
+  const qualityCode = qualityCandidate?.deterministicVisual?.checks?.find((check) => check.status === 'FAIL'
+    && ['WRONG_ORIENTATION','PROVIDER_OUTPUT_GEOMETRY_MISMATCH'].includes(check.code))?.code;
+  if (qualityCode) return Object.freeze({ candidate: qualityCandidate, code: qualityCode });
+  const direct = source.jobError;
+  if (direct?.code === 'PROVIDER_OUTPUT_GEOMETRY_MISMATCH' && direct.details?.assetId === shot?.asset_id) {
+    return Object.freeze({ candidate: Object.freeze({ assetId: shot.asset_id,
+      sourceProbe: Object.freeze({ width: direct.details.actualWidth, height: direct.details.actualHeight }) }),
+    code: direct.code });
+  }
+  return null;
+}
 
 class ProductionCommandError extends Error {
   constructor(status, code, message, details = null) {
@@ -115,8 +131,12 @@ class ProductionCommandService {
           'ElevenLabs credentials are required for post-PASS semantic recovery speech');
       }
     }
+    const referenceAware = input.creativePlan?.planner === 'v2.10-operator-storyboard'
+      || input.assetPlan?.assets?.some((asset) => asset.generation_requirements?.v210_reference);
     const runtime = this.runtimeFactory({ db: this.repository.db, storage: this.storage, config, env,
-      logger: this.logger, semanticOnly });
+      logger: this.logger, semanticOnly,
+      ...(referenceAware ? { mediaExecutorDecorator: (delegate) => new V210ReferenceAwareMediaExecutor({
+        delegate, storage: this.storage }) } : {}) });
     return { ...runtime, config };
   }
 
@@ -434,7 +454,8 @@ class ProductionCommandService {
       publicationTriggered: false });
   }
 
-  async prepareShotRegeneration({ productionId, brandId, shotId, requestId, instruction = null }) {
+  async prepareShotRegeneration({ productionId, brandId, shotId, requestId, instruction = null,
+    recoveryReason = null } = {}) {
     const source = await this.stored(productionId, brandId);
     if (source.renderMode !== 'QUALITY') throw new ProductionCommandError(409, 'SHOT_REGENERATION_UNAVAILABLE', 'Per-shot regeneration is available for QUALITY productions only');
     if (['RUNNING','QUEUED'].includes(source.jobStatus)) throw new ProductionCommandError(409, 'SHOT_REGENERATION_UNAVAILABLE', `Shot regeneration is unavailable while the durable job is ${source.jobStatus}`);
@@ -447,7 +468,22 @@ class ProductionCommandService {
     const raw = latest?.canonicalRawInput || source.jobPayload.canonicalRawInput;
     const revisionNo = await this.repository.nextShotRevision(productionId, shotId);
     let revision;
-    try { revision = buildShotRevision(raw, { shotId, requestId, instruction: instruction?.trim() || null, revisionNo }); }
+    const geometryRecovery = recoveryReason === 'SOURCE_GEOMETRY';
+    let geometryFailure = null;
+    if (geometryRecovery) {
+      geometryFailure = geometryFailureForShot(source, raw, shotId);
+      if (!geometryFailure) {
+        throw new ProductionCommandError(409, 'GEOMETRY_RECOVERY_NOT_APPLICABLE', 'The selected shot has no objective geometry failure');
+      }
+      if (typeof this.repository.countGeometryRecoveries === 'function'
+        && await this.repository.countGeometryRecoveries(productionId, geometryFailure.candidate.assetId, brandId) >= 1) {
+        throw new ProductionCommandError(409, 'GEOMETRY_RECOVERY_LIMIT_REACHED',
+          'One automatic geometry replacement has already been authorized for this asset');
+      }
+    }
+    try { revision = buildShotRevision(raw, { shotId, requestId, instruction: instruction?.trim() || null, revisionNo,
+      recoveryKind: geometryRecovery ? 'SOURCE_GEOMETRY' : null,
+      retryReason: geometryRecovery ? geometryFailure.code : null }); }
     catch (error) {
       if (error.code === 'SHOT_NOT_FOUND') throw new ProductionCommandError(404, error.code, error.message);
       throw error;
@@ -458,10 +494,12 @@ class ProductionCommandService {
     const prepared = await runtime.service.prepareRevision({ input: revision.input, config: runtime.config, productionId });
     const expectedVideos = prepared.plan.expectedVideoGenerations || 0;
     const expectedAudio = prepared.plan.expectedAudioGenerations || 0;
-    if (expectedVideos !== 1 || expectedAudio !== 0 || prepared.plan.expectedPaidProviderCalls !== 1) {
+    if (!geometryRecovery && (expectedVideos !== 1 || expectedAudio !== 0 || prepared.plan.expectedPaidProviderCalls !== 1)) {
       throw new ProductionCommandError(409, 'SHOT_REGENERATION_PLAN_INVALID', 'Per-shot preflight must reuse existing media and generate exactly one video asset');
     }
-    return { source, revision, prepared };
+    if (geometryRecovery && !revision.input.assetPlan.assets.some((asset) => asset.asset_id === revision.replacementAssetId
+      && asset.kind === 'video')) throw new ProductionCommandError(409, 'GEOMETRY_RECOVERY_PLAN_INVALID', 'Replacement video asset is missing');
+    return { source, revision, prepared, geometryRecovery, geometryFailureCode: geometryFailure?.code || null };
   }
 
   async preflightShotRegeneration(args) {
@@ -470,15 +508,18 @@ class ProductionCommandService {
       shotId: args.shotId, sourceAssetId: command.revision.sourceAssetId,
       replacementAssetId: command.revision.replacementAssetId, revisionNo: command.revision.revisionNo,
       expectedVideoGenerations: 1, expectedAudioGenerations: 0, expectedProviderCalls: 1,
-      expectedSemanticEvaluations: command.prepared.plan.expectedSemanticEvaluations || 0,
-      expectedContinuityEvaluations: command.prepared.plan.expectedContinuityEvaluations || 0,
-      expectedEvaluatorCalls: command.prepared.plan.expectedQualityEvaluatorCalls || 0,
-      expectedExternalCalls: 1 + (command.prepared.plan.expectedQualityEvaluatorCalls || 0),
+      expectedSemanticEvaluations: command.geometryRecovery ? 1 : command.prepared.plan.expectedSemanticEvaluations || 0,
+      expectedContinuityEvaluations: 0,
+      expectedEvaluatorCalls: command.geometryRecovery ? 1 : command.prepared.plan.expectedQualityEvaluatorCalls || 0,
+      expectedExternalCalls: command.geometryRecovery ? 2 : 1 + (command.prepared.plan.expectedQualityEvaluatorCalls || 0),
       semanticEvaluatorProvider: command.prepared.plan.semanticEvaluatorProvider || null,
       semanticEvaluatorModel: command.prepared.plan.semanticEvaluatorModel || null,
       provider: command.prepared.plan.provider, model: command.prepared.plan.model,
       resolution: command.prepared.plan.resolution, estimatedCost: null, costStatus: 'UNKNOWN',
-      humanApprovalRequired: true, autoPublish: false, providerCalls: 0 });
+      humanApprovalRequired: true, autoPublish: false, providerCalls: 0,
+      recoveryAction: command.geometryRecovery ? 'REGENERATE_FAILED_SHOT' : 'REGENERATE_SHOT',
+      recoveryKind: command.geometryRecovery ? 'SOURCE_GEOMETRY' : null,
+      existingGoodAssetsReused: command.geometryRecovery, automaticGeometryAttemptsMaximum: command.geometryRecovery ? 1 : null });
   }
 
   async regenerateShot(args) {
@@ -492,6 +533,10 @@ class ProductionCommandService {
       if (['SUCCEEDED','RUNNING'].includes(prior.status)) return Object.freeze({
         regenerationId: prior.id, status: prior.status, reused: true,
         publicationTriggered: false, humanApprovalRequired: true });
+      if ((prior.recovery_kind || prior.recoveryKind) === 'SOURCE_GEOMETRY') {
+        throw new ProductionCommandError(409, 'GEOMETRY_RECOVERY_LIMIT_REACHED',
+          'The bounded automatic geometry replacement attempt is already recorded; explicit operator escalation is required');
+      }
       const raw = prior.canonicalRawInput || prior.canonical_raw_input;
       if (!raw) throw new ProductionCommandError(500, 'SHOT_REGENERATION_STATE_INVALID', 'Persisted shot regeneration is missing canonical input');
       return this.scheduleShotExecution({ record: prior, input: operatorInputFromRaw(raw), args, reused: true });
@@ -507,19 +552,27 @@ class ProductionCommandService {
       revisionNo: command.revision.revisionNo, inputFingerprint: command.revision.input.fingerprint,
       canonicalRawInput: command.revision.raw, instruction: args.instruction?.trim() || null,
       provider: command.prepared.plan.provider, model: command.prepared.plan.model,
-      resolution: command.prepared.plan.resolution }); }
+      resolution: command.prepared.plan.resolution,
+      recoveryKind: command.geometryRecovery ? 'SOURCE_GEOMETRY' : null,
+      retryReason: command.geometryRecovery ? command.geometryFailureCode : null,
+      supersedesAssetId: command.geometryRecovery ? command.revision.sourceAssetId : null,
+      automaticAttempt: command.geometryRecovery ? 1 : null }); }
     catch (error) {
       if (error.code === 'SHOT_REGENERATION_ACTIVE') throw new ProductionCommandError(409, error.code, error.message);
       throw error;
     }
     if (record.status === 'SUCCEEDED' || record.status === 'RUNNING') return Object.freeze({
       regenerationId: record.id, status: record.status, reused: true, publicationTriggered: false });
-    return this.scheduleShotExecution({ record, input: command.revision.input, args, reused: false,
+    return this.scheduleShotExecution({ record, input: command.revision.input,
+      args: { ...args, sourceJobId: command.source.jobId }, reused: false,
       revision: command.revision });
   }
 
   scheduleShotExecution({ record, input, args, reused, revision = null }) {
     const runtime = this.runtime(input);
+    if ((record.recoveryKind || record.recovery_kind) === 'SOURCE_GEOMETRY' || args.recoveryReason === 'SOURCE_GEOMETRY') {
+      return this.scheduleGeometryRecoveryExecution({ record, input, args, reused, revision, runtime });
+    }
     this.scheduler(async () => {
       const claimed = await this.repository.claimShotRegeneration(record.id, runtime.config.workerId);
       if (!claimed) return;
@@ -549,6 +602,59 @@ class ProductionCommandService {
       replacementAssetId: revision?.replacementAssetId || record.replacementAssetId || record.replacement_asset_id,
       revisionNo: revision?.revisionNo || record.revisionNo || record.revision_no,
       status: record.status, accepted: true, reused, expectedProviderCalls: 1, publicationTriggered: false,
+      humanApprovalRequired: true });
+  }
+
+  scheduleGeometryRecoveryExecution({ record, input, args, reused, revision, runtime }) {
+    this.scheduler(async () => {
+      const claimed = await this.repository.claimShotRegeneration(record.id, runtime.config.workerId);
+      if (!claimed) return;
+      try {
+        const prepared = await runtime.service.prepareRevision({ input,
+          config: runtime.config, productionId: args.productionId });
+        const assetId = revision?.replacementAssetId || record.replacementAssetId || record.replacement_asset_id;
+        const asset = prepared.input.assetPlan.assets.find((item) => item.asset_id === assetId && item.kind === 'video');
+        if (!asset) throw Object.assign(new Error('Geometry replacement asset is missing'), { code: 'GEOMETRY_RECOVERY_PLAN_INVALID' });
+        const media = await runtime.mediaExecutor.execute({ productionId: args.productionId,
+          workspaceId: prepared.input.workspaceId, brandId: args.brandId, workerId: runtime.config.workerId, asset });
+        const quality = await runtime.visualQualityEvaluator.evaluate({ media,
+          creativePlan: prepared.input.creativePlan || null, negativeIntent: prepared.input.visualStyle?.avoid || null,
+          expectedAspectRatio: prepared.input.aspectRatio || '9:16', intendedContentType: 'cinematic',
+          qualityTier: asset.generation_requirements?.profile || 'STANDARD', provider: media.provider, model: media.model,
+          generationSettings: asset.generation_requirements?.resolved_settings || {}, motionExpected: true,
+          evaluationClass: 'SOURCE_GEOMETRY_RECOVERY', semanticEvaluationRequired: true });
+        if (quality.status === 'FAIL' || quality.disposition === 'BLOCK') {
+          const error = new Error('Geometry replacement failed source quality validation');
+          error.code = 'SOURCE_QUALITY_VALIDATION_FAILED'; error.details = { quality, assetId }; throw error;
+        }
+        const sourceAssetId = revision?.sourceAssetId || record.sourceAssetId || record.source_asset_id;
+        const retryReason = record.retryReason || record.retry_reason || asset.generation_requirements.retry_reason;
+        const superseded = typeof this.repository.sourceMediaExecution === 'function'
+          ? await this.repository.sourceMediaExecution(args.productionId, args.brandId, sourceAssetId) : null;
+        const result = { status: 'SUCCEEDED', recoveryKind: 'SOURCE_GEOMETRY', sourceAssetId,
+          replacementAssetId: assetId, artifact: { artifactId: media.artifact.artifactId,
+            version: media.artifact.version, storageKey: media.artifact.storageKey, contentHash: media.artifact.contentHash },
+          provider: media.provider, model: media.model, capability: asset.generation_requirements.capability,
+          resolvedSettings: asset.generation_requirements.resolved_settings || {}, canonicalAspectRatio: prepared.input.aspectRatio,
+          actualSourceDimensions: { width: media.mediaProbe?.width, height: media.mediaProbe?.height },
+          referenceEvidence: asset.generation_requirements.v210_reference_evidence || media.provenance?.referenceGeometry || null,
+          seed: asset.generation_requirements.seed ?? media.provenance?.seed ?? null,
+          providerRequestId: media.requestId || null,
+          lineageVersion: Number(record.revisionNo || record.revision_no || revision?.revisionNo || 1) + 1,
+          supersedesLineageVersion: Number(record.revisionNo || record.revision_no || revision?.revisionNo || 1),
+          supersedesArtifact: superseded ? { artifactId: superseded.artifact_id,
+            version: superseded.artifact_version, storageKey: superseded.artifact_storage_key,
+            contentHash: superseded.artifact_content_hash } : null,
+          retryReason, automaticAttempt: 1, quality, completedAt: new Date().toISOString() };
+        await this.repository.completeGeometryRecovery(record.id, { productionId: args.productionId,
+          jobId: args.sourceJobId, result });
+      } catch (error) { await this.repository.failShotRegeneration(record.id, error); throw error; }
+    }, this.logger);
+    return Object.freeze({ regenerationId: record.id, productionId: args.productionId, shotId: args.shotId,
+      replacementAssetId: revision?.replacementAssetId || record.replacementAssetId || record.replacement_asset_id,
+      revisionNo: revision?.revisionNo || record.revisionNo || record.revision_no, status: record.status,
+      accepted: true, reused, expectedProviderCalls: 1, expectedVideoGenerations: 1,
+      recoveryKind: 'SOURCE_GEOMETRY', existingGoodAssetsReused: true, publicationTriggered: false,
       humanApprovalRequired: true });
   }
 }

@@ -485,10 +485,19 @@ class MasterProductionOrchestrator {
           assetId: asset.asset_id, sourceArtifact: media.artifact, evaluation, evaluationClass: 'source' });
         sourceEvaluations.push(Object.freeze({ assetId: asset.asset_id, shotIds: asset.required_for_shots,
           provider: media.provider, model: media.model, profile: qualityTier,
+          capability: asset.generation_requirements?.capability || null,
           seed: asset.generation_requirements?.seed ?? null,
           canonicalPrompt: asset.generation_requirements?.prompt || null,
           providerTranslatedPrompt: media.provenance?.providerTranslatedPrompt || media.provenance?.input?.prompt || null,
           sourceProbe: media.mediaProbe || null,
+          canonicalAspectRatio: asset.generation_requirements?.aspect_ratio || null,
+          referencePolicy: asset.generation_requirements?.v210_reference?.policy || 'NONE',
+          referenceEvidence: asset.generation_requirements?.v210_reference_evidence
+            || media.provenance?.referenceGeometry || null,
+          providerRequestId: media.requestId || null,
+          artifactVersion: media.artifact?.version || null,
+          supersedesAssetId: asset.generation_requirements?.supersedes_asset_id || null,
+          retryReason: asset.generation_requirements?.retry_reason || null,
           generationSettings: asset.generation_requirements?.resolved_settings || {}, ...persisted }));
         if (persisted.status === 'FAIL') {
           const sourceQuality = Object.freeze({ ...combineResults({ qualityClass: 'SOURCE_QUALITY', tier: qualityTier,

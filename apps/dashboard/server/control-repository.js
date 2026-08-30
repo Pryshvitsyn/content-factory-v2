@@ -294,7 +294,9 @@ class ControlRepository {
       SELECT sr.id, sr.request_id AS "requestId", sr.shot_id AS "shotId",
         sr.source_asset_id AS "sourceAssetId", sr.replacement_asset_id AS "replacementAssetId",
         sr.revision_no AS "revisionNo", sr.status, sr.expected_provider_calls AS "expectedProviderCalls",
-        sr.provider, sr.model, sr.resolution, sr.result, sr.error, sr.created_at AS "createdAt"
+        sr.provider, sr.model, sr.resolution, sr.recovery_kind AS "recoveryKind",
+        sr.retry_reason AS "retryReason",sr.supersedes_asset_id AS "supersedesAssetId",
+        sr.automatic_attempt AS "automaticAttempt",sr.result, sr.error, sr.created_at AS "createdAt"
       FROM v2_7.shot_regenerations sr JOIN v2_1.productions p ON p.id=sr.production_id
       WHERE sr.production_id=$1 AND p.brand_id=$2 ORDER BY sr.created_at DESC`, [productionId, brandId]);
     return result.rows;
@@ -315,6 +317,33 @@ class ControlRepository {
     return result.rows[0].revision;
   }
 
+  async countGeometryRecoveries(productionId, sourceAssetId, brandId) {
+    const result = await this.db.query(`SELECT count(*)::int AS count FROM v2_7.shot_regenerations sr
+      JOIN v2_1.productions p ON p.id=sr.production_id
+      WHERE sr.production_id=$1 AND sr.source_asset_id=$2 AND sr.recovery_kind='SOURCE_GEOMETRY'
+        AND p.brand_id=$3 AND sr.brand_id=$3`, [productionId, sourceAssetId, brandId]);
+    return result.rows[0]?.count || 0;
+  }
+
+  async latestSuccessfulGeometryRecovery(productionId, brandId, sourceAssetId) {
+    const result = await this.db.query(`SELECT sr.*,sr.shot_id AS "shotId",sr.replacement_asset_id AS "replacementAssetId"
+      FROM v2_7.shot_regenerations sr JOIN v2_1.productions p ON p.id=sr.production_id
+      WHERE sr.production_id=$1 AND sr.source_asset_id=$3 AND sr.recovery_kind='SOURCE_GEOMETRY'
+        AND sr.status='SUCCEEDED' AND p.brand_id=$2 AND sr.brand_id=$2
+        AND sr.workspace_id=p.workspace_id ORDER BY sr.completed_at DESC LIMIT 1`,
+    [productionId, brandId, sourceAssetId]);
+    return result.rows[0] || null;
+  }
+
+  async sourceMediaExecution(productionId, brandId, assetId) {
+    const result = await this.db.query(`SELECT me.* FROM v2_5.media_executions me
+      JOIN v2_1.productions p ON p.id=me.production_id
+      WHERE me.production_id=$1 AND me.brand_id=$2 AND me.asset_id=$3
+        AND p.brand_id=$2 AND p.workspace_id=me.workspace_id
+      ORDER BY me.created_at DESC LIMIT 1`, [productionId, brandId, assetId]);
+    return result.rows[0] || null;
+  }
+
   async getShotRegenerationByRequest(productionId, requestId) {
     const result = await this.db.query(`SELECT *, input_fingerprint AS "inputFingerprint" FROM v2_7.shot_regenerations
       WHERE production_id=$1 AND request_id=$2`, [productionId, requestId]);
@@ -326,15 +355,20 @@ class ControlRepository {
     try { result = await this.db.query(`/* dashboard:ensure-shot-regeneration */
       INSERT INTO v2_7.shot_regenerations(workspace_id,brand_id,production_id,request_id,shot_id,
         source_asset_id,replacement_asset_id,revision_no,status,input_fingerprint,canonical_raw_input,
-        instruction,provider,model,resolution)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PREPARED',$9,$10::jsonb,$11,$12,$13,$14)
+        instruction,provider,model,resolution,recovery_kind,retry_reason,supersedes_asset_id,automatic_attempt)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PREPARED',$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18)
       ON CONFLICT(production_id,request_id) DO UPDATE SET updated_at=now()
       RETURNING *, canonical_raw_input AS "canonicalRawInput", replacement_asset_id AS "replacementAssetId",
         source_asset_id AS "sourceAssetId", revision_no AS "revisionNo"`,
     [record.workspaceId, record.brandId, record.productionId, record.requestId, record.shotId,
       record.sourceAssetId, record.replacementAssetId, record.revisionNo, record.inputFingerprint,
-      JSON.stringify(record.canonicalRawInput), record.instruction, record.provider, record.model, record.resolution]); }
+      JSON.stringify(record.canonicalRawInput), record.instruction, record.provider, record.model, record.resolution,
+      record.recoveryKind || null, record.retryReason || null, record.supersedesAssetId || null, record.automaticAttempt || null]); }
     catch (error) {
+      if (error.code === '23505' && error.constraint === 'shot_regenerations_one_automatic_geometry_attempt') {
+        throw Object.assign(new Error('The one automatic geometry recovery attempt is already recorded for this asset'),
+          { code: 'GEOMETRY_RECOVERY_LIMIT_REACHED' });
+      }
       if (error.code === '23505') throw Object.assign(new Error('Another shot regeneration is active for this production'), { code: 'SHOT_REGENERATION_ACTIVE' });
       throw error;
     }
@@ -355,8 +389,33 @@ class ControlRepository {
   }
 
   async failShotRegeneration(id, error) {
-    await this.db.query(`UPDATE v2_7.shot_regenerations SET status='RETRYING',error=$2::jsonb,
-      worker_id=NULL,updated_at=now() WHERE id=$1 AND status='RUNNING'`, [id, JSON.stringify({ code: error.code || 'SHOT_REGENERATION_FAILED', message: error.message })]);
+    const retryable = error.code !== 'PROVIDER_OUTPUT_GEOMETRY_MISMATCH';
+    await this.db.query(`UPDATE v2_7.shot_regenerations SET status=CASE WHEN recovery_kind='SOURCE_GEOMETRY' THEN 'FAILED' ELSE $3 END,error=$2::jsonb,
+      worker_id=NULL,updated_at=now() WHERE id=$1 AND status='RUNNING'`, [id,
+      JSON.stringify({ code: error.code || 'SHOT_REGENERATION_FAILED', message: error.message, details: error.details || null }),
+      retryable ? 'RETRYING' : 'FAILED']);
+  }
+
+  async completeGeometryRecovery(id, { productionId, jobId, result }) {
+    if (!jobId) throw Object.assign(new Error('Exact failed job identity is required for same-production geometry recovery'),
+      { code: 'GEOMETRY_RECOVERY_JOB_ID_REQUIRED' });
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(`UPDATE v2_7.shot_regenerations SET status='SUCCEEDED',result=$2::jsonb,
+        error='{}'::jsonb,worker_id=NULL,completed_at=now(),updated_at=now()
+        WHERE id=$1 AND status='RUNNING' AND recovery_kind='SOURCE_GEOMETRY' RETURNING *`, [id, JSON.stringify(result)]);
+      if (!updated.rows[0]) throw Object.assign(new Error('Geometry recovery execution was fenced'), { code: 'GEOMETRY_RECOVERY_FENCED' });
+      const resumed = await client.query(`UPDATE v2_1.jobs SET status='RETRYING',worker_id=NULL,lease_expires_at=NULL,next_attempt_at=now(),
+        error=jsonb_build_object('code','SOURCE_GEOMETRY_RECOVERED','message','Failed source geometry was replaced immutably; continue the same execution.',
+          'details',jsonb_build_object('geometryRecovery',$3::jsonb)),
+        payload=coalesce(payload,'{}'::jsonb)||jsonb_build_object('geometryRecovery',$3::jsonb),updated_at=now()
+        WHERE id=$1 AND production_id=$2 AND status='FAILED' RETURNING id`,
+      [jobId, productionId, JSON.stringify(result)]);
+      if (!resumed.rows[0]) throw Object.assign(new Error('Exact failed job could not be resumed'),
+        { code: 'GEOMETRY_RECOVERY_JOB_FENCED' });
+      await client.query('COMMIT'); return updated.rows[0];
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
   }
 
   async resolveArtifact({ sourceId, artifactId, version, brandId }) {
