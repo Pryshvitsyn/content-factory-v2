@@ -2,6 +2,11 @@
 
 const { REASON_CODES, TIER_POLICIES, normalizeTier, qualityCheck, qualityResult } = require('./quality-contract');
 
+const PANEL_EVALUATOR_VERSION = 'v2.10.1-temporal-panel-detector';
+const DIVIDER_DARK_RATIO = 0.82;
+const DIVIDER_POSITION_TOLERANCE = 0.03;
+const DIVIDER_PERSISTENCE_FRACTION = 0.60;
+
 function groups(values, predicate, edgeFraction = 0.08) {
   const start = Math.floor(values.length * edgeFraction);
   const end = Math.ceil(values.length * (1 - edgeFraction));
@@ -14,15 +19,129 @@ function groups(values, predicate, edgeFraction = 0.08) {
   return result;
 }
 
-function dividerEvidence(frames) {
-  let horizontal = []; let vertical = [];
-  for (const frame of frames) {
-    const rows = groups(frame.metrics.rowDarkRatios, (ratio) => ratio >= 0.82);
-    const columns = groups(frame.metrics.columnDarkRatios, (ratio) => ratio >= 0.82);
-    if (rows.length > horizontal.length) horizontal = rows;
-    if (columns.length > vertical.length) vertical = columns;
+function average(values) {
+  return values.length ? values.reduce((sum, value) => sum + Number(value || 0), 0) / values.length : 0;
+}
+
+function normalizedCandidate({ group, values, orientation, frameIndex, frame }) {
+  const length = values.length || 1;
+  const span = values.slice(group.start, group.end + 1);
+  return Object.freeze({
+    orientation,
+    frameIndex,
+    frameRatio: frame?.ratio ?? null,
+    timestampMs: frame?.timestampMs ?? null,
+    analysisHash: frame?.analysisHash || null,
+    start: group.start,
+    end: group.end,
+    normalizedCenter: Number((((group.start + group.end + 1) / 2) / length).toFixed(6)),
+    normalizedThickness: Number(((group.end - group.start + 1) / length).toFixed(6)),
+    strength: Number(average(span).toFixed(6)),
+  });
+}
+
+function dividerCandidates(frames) {
+  const candidates = [];
+  frames.forEach((frame, frameIndex) => {
+    const rows = frame.metrics?.rowDarkRatios || [];
+    const columns = frame.metrics?.columnDarkRatios || [];
+    groups(rows, (ratio) => ratio >= DIVIDER_DARK_RATIO).forEach((group) => candidates.push(normalizedCandidate({
+      group, values: rows, orientation: 'horizontal', frameIndex, frame,
+    })));
+    groups(columns, (ratio) => ratio >= DIVIDER_DARK_RATIO).forEach((group) => candidates.push(normalizedCandidate({
+      group, values: columns, orientation: 'vertical', frameIndex, frame,
+    })));
+  });
+  return candidates;
+}
+
+function clusterCandidates(candidates, frameCount, tolerance = DIVIDER_POSITION_TOLERANCE) {
+  const clusters = [];
+  for (const candidate of [...candidates].sort((a, b) => a.normalizedCenter - b.normalizedCenter)) {
+    const compatible = clusters
+      .filter((cluster) => cluster.orientation === candidate.orientation
+        && Math.abs(cluster.meanPosition - candidate.normalizedCenter) <= tolerance)
+      .sort((a, b) => Math.abs(a.meanPosition - candidate.normalizedCenter)
+        - Math.abs(b.meanPosition - candidate.normalizedCenter))[0];
+    if (!compatible) {
+      clusters.push({ orientation: candidate.orientation, items: [candidate], meanPosition: candidate.normalizedCenter });
+      continue;
+    }
+    const existingIndex = compatible.items.findIndex((item) => item.frameIndex === candidate.frameIndex);
+    if (existingIndex >= 0) {
+      if (candidate.strength > compatible.items[existingIndex].strength) compatible.items[existingIndex] = candidate;
+    } else compatible.items.push(candidate);
+    compatible.meanPosition = average(compatible.items.map((item) => item.normalizedCenter));
   }
-  return { horizontal, vertical };
+  return clusters.map((cluster) => {
+    const positions = cluster.items.map((item) => item.normalizedCenter);
+    const uniqueFrames = new Set(cluster.items.map((item) => item.frameIndex));
+    return Object.freeze({
+      orientation: cluster.orientation,
+      frameCount: uniqueFrames.size,
+      persistence: Number((uniqueFrames.size / Math.max(1, frameCount)).toFixed(6)),
+      meanPosition: Number(average(positions).toFixed(6)),
+      positionSpread: Number((Math.max(...positions) - Math.min(...positions)).toFixed(6)),
+      meanThickness: Number(average(cluster.items.map((item) => item.normalizedThickness)).toFixed(6)),
+      meanStrength: Number(average(cluster.items.map((item) => item.strength)).toFixed(6)),
+      samples: Object.freeze(cluster.items),
+    });
+  });
+}
+
+function dividerEvidence(frames) {
+  const candidates = dividerCandidates(frames);
+  const clusters = clusterCandidates(candidates, frames.length);
+  const minimumPersistentFrames = Math.max(3, Math.ceil(frames.length * DIVIDER_PERSISTENCE_FRACTION));
+  const persistent = clusters.filter((cluster) => cluster.frameCount >= minimumPersistentFrames
+    && cluster.positionSpread <= DIVIDER_POSITION_TOLERANCE);
+  const horizontalPersistent = persistent.filter((cluster) => cluster.orientation === 'horizontal');
+  const verticalPersistent = persistent.filter((cluster) => cluster.orientation === 'vertical');
+  const contactSheet = horizontalPersistent.length >= 1 && verticalPersistent.length >= 1;
+  const multiPanel = !contactSheet && (horizontalPersistent.length >= 2 || verticalPersistent.length >= 2);
+  const split = !contactSheet && !multiPanel && persistent.length === 1;
+  const classification = contactSheet ? 'CONTACT_SHEET'
+    : multiPanel ? 'PERSISTENT_MULTI_PANEL'
+      : split ? 'PERSISTENT_SPLIT_SCREEN'
+        : candidates.length ? 'TRANSIENT_INTERNAL_DIVIDER' : 'NONE';
+  const legacyRange = (cluster) => cluster?.samples?.[0]
+    ? { start: cluster.samples[0].start, end: cluster.samples[0].end } : null;
+  return Object.freeze({
+    evaluatorVersion: PANEL_EVALUATOR_VERSION,
+    classification,
+    minimumPersistentFrames,
+    totalFrames: frames.length,
+    darkRatioThreshold: DIVIDER_DARK_RATIO,
+    normalizedPositionTolerance: DIVIDER_POSITION_TOLERANCE,
+    horizontal: Object.freeze(horizontalPersistent.map(legacyRange).filter(Boolean)),
+    vertical: Object.freeze(verticalPersistent.map(legacyRange).filter(Boolean)),
+    candidates: Object.freeze(candidates),
+    clusters: Object.freeze(clusters),
+    persistentClusters: Object.freeze(persistent),
+  });
+}
+
+function panelCheckFromEvidence(dividers) {
+  if (dividers.classification === 'CONTACT_SHEET') return qualityCheck({
+    code: REASON_CODES.CONTACT_SHEET_DETECTED, status: 'FAIL', qualityClass: 'SOURCE_VISUAL', hardFailure: true,
+    reason: 'Persistent horizontal and vertical internal dividers form a contact-sheet or grid layout.', evidence: dividers,
+  });
+  if (dividers.classification === 'PERSISTENT_MULTI_PANEL') return qualityCheck({
+    code: REASON_CODES.TRIPTYCH_DETECTED, status: 'FAIL', qualityClass: 'SOURCE_VISUAL', hardFailure: true,
+    reason: 'Multiple persistent internal dividers form a stable multi-panel layout.', evidence: dividers,
+  });
+  if (dividers.classification === 'PERSISTENT_SPLIT_SCREEN') return qualityCheck({
+    code: REASON_CODES.PERSISTENT_SPLIT_SCREEN, status: 'FAIL', qualityClass: 'SOURCE_VISUAL', hardFailure: true,
+    reason: 'A strong internal divider persists at a stable normalized position across representative frames.', evidence: dividers,
+  });
+  if (dividers.classification === 'TRANSIENT_INTERNAL_DIVIDER') return qualityCheck({
+    code: REASON_CODES.TRANSIENT_INTERNAL_DIVIDER, status: 'WARN', qualityClass: 'SOURCE_VISUAL', hardFailure: false,
+    reason: 'A dark internal line appears transiently or inconsistently and is insufficient by itself to prove split-screen content.', evidence: dividers,
+  });
+  return qualityCheck({
+    code: REASON_CODES.MULTI_PANEL_COMPOSITION, status: 'PASS', qualityClass: 'SOURCE_VISUAL', hardFailure: false,
+    reason: 'No persistent internal panel divider was detected across representative frames.', evidence: dividers,
+  });
 }
 
 function deterministicVisualChecks({ frames, probe, expectedAspectRatio = '9:16', qualityTier = 'STANDARD' } = {}) {
@@ -51,17 +170,7 @@ function deterministicVisualChecks({ frames, probe, expectedAspectRatio = '9:16'
     reason: blank.length ? 'One or more representative frames are visually blank or near-uniform.' : 'No representative blank frames were detected.',
     evidence: { timestampsMs: blank.map((frame) => frame.timestampMs), thresholdStandardDeviation: policy.blankStandardDeviation } }));
 
-  const dividers = dividerEvidence(frames);
-  const triptych = dividers.horizontal.length >= 2 || dividers.vertical.length >= 2;
-  const split = !triptych && (dividers.horizontal.length === 1 || dividers.vertical.length === 1);
-  const contactSheet = dividers.horizontal.length >= 1 && dividers.vertical.length >= 1;
-  const panelCode = contactSheet ? REASON_CODES.CONTACT_SHEET_DETECTED
-    : triptych ? REASON_CODES.TRIPTYCH_DETECTED : split ? REASON_CODES.SPLIT_SCREEN_DETECTED : REASON_CODES.MULTI_PANEL_COMPOSITION;
-  checks.push(qualityCheck({ code: panelCode, status: (triptych || split || contactSheet) ? 'FAIL' : 'PASS', qualityClass: 'SOURCE_VISUAL',
-    reason: contactSheet ? 'A grid/contact-sheet structure was detected.' : triptych ? 'Multiple strong internal dividers form a triptych or multi-panel layout.'
-      : split ? 'A strong internal divider forms a split-screen layout.' : 'No strong deterministic panel divider was detected.',
-    hardFailure: triptych || contactSheet,
-    evidence: dividers }));
+  checks.push(panelCheckFromEvidence(dividerEvidence(frames)));
 
   const edgeBorderFrames = frames.filter((frame) => {
     const rows = frame.metrics.rowDarkRatios; const cols = frame.metrics.columnDarkRatios;
@@ -73,21 +182,22 @@ function deterministicVisualChecks({ frames, probe, expectedAspectRatio = '9:16'
     qualityClass: 'SOURCE_VISUAL', hardFailure: false,
     reason: edgeBorderFrames.length >= Math.ceil(frames.length / 2) ? 'Persistent dark outer borders may indicate unintended matte content.' : 'No persistent large outer border was detected.',
     evidence: { timestampsMs: edgeBorderFrames.map((frame) => frame.timestampMs) } }));
-  return qualityResult({ qualityClass: 'DETERMINISTIC_VISUAL', tier, checks, metadata: { evaluator: 'v2.9-deterministic-visual' } });
+  return qualityResult({ qualityClass: 'DETERMINISTIC_VISUAL', tier, checks,
+    metadata: { evaluator: PANEL_EVALUATOR_VERSION } });
 }
 
 function deterministicTemporalChecks({ frames, qualityTier = 'STANDARD', motionExpected = true } = {}) {
   const tier = normalizeTier(qualityTier); const differences = frames.map((frame) => frame.differenceFromPrevious).filter(Number.isFinite);
-  const average = differences.length ? differences.reduce((sum, value) => sum + value, 0) / differences.length : 0;
+  const averageDifference = differences.length ? differences.reduce((sum, value) => sum + value, 0) / differences.length : 0;
   const threshold = TIER_POLICIES[tier].staticMeanDifference;
-  const staticFailure = motionExpected && differences.length > 0 && average < threshold;
+  const staticFailure = motionExpected && differences.length > 0 && averageDifference < threshold;
   const luminanceChanges = frames.slice(1).map((frame, index) => Math.abs(frame.metrics.mean - frames[index].metrics.mean));
   const flickerThreshold = { ECONOMY: 55, STANDARD: 42, PREMIUM: 32 }[tier];
   const severeFlicker = luminanceChanges.filter((value) => value >= flickerThreshold).length >= 2;
   const checks = [qualityCheck({ code: REASON_CODES.EXCESSIVE_STATIC_CONTENT, status: staticFailure ? 'FAIL' : 'PASS',
     qualityClass: 'TEMPORAL_QUALITY', hardFailure: false,
     reason: staticFailure ? 'Representative frames change too little for the requested moving shot.' : 'Sample-to-sample change is consistent with non-frozen content.',
-    evidence: { meanAbsoluteDifferences: differences, average: Number(average.toFixed(3)), threshold, motionExpected } }),
+    evidence: { meanAbsoluteDifferences: differences, average: Number(averageDifference.toFixed(3)), threshold, motionExpected } }),
   qualityCheck({ code: REASON_CODES.TEMPORAL_FLICKER, status: severeFlicker ? 'FAIL' : 'PASS',
     qualityClass: 'TEMPORAL_QUALITY', hardFailure: false,
     reason: severeFlicker ? 'Repeated severe whole-frame luminance changes indicate possible temporal flicker.'
@@ -96,4 +206,16 @@ function deterministicTemporalChecks({ frames, qualityTier = 'STANDARD', motionE
   return qualityResult({ qualityClass: 'TEMPORAL_QUALITY', tier, checks, metadata: { evaluator: 'v2.9-deterministic-temporal' } });
 }
 
-module.exports = { deterministicTemporalChecks, deterministicVisualChecks, dividerEvidence, groups };
+module.exports = {
+  DIVIDER_DARK_RATIO,
+  DIVIDER_PERSISTENCE_FRACTION,
+  DIVIDER_POSITION_TOLERANCE,
+  PANEL_EVALUATOR_VERSION,
+  clusterCandidates,
+  deterministicTemporalChecks,
+  deterministicVisualChecks,
+  dividerCandidates,
+  dividerEvidence,
+  groups,
+  panelCheckFromEvidence,
+};

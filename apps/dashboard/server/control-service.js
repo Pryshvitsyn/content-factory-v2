@@ -74,7 +74,9 @@ function progressFor(item) {
 }
 
 function evaluatorAccounting(item) {
-  const quality = item.validationEvidence || item.jobError?.details?.quality || item.jobResult?.quality || null;
+  // Error details retain the full durable quality object, including evaluator call accounting.
+  // The compact validation summary intentionally omits that metadata, so it must not shadow durable truth.
+  const quality = item.jobError?.details?.quality || item.jobResult?.quality || item.validationEvidence || null;
   const accounting = quality?.metadata?.externalCallAccounting || {};
   return Object.freeze({
     actualSemanticEvaluations: Number(accounting.semanticVisualEvaluations || 0),
@@ -86,14 +88,15 @@ function evaluatorAccounting(item) {
 }
 
 class ControlService {
-  constructor({ repository, reviewService, commandService = null, storage, providers, providerCatalog = null,
-    actor = 'local-operator', env = process.env } = {}) {
+  constructor({ repository, reviewService, commandService = null, qualityRecoveryService = null, storage,
+    providers, providerCatalog = null, actor = 'local-operator', env = process.env } = {}) {
     if (!repository) throw new Error('repository is required');
     if (!reviewService) throw new Error('reviewService is required');
     if (!storage) throw new Error('storage is required');
     this.repository = repository;
     this.reviewService = reviewService;
     this.commandService = commandService;
+    this.qualityRecoveryService = qualityRecoveryService;
     this.storage = storage;
     this.providers = providers || [];
     this.providerCatalog = providerCatalog;
@@ -170,10 +173,16 @@ class ControlService {
       }
       catch { semanticRetry = Object.freeze({ ...semanticRetry, eligible: false, action: null }); }
     }
+    let qualityRecovery = null;
+    if (this.qualityRecoveryService) {
+      try { qualityRecovery = await this.qualityRecoveryService.inspect({ productionId: item.id, brandId: item.brandId, production: item }); }
+      catch (error) { qualityRecovery = Object.freeze({ eligible: false, status: 'BLOCKED',
+        action: null, reason: error.message, code: error.code || 'QUALITY_RECOVERY_INSPECTION_FAILED' }); }
+    }
     return { ...item, operationalStatus: operationalStatus(item), progress: progressFor(item), shotRegenerations,
       actualProviderCalls: execution.actualProviderCalls, ambiguousExecutions: execution.ambiguousExecutions,
       ...evaluator, actualExternalCalls: execution.actualProviderCalls + evaluator.actualEvaluatorCalls,
-      semanticRetry, autoPublish: false };
+      semanticRetry, qualityRecovery, autoPublish: false };
   }
 
   async stages(productionId, brandId) {
@@ -211,6 +220,12 @@ class ControlService {
     return this.commandService;
   }
 
+  requireQualityRecovery() {
+    if (!this.qualityRecoveryService) throw new ControlError(503, 'QUALITY_RECOVERY_UNAVAILABLE',
+      'Quality evidence recovery is not configured');
+    return this.qualityRecoveryService;
+  }
+
   async preflightProduction(body) { return this.requireCommands().preflight(body); }
 
   async createProduction(body) {
@@ -225,6 +240,16 @@ class ControlService {
   async retryProduction({ productionId, brandId }) {
     return this.requireCommands().retry({ productionId: requiredUuid('productionId', productionId),
       brandId: requiredUuid('brandId', brandId) });
+  }
+
+  async preflightQualityRecovery({ productionId, brandId }) {
+    return this.requireQualityRecovery().preflight({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId) });
+  }
+
+  async recoverQualityEvidence({ productionId, brandId, confirmation }) {
+    return this.requireQualityRecovery().recover({ productionId: requiredUuid('productionId', productionId),
+      brandId: requiredUuid('brandId', brandId), confirmation });
   }
 
   async preflightSemanticRetry({ productionId, brandId }) {

@@ -86,6 +86,16 @@ function createControlServer({ service, creativeService = null, logger = console
         return json(response, 202, await service.regenerateShot(args));
       }
       if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
+        && segments[3] === 'quality-recovery' && segments.length === 5 && segments[4] === 'preflight') {
+        const body = await readJson(request);
+        return json(response, 200, await service.preflightQualityRecovery({ productionId: segments[2], ...body }));
+      }
+      if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
+        && segments[3] === 'quality-recovery' && segments.length === 4) {
+        const body = await readJson(request);
+        return json(response, 200, await service.recoverQualityEvidence({ productionId: segments[2], ...body }));
+      }
+      if (request.method === 'POST' && segments[0] === 'api' && segments[1] === 'productions'
         && segments[3] === 'semantic-retry' && segments.length === 5 && segments[4] === 'preflight') {
         const body = await readJson(request);
         return json(response, 200, await service.preflightSemanticRetry({ productionId: segments[2], ...body }));
