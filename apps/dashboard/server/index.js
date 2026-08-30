@@ -19,6 +19,24 @@ const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integr
 const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 
+function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
+  if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
+  const preflight = commandService.preflightShotRegeneration.bind(commandService);
+  const regenerate = commandService.regenerateShot.bind(commandService);
+  const resolveRecoveryReason = async (args) => {
+    if (args?.recoveryReason) return args;
+    const plan = await qualityRecoveryService.inspect({ productionId: args.productionId, brandId: args.brandId });
+    if (plan?.action === 'REGENERATE_SHOT' && plan.shotId === args.shotId
+      && ['SOURCE_GEOMETRY','SOURCE_CONTINUITY'].includes(plan.recoveryKind)) {
+      return { ...args, recoveryReason: plan.recoveryKind };
+    }
+    return args;
+  };
+  commandService.preflightShotRegeneration = async (args) => preflight(await resolveRecoveryReason(args));
+  commandService.regenerateShot = async (args) => regenerate(await resolveRecoveryReason(args));
+  return commandService;
+}
+
 function createDashboardRuntime(env = process.env, { previewProvider, creativeStarter } = {}) {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   const db = new Pool({ connectionString: env.DATABASE_URL, max: 10 });
@@ -39,6 +57,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     return semanticPreflight(args);
   };
   const qualityRecoveryService = new QualityRecoveryService({ repository, storage, commandService, env, logger: console });
+  wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService);
   const service = new ControlService({
     repository, reviewService, commandService, qualityRecoveryService, storage, providers, providerCatalog, actor, env,
   });
@@ -66,4 +85,4 @@ if (require.main === module) {
   process.on('SIGTERM', shutdown);
 }
 
-module.exports = { createDashboardRuntime };
+module.exports = { createDashboardRuntime, wireQualityRecoveryShotRegeneration };
