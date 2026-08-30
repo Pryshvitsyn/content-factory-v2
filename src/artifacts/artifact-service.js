@@ -27,7 +27,7 @@ function semanticallyEquivalent({ type, existing, incoming }) {
 }
 
 function idempotencyConflict({ artifactId, type, storageKey, existingHash, incomingHash }) {
-  const error = new Error('Artifact idempotency conflict: existing content differs');
+  const error = new Error(`Artifact idempotency conflict: existing content differs (${artifactId})`);
   error.code = 'ARTIFACT_IDEMPOTENCY_CONFLICT';
   error.details = Object.freeze({ artifactId, type, storageKey, existingHash, incomingHash });
   return error;
