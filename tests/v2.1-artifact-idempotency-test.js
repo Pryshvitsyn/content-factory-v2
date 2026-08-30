@@ -44,6 +44,46 @@ async function run() {
       artifactId: 'missing', type: 'binary', idempotencyKey: 'missing',
     }), null);
 
+    const canonicalJson = {
+      artifactId: 'production:test:live-input',
+      type: 'text',
+      content: JSON.stringify({
+        productionKey: 'v210-test',
+        script: { hook: 'Notice the moment', scenes: [{ id: 1, copy: 'Do not guess' }] },
+        assetPlan: { assets: [{ asset_id: 'video-1', kind: 'video' }] },
+      }),
+      idempotencyKey: 'brand:production:live-input:canonical-fingerprint',
+      provider: 'operator',
+      model: 'v2.6-real-content-input',
+    };
+    const originalJson = await artifacts.createVersion(canonicalJson);
+    const reorderedJson = await artifacts.createVersion({ ...canonicalJson, content: JSON.stringify({
+      assetPlan: { assets: [{ kind: 'video', asset_id: 'video-1' }] },
+      script: { scenes: [{ copy: 'Do not guess', id: 1 }], hook: 'Notice the moment' },
+      productionKey: 'v210-test',
+    }) });
+    assert.equal(reorderedJson.idempotent, true,
+      'semantically identical JSON must reuse the immutable artifact even if object key order changed');
+    assert.equal(reorderedJson.semanticEquivalent, true);
+    assert.equal(reorderedJson.storageKey, originalJson.storageKey);
+    assert.equal(reorderedJson.contentHash, originalJson.contentHash,
+      'reused artifact must report the hash of the bytes that are actually stored');
+
+    await assert.rejects(
+      () => artifacts.createVersion({ ...canonicalJson, content: JSON.stringify({
+        productionKey: 'v210-test',
+        script: { hook: 'Materially changed', scenes: [{ id: 1, copy: 'Do not guess' }] },
+        assetPlan: { assets: [{ asset_id: 'video-1', kind: 'video' }] },
+      }) }),
+      (error) => Boolean(error.code === 'ARTIFACT_IDEMPOTENCY_CONFLICT'
+        && error.details?.artifactId === canonicalJson.artifactId
+        && typeof error.details?.existingHash === 'string'
+        && error.details.existingHash.length > 0
+        && typeof error.details?.incomingHash === 'string'
+        && error.details.incomingHash.length > 0),
+      'materially different JSON must remain a hard idempotency conflict with durable diagnostics'
+    );
+
     await assert.rejects(
       () => artifacts.createVersion({ ...input, content: 'tampered-output' }),
       /Artifact idempotency conflict: existing content differs/
