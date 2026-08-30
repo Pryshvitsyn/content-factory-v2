@@ -1,0 +1,111 @@
+name: V2.10.3 Shot Inspector UI Patch
+
+on:
+  push:
+    branches:
+      - fix/v2.10.2-reference-geometry-recovery
+    paths:
+      - .github/workflows/v2103-shot-inspector-ui-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/v2.10.2-reference-geometry-recovery
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Patch per-shot continuity inspector
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          app = Path('apps/dashboard/client/src/App.jsx')
+          text = app.read_text()
+
+          marker = 'function ShotInspector({ shot, evaluation, continuity, regeneration, disabled, regenerate }) {'
+          helper = r'''const CONTINUITY_UI_FAMILIES = Object.freeze([
+            Object.freeze({ label: 'Character identity', codes: Object.freeze(['VISUAL_IDENTITY_CONTINUITY','CHARACTER_IDENTITY_DRIFT','CONTINUITY_FAILURE','IDENTITY_DRIFT']) }),
+            Object.freeze({ label: 'Wardrobe', codes: Object.freeze(['WARDROBE_CONTINUITY','WARDROBE_CONTINUITY_DRIFT']) }),
+            Object.freeze({ label: 'Environment', codes: Object.freeze(['LOCATION_CONTINUITY','ENVIRONMENT_CONTINUITY_DRIFT']) }),
+            Object.freeze({ label: 'Visual style', codes: Object.freeze(['VISUAL_STYLE_CONTINUITY','VISUAL_STYLE_CONTINUITY_DRIFT']) }),
+            Object.freeze({ label: 'Acting / motion', codes: Object.freeze(['ACTING_STYLE_CONTINUITY','ACTING_STYLE_CONTINUITY_DRIFT']) }),
+          ]);
+
+          function continuityFamilyValue(continuity, codes) {
+            const check = (continuity?.checks || []).find((item) => codes.includes(item.code));
+            return check ? `${check.status} · ${check.code}` : 'NOT_EVALUATED';
+          }
+
+          function continuityComparedArtifacts(continuity) {
+            const compared = continuity?.metadata?.comparedArtifactVersions || continuity?.metadata?.comparedShots || [];
+            return compared.length ? compared.map((item) => [item.shotId || item.assetId, item.artifactVersion != null ? `v${item.artifactVersion}` : null].filter(Boolean).join(' · ')).join(' ↔ ') : 'Not recorded';
+          }
+
+          ''' + marker
+          if 'const CONTINUITY_UI_FAMILIES' not in text:
+              if marker not in text:
+                  raise SystemExit('ShotInspector marker not found')
+              text = text.replace(marker, helper, 1)
+
+          old = "  const lowSource = Math.min(probe.width || Infinity, probe.height || Infinity) < 720;\n"
+          new = old + "  const shotContinuity = evaluation?.continuity || null;\n  const continuityEvaluator = [shotContinuity?.metadata?.provider, shotContinuity?.metadata?.model].filter(Boolean).join(' · ');\n"
+          if 'const shotContinuity = evaluation?.continuity || null;' not in text:
+              if old not in text:
+                  raise SystemExit('ShotInspector lowSource insertion point not found')
+              text = text.replace(old, new, 1)
+
+          old_continuity = '<KeyValue label="Continuity" value={continuity?.status || \'NOT_EVALUATED\'} />'
+          new_continuity = '<KeyValue label="Continuity" value={shotContinuity?.status || \'NOT_EVALUATED\'} />'
+          if old_continuity in text:
+              text = text.replace(old_continuity, new_continuity, 1)
+
+          insertion = "    {lowSource ? <div className=\"warning-panel\">Upscaled low-resolution source: the 1080×1920 master does not create 1080p source quality.</div> : null}\n"
+          continuity_ui = r'''    <div className="notice"><strong>Cross-shot continuity · per-shot gate</strong><div className="plan-grid"><KeyValue label="Continuity evaluator" value={continuityEvaluator} /><KeyValue label="Compared artifacts" value={continuityComparedArtifacts(shotContinuity)} />{CONTINUITY_UI_FAMILIES.map((family) => <KeyValue key={family.label} label={family.label} value={continuityFamilyValue(shotContinuity, family.codes)} />)}</div>{shotContinuity?.checks?.length ? <ValidationDetails evidence={shotContinuity} /> : <small>No cross-shot evaluation is recorded for this shot. The first accepted shot normally has no predecessor comparison.</small>}</div>
+'''
+          if 'Cross-shot continuity · per-shot gate' not in text:
+              if insertion not in text:
+                  raise SystemExit('ShotInspector continuity UI insertion point not found')
+              text = text.replace(insertion, continuity_ui + insertion, 1)
+
+          app.write_text(text)
+
+          test = Path('tests/v2.10.3-cross-shot-continuity-test.js')
+          tests = test.read_text()
+          anchor = "  assert(failureGate >= 0 && nextAssetAdvance > failureGate,\n    'MasterProductionOrchestrator must stop on failed source evaluation before advancing to the next asset');\n"
+          dashboard_assertions = anchor + r'''  const dashboard = fs.readFileSync(require.resolve('../apps/dashboard/client/src/App.jsx'), 'utf8');
+          assert.match(dashboard, /evaluation\?\.continuity \|\| null/,
+            'Shot Inspector must use per-shot incremental continuity evidence rather than only aggregate continuity');
+          for (const label of ['Character identity','Wardrobe','Environment','Visual style','Acting / motion']) {
+            assert(dashboard.includes(`label: '${label}'`) || dashboard.includes(`label=\"${label}\"`),
+              `Shot Inspector must expose ${label} as a dedicated continuity field`);
+          }
+          assert(dashboard.includes('Continuity evaluator'));
+          assert(dashboard.includes('Compared artifacts'));
+'''
+          if 'Shot Inspector must use per-shot incremental continuity evidence' not in tests:
+              if anchor not in tests:
+                  raise SystemExit('V2.10.3 caller ordering test anchor not found')
+              tests = tests.replace(anchor, dashboard_assertions, 1)
+              test.write_text(tests)
+          PY
+      - name: V2.10.3 focused tests
+        run: npm run test:v2.10.3
+      - name: Dashboard build
+        run: npm run dashboard:build
+      - name: Commit final UI patch and self-remove helper workflow
+        run: |
+          git config user.name "content-factory-ci"
+          git config user.email "content-factory-ci@users.noreply.github.com"
+          git rm .github/workflows/v2103-shot-inspector-ui-patch.yml
+          git add apps/dashboard/client/src/App.jsx tests/v2.10.3-cross-shot-continuity-test.js
+          git commit -m "feat(v2.10.3): expose per-shot continuity in Shot Inspector"
+          git push origin HEAD:fix/v2.10.2-reference-geometry-recovery
