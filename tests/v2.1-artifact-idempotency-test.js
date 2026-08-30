@@ -75,10 +75,12 @@ async function run() {
         script: { hook: 'Materially changed', scenes: [{ id: 1, copy: 'Do not guess' }] },
         assetPlan: { assets: [{ asset_id: 'video-1', kind: 'video' }] },
       }) }),
-      (error) => error.code === 'ARTIFACT_IDEMPOTENCY_CONFLICT'
+      (error) => Boolean(error.code === 'ARTIFACT_IDEMPOTENCY_CONFLICT'
         && error.details?.artifactId === canonicalJson.artifactId
-        && error.details?.existingHash
-        && error.details?.incomingHash,
+        && typeof error.details?.existingHash === 'string'
+        && error.details.existingHash.length > 0
+        && typeof error.details?.incomingHash === 'string'
+        && error.details.incomingHash.length > 0),
       'materially different JSON must remain a hard idempotency conflict with durable diagnostics'
     );
 
