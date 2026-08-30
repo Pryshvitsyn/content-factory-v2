@@ -13,6 +13,12 @@ const HARD_MEDIA_FAILURE_CODES = Object.freeze(new Set([
   'WRONG_ORIENTATION','SOURCE_MEDIA_READABLE','SOURCE_RESOLUTION_BELOW_POLICY','FRAME_CORRUPTION',
   'PROVIDER_OUTPUT_GEOMETRY_MISMATCH','MEDIA_UNREADABLE','MEDIA_VIDEO_STREAM_MISSING',
 ]));
+const CONTINUITY_REGENERATION_CODES = Object.freeze(new Set([
+  'CHARACTER_IDENTITY_DRIFT','WARDROBE_CONTINUITY_DRIFT','ENVIRONMENT_CONTINUITY_DRIFT',
+  'PROP_CONTINUITY_DRIFT','LIGHTING_COLOR_CONTINUITY_DRIFT','VISUAL_STYLE_CONTINUITY_DRIFT',
+  'CROSS_SHOT_REALISM_DRIFT','ACTING_STYLE_CONTINUITY_DRIFT','CONTINUITY_FAILURE',
+  'CONTINUITY_PREDECESSOR_EVIDENCE_MISSING',
+]));
 
 class QualityRecoveryError extends Error {
   constructor(status, code, message, details = null) {
@@ -50,6 +56,14 @@ function candidateFromProduction(production) {
 function hardMediaFailures(candidate) {
   return (candidate?.deterministicVisual?.checks || []).filter((check) => check.status === 'FAIL'
     && HARD_MEDIA_FAILURE_CODES.has(check.code)).map((check) => check.code);
+}
+
+function continuityFailures(candidate) {
+  const embedded = candidate?.continuity?.checks || [];
+  const flattened = (candidate?.checks || []).filter((check) => check?.qualityClass === 'CONTINUITY_QUALITY');
+  return [...embedded, ...flattened].filter((check) => check?.status === 'FAIL'
+    && CONTINUITY_REGENERATION_CODES.has(check.code)).map((check) => check.code)
+    .filter((code, index, all) => all.indexOf(code) === index);
 }
 
 function shotIdForAsset(production, assetId) {
@@ -210,6 +224,19 @@ class QualityRecoveryService {
         automaticGeometryAttemptsUsed: attempts, automaticGeometryAttemptsMaximum: 1,
         nextActionAfterRecovery: 'CONTINUE_SAME_EXECUTION' });
     }
+    const continuityDrift = continuityFailures(candidate);
+    if (continuityDrift.length) {
+      return Object.freeze({ eligible: true, recovered: false, action: 'REGENERATE_SHOT', status: 'READY',
+        reason: 'Cross-shot continuity drift is visible in the immutable source. Re-evaluating the same bytes cannot restore character/style continuity; an explicitly confirmed shot replacement is required.',
+        assetId: candidate.assetId, shotId: shotIdForAsset(item, candidate.assetId), recoveryKind: 'SOURCE_CONTINUITY',
+        hardFailureCodes: continuityDrift, existingMedia: 'CONTINUITY_REJECTED_IMMUTABLE_VERSION_PRESERVED',
+        existingGoodAssetsReused: true, videoRegenerations: 1, newVideoGenerations: 1,
+        semanticEvidence: 'NOT_REUSED_FOR_REPLACEMENT', semanticEvaluations: null, continuityEvaluations: null,
+        expectedExternalCalls: null, maximumExternalCalls: null, requiresPaidProviderConfirmation: true,
+        automaticContinuityAttemptsUsed: 0, automaticContinuityAttemptsMaximum: 0,
+        operatorAuthorizationRequiredForEveryContinuityReplacement: true,
+        nextActionAfterRecovery: 'CONTINUE_SAME_EXECUTION' });
+    }
     const executions = await this.repository.semanticRetryMediaExecutions(item.id, item.brandId);
     const row = executions.find((entry) => String(entry.asset_id) === String(candidate.assetId));
     if (!durableMedia(row)) return Object.freeze({ eligible: false, recovered: false, action: 'REGENERATE_SHOT',
@@ -249,7 +276,7 @@ class QualityRecoveryService {
     }
     const plan = await this.inspect({ productionId, brandId, production });
     if (plan.action === 'REGENERATE_SHOT') throw new QualityRecoveryError(409, 'QUALITY_RECOVERY_REGENERATION_REQUIRED',
-      'This objective source failure requires the explicit REGENERATE FAILED SHOT action; the same immutable bytes will not be re-evaluated', plan);
+      'This source failure requires the explicit REGENERATE FAILED SHOT action; the same immutable bytes will not be re-evaluated', plan);
     if (!plan.eligible) throw new QualityRecoveryError(409, 'QUALITY_RECOVERY_UNAVAILABLE',
       plan.reason || 'Quality evidence recovery is not available for this production', plan);
     const candidate = candidateFromProduction(production);
@@ -341,6 +368,8 @@ module.exports = {
   QualityRecoveryError,
   QualityRecoveryService,
   candidateFromProduction,
+  continuityFailures,
+  CONTINUITY_REGENERATION_CODES,
   durableMedia,
   recoverySemanticAdapter,
   semanticEvidenceReusable,
