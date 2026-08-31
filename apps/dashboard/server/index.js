@@ -18,6 +18,8 @@ const { V210PostgresRepository } = require('../../../src/v2.10/postgres-reposito
 const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
 const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
+const { AvatarStudioPostgresRepository } = require('../../../src/avatar-studio/postgres-repository');
+const { AvatarStudioService } = require('../../../src/avatar-studio/service');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -70,9 +72,11 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const creativeService = new CreativeProductionService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
-  return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, v210Repository,
+  const avatarRepository = new AvatarStudioPostgresRepository({ db });
+  const avatarService = new AvatarStudioService({ repository: avatarRepository, actor });
+  return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, avatarService, avatarRepository, v210Repository,
     creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
-    server: createControlServer({ service, creativeService }) };
+    server: createControlServer({ service, creativeService, avatarService }) };
 }
 
 if (require.main === module) {
