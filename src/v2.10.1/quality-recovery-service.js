@@ -5,6 +5,8 @@ const { ArtifactService } = require('../artifacts/artifact-service');
 const { VisualQualityEvaluator } = require('../v2.9/visual-quality-evaluator');
 const { createSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator-factory');
 const { persistVisualQualityEvidence } = require('../../worker/v2.1-master-production');
+const { SOURCE_CREATIVE_RECOVERY_KIND, creativeFailureCodes,
+  sourceCreativeRecoveryContext } = require('../v2.10.4/source-creative-recovery');
 
 const QUALITY_RECOVERY_VERSION = 'v2.10.1';
 const RECOVERABLE_ERROR = 'SOURCE_QUALITY_VALIDATION_FAILED';
@@ -173,6 +175,14 @@ class QualityRecoveryService {
     const item = production || await this.load(productionId, brandId);
     const recovered = item.jobPayload?.qualityRecovery;
     const geometryRecovered = item.jobPayload?.geometryRecovery;
+    const sourceRecovered = item.jobPayload?.sourceRecovery;
+    if (item.jobStatus === 'RETRYING' && sourceRecovered?.status === 'SUCCEEDED') {
+      return Object.freeze({ eligible: false, recovered: true, action: 'CONTINUE_SAME_EXECUTION',
+        status: 'READY_TO_CONTINUE', recoveryKind: sourceRecovered.recoveryKind,
+        assetId: sourceRecovered.sourceAssetId, replacementAssetId: sourceRecovered.replacementAssetId,
+        existingMedia: 'SUPERSEDED_IMMUTABLY', videoRegenerations: 1, semanticEvaluations: 0,
+        expectedExternalCalls: 0, disposition: 'REPLACED', evidence: sourceRecovered.quality || null });
+    }
     if (item.jobStatus === 'RETRYING' && geometryRecovered?.status === 'SUCCEEDED') {
       return Object.freeze({ eligible: false, recovered: true, action: 'CONTINUE_SAME_EXECUTION',
         status: 'READY_TO_CONTINUE', recoveryKind: 'SOURCE_GEOMETRY',
@@ -235,6 +245,47 @@ class QualityRecoveryService {
         expectedExternalCalls: null, maximumExternalCalls: null, requiresPaidProviderConfirmation: true,
         automaticContinuityAttemptsUsed: 0, automaticContinuityAttemptsMaximum: 0,
         operatorAuthorizationRequiredForEveryContinuityReplacement: true,
+        nextActionAfterRecovery: 'CONTINUE_SAME_EXECUTION' });
+    }
+    const creativeFailures = creativeFailureCodes(candidate);
+    if (creativeFailures.length) {
+      const raw = item.jobPayload?.canonicalRawInput || {};
+      const resolvedShotId = shotIdForAsset(item, candidate.assetId);
+      const rawShot = (raw.scenes || []).flatMap((scene) => scene.shots || [])
+        .find((shot) => shot.shot_id === resolvedShotId || shot.asset_id === candidate.assetId) || null;
+      const approvedShot = raw.creative_plan?.shots?.find((shot) => shot.shotId === resolvedShotId
+        || shot.assetId === candidate.assetId) || null;
+      const creativeContext = sourceCreativeRecoveryContext({ candidate, approvedShot,
+        originalGenerationRequirements: rawShot?.video || null });
+      const prior = typeof this.repository.latestSuccessfulCreativeRecovery === 'function'
+        ? await this.repository.latestSuccessfulCreativeRecovery(item.id, item.brandId, candidate.assetId) : null;
+      if (prior) return Object.freeze({ eligible: false, recovered: true, action: 'CONTINUE_SAME_EXECUTION',
+        status: 'READY_TO_CONTINUE', assetId: candidate.assetId, shotId: prior.shotId || prior.shot_id,
+        replacementAssetId: prior.replacementAssetId || prior.replacement_asset_id,
+        recoveryKind: SOURCE_CREATIVE_RECOVERY_KIND, hardFailureCodes: creativeFailures,
+        existingMedia: 'SUPERSEDED_IMMUTABLY', videoRegenerations: 1, semanticEvaluations: 0,
+        expectedExternalCalls: 0, evidence: prior.result?.quality?.evidenceArtifact || null,
+        disposition: 'REPLACED' });
+      const attempts = typeof this.repository.countCreativeRecoveries === 'function'
+        ? await this.repository.countCreativeRecoveries(item.id, candidate.assetId, item.brandId) : 0;
+      return Object.freeze({ eligible: attempts < 1, recovered: false, action: 'REGENERATE_SHOT',
+        status: attempts < 1 ? 'READY' : 'BLOCKED', reason: attempts < 1
+          ? 'The immutable source visibly contradicts the approved creative plan; re-evaluating the same bytes cannot repair it.'
+          : 'The one automatic creative replacement allowance has already been used; explicit operator escalation is required.',
+        assetId: candidate.assetId, shotId: resolvedShotId,
+        recoveryKind: SOURCE_CREATIVE_RECOVERY_KIND, hardFailureCodes: creativeFailures,
+        failureReason: creativeContext?.failureReason || null,
+        failureEvidence: creativeContext?.failureEvidence || null,
+        sanitizedRecoveryObservation: creativeContext?.sanitizedObservation || null,
+        approvedShotPlan: creativeContext?.approvedShotPlan || null,
+        originalGenerationRequirements: creativeContext?.originalGenerationRequirements || null,
+        existingMedia: 'CREATIVE_REJECTED_IMMUTABLE_VERSION_PRESERVED',
+        existingFailedArtifact: 'PRESERVED_IMMUTABLY', existingGoodAssetsReused: true,
+        videoRegenerations: 1, newVideoGenerations: 1, semanticEvidence: 'NOT_REUSED_FOR_REPLACEMENT',
+        semanticEvaluations: 1, expectedExternalCalls: 2, maximumExternalCalls: 2,
+        requiresPaidProviderConfirmation: true, operatorAuthorizationRequired: true,
+        automaticCreativeAttemptsUsed: attempts, automaticCreativeAttemptsMaximum: 1,
+        sameProduction: true, humanApprovalRequired: true, autoPublish: false,
         nextActionAfterRecovery: 'CONTINUE_SAME_EXECUTION' });
     }
     const executions = await this.repository.semanticRetryMediaExecutions(item.id, item.brandId);

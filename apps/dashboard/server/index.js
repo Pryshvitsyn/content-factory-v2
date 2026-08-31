@@ -27,7 +27,7 @@ function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryServ
     if (args?.recoveryReason) return args;
     const plan = await qualityRecoveryService.inspect({ productionId: args.productionId, brandId: args.brandId });
     if (plan?.action === 'REGENERATE_SHOT' && plan.shotId === args.shotId
-      && ['SOURCE_GEOMETRY','SOURCE_CONTINUITY'].includes(plan.recoveryKind)) {
+      && ['SOURCE_GEOMETRY','SOURCE_CONTINUITY','SOURCE_CREATIVE'].includes(plan.recoveryKind)) {
       return { ...args, recoveryReason: plan.recoveryKind };
     }
     return args;

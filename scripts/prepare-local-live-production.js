@@ -40,6 +40,7 @@ const V210_MIGRATIONS = [
   'migrations/20260829_v2_10_creative_production.sql',
   'migrations/20260829_v2_10_completion.sql',
   'migrations/20260830_v2_10_2_reference_geometry_recovery.sql',
+  'migrations/20260831_v2_10_4_source_creative_recovery.sql',
 ];
 
 function discoverDatabaseUrl(env = process.env) {

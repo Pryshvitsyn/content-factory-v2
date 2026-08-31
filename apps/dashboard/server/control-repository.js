@@ -335,6 +335,24 @@ class ControlRepository {
     return result.rows[0] || null;
   }
 
+  async countCreativeRecoveries(productionId, sourceAssetId, brandId) {
+    const result = await this.db.query(`SELECT count(*)::int AS count FROM v2_7.shot_regenerations sr
+      JOIN v2_1.productions p ON p.id=sr.production_id
+      WHERE sr.production_id=$1 AND sr.source_asset_id=$2 AND sr.recovery_kind='SOURCE_CREATIVE'
+        AND p.brand_id=$3 AND sr.brand_id=$3`, [productionId, sourceAssetId, brandId]);
+    return result.rows[0]?.count || 0;
+  }
+
+  async latestSuccessfulCreativeRecovery(productionId, brandId, sourceAssetId) {
+    const result = await this.db.query(`SELECT sr.*,sr.shot_id AS "shotId",sr.replacement_asset_id AS "replacementAssetId"
+      FROM v2_7.shot_regenerations sr JOIN v2_1.productions p ON p.id=sr.production_id
+      WHERE sr.production_id=$1 AND sr.source_asset_id=$3 AND sr.recovery_kind='SOURCE_CREATIVE'
+        AND sr.status='SUCCEEDED' AND p.brand_id=$2 AND sr.brand_id=$2
+        AND sr.workspace_id=p.workspace_id ORDER BY sr.completed_at DESC LIMIT 1`,
+    [productionId, brandId, sourceAssetId]);
+    return result.rows[0] || null;
+  }
+
   async sourceMediaExecution(productionId, brandId, assetId) {
     const result = await this.db.query(`SELECT me.* FROM v2_5.media_executions me
       JOIN v2_1.productions p ON p.id=me.production_id
@@ -369,6 +387,10 @@ class ControlRepository {
         throw Object.assign(new Error('The one automatic geometry recovery attempt is already recorded for this asset'),
           { code: 'GEOMETRY_RECOVERY_LIMIT_REACHED' });
       }
+      if (error.code === '23505' && error.constraint === 'shot_regenerations_one_automatic_creative_attempt') {
+        throw Object.assign(new Error('The one automatic creative recovery attempt is already recorded for this asset'),
+          { code: 'CREATIVE_RECOVERY_LIMIT_REACHED' });
+      }
       if (error.code === '23505') throw Object.assign(new Error('Another shot regeneration is active for this production'), { code: 'SHOT_REGENERATION_ACTIVE' });
       throw error;
     }
@@ -390,30 +412,40 @@ class ControlRepository {
 
   async failShotRegeneration(id, error) {
     const retryable = error.code !== 'PROVIDER_OUTPUT_GEOMETRY_MISMATCH';
-    await this.db.query(`UPDATE v2_7.shot_regenerations SET status=CASE WHEN recovery_kind='SOURCE_GEOMETRY' THEN 'FAILED' ELSE $3 END,error=$2::jsonb,
+    await this.db.query(`UPDATE v2_7.shot_regenerations SET status=CASE WHEN recovery_kind IN ('SOURCE_GEOMETRY','SOURCE_CREATIVE') THEN 'FAILED' ELSE $3 END,error=$2::jsonb,
       worker_id=NULL,updated_at=now() WHERE id=$1 AND status='RUNNING'`, [id,
       JSON.stringify({ code: error.code || 'SHOT_REGENERATION_FAILED', message: error.message, details: error.details || null }),
       retryable ? 'RETRYING' : 'FAILED']);
   }
 
   async completeGeometryRecovery(id, { productionId, jobId, result }) {
-    if (!jobId) throw Object.assign(new Error('Exact failed job identity is required for same-production geometry recovery'),
-      { code: 'GEOMETRY_RECOVERY_JOB_ID_REQUIRED' });
+    return this.completeSourceRecovery(id, { productionId, jobId, recoveryKind: 'SOURCE_GEOMETRY', result });
+  }
+
+  async completeSourceRecovery(id, { productionId, jobId, recoveryKind, result }) {
+    const allowed = ['SOURCE_GEOMETRY','SOURCE_CREATIVE'];
+    if (!allowed.includes(recoveryKind)) throw Object.assign(new Error('Unsupported bounded source recovery kind'),
+      { code: 'SOURCE_RECOVERY_KIND_INVALID' });
+    const geometry = recoveryKind === 'SOURCE_GEOMETRY';
+    if (!jobId) throw Object.assign(new Error(`Exact failed job identity is required for same-production ${geometry ? 'geometry' : 'source'} recovery`),
+      { code: geometry ? 'GEOMETRY_RECOVERY_JOB_ID_REQUIRED' : 'SOURCE_RECOVERY_JOB_ID_REQUIRED' });
+    const payloadKey = recoveryKind === 'SOURCE_GEOMETRY' ? 'geometryRecovery' : 'sourceRecovery';
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
       const updated = await client.query(`UPDATE v2_7.shot_regenerations SET status='SUCCEEDED',result=$2::jsonb,
         error='{}'::jsonb,worker_id=NULL,completed_at=now(),updated_at=now()
-        WHERE id=$1 AND status='RUNNING' AND recovery_kind='SOURCE_GEOMETRY' RETURNING *`, [id, JSON.stringify(result)]);
-      if (!updated.rows[0]) throw Object.assign(new Error('Geometry recovery execution was fenced'), { code: 'GEOMETRY_RECOVERY_FENCED' });
+        WHERE id=$1 AND status='RUNNING' AND recovery_kind=$3 RETURNING *`, [id, JSON.stringify(result), recoveryKind]);
+      if (!updated.rows[0]) throw Object.assign(new Error(`${geometry ? 'Geometry' : 'Source'} recovery execution was fenced`),
+        { code: geometry ? 'GEOMETRY_RECOVERY_FENCED' : 'SOURCE_RECOVERY_FENCED' });
       const resumed = await client.query(`UPDATE v2_1.jobs SET status='RETRYING',worker_id=NULL,lease_expires_at=NULL,next_attempt_at=now(),
-        error=jsonb_build_object('code','SOURCE_GEOMETRY_RECOVERED','message','Failed source geometry was replaced immutably; continue the same execution.',
-          'details',jsonb_build_object('geometryRecovery',$3::jsonb)),
-        payload=coalesce(payload,'{}'::jsonb)||jsonb_build_object('geometryRecovery',$3::jsonb),updated_at=now()
+        error=jsonb_build_object('code',$4::text,'message','Failed source was replaced immutably; continue the same execution.',
+          'details',jsonb_build_object($5::text,$3::jsonb)),
+        payload=coalesce(payload,'{}'::jsonb)||jsonb_build_object($5::text,$3::jsonb),updated_at=now()
         WHERE id=$1 AND production_id=$2 AND status='FAILED' RETURNING id`,
-      [jobId, productionId, JSON.stringify(result)]);
+      [jobId, productionId, JSON.stringify(result), `${recoveryKind}_RECOVERED`, payloadKey]);
       if (!resumed.rows[0]) throw Object.assign(new Error('Exact failed job could not be resumed'),
-        { code: 'GEOMETRY_RECOVERY_JOB_FENCED' });
+        { code: geometry ? 'GEOMETRY_RECOVERY_JOB_FENCED' : 'SOURCE_RECOVERY_JOB_FENCED' });
       await client.query('COMMIT'); return updated.rows[0];
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
   }
