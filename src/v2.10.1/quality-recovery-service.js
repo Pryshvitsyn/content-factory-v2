@@ -276,6 +276,7 @@ class QualityRecoveryService {
         recoveryKind: SOURCE_CREATIVE_RECOVERY_KIND, hardFailureCodes: creativeFailures,
         failureReason: creativeContext?.failureReason || null,
         failureEvidence: creativeContext?.failureEvidence || null,
+        sanitizedRecoveryObservation: creativeContext?.sanitizedObservation || null,
         approvedShotPlan: creativeContext?.approvedShotPlan || null,
         originalGenerationRequirements: creativeContext?.originalGenerationRequirements || null,
         existingMedia: 'CREATIVE_REJECTED_IMMUTABLE_VERSION_PRESERVED',

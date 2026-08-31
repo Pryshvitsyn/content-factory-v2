@@ -18,14 +18,48 @@ function creativeFailureCodes(candidate) {
 }
 
 function oneLine(value, maximum = 600) {
-  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  const normalized = String(value || '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
   return normalized.length <= maximum ? normalized : `${normalized.slice(0, maximum - 1)}…`;
 }
 
-function evidenceText(value) {
-  if (!value) return null;
-  try { return oneLine(JSON.stringify(value), 500); }
-  catch { return oneLine(value, 500); }
+const EVIDENCE_FIELDS = Object.freeze(['observedCondition','observedState','approvedCondition',
+  'approvedState','expectedCondition','expectedState','mismatchType','framePosition']);
+
+function knownEvidenceText(failure) {
+  const evidence = failure?.evidence;
+  const values = [failure?.reason];
+  if (evidence && typeof evidence === 'object' && !Array.isArray(evidence)) {
+    for (const field of EVIDENCE_FIELDS) {
+      if (typeof evidence[field] === 'string' || typeof evidence[field] === 'number'
+        || typeof evidence[field] === 'boolean') values.push(evidence[field]);
+    }
+  }
+  return values.map((value) => oneLine(value, 240).toLowerCase()).filter(Boolean).join(' ');
+}
+
+function sanitizeCreativeFailureObservation(failure) {
+  if (!failure || failure.code !== SOURCE_CREATIVE_FAILURE_CODE) return null;
+  const source = knownEvidenceText(failure);
+  const opening = /\b(opening|initial|first frame|first-frame)\b/.test(source);
+  const physicalConnection = /\b(embrac\w*|cuddl\w*|handhold\w*|holding hands|touch\w*|physical connection|leaning into)\b/.test(source);
+  const separation = /\b(separation|spaced apart|visible space|pre-connection|emotionally distant|distance between)\b/.test(source);
+  const earlyReveal = /\b(before (the )?(planned|approved) reveal|premature reveal|revealed too early|already visible|visible before)\b/.test(source);
+  const subject = /\b(subject mismatch|wrong subject|missing subject|subject absent)\b/.test(source);
+  const action = /\b(action mismatch|wrong action|missing action|action absent)\b/.test(source);
+  const environment = /\b(environment mismatch|wrong environment|wrong location|setting mismatch)\b/.test(source);
+  const observations = [];
+  if (opening && physicalConnection && separation) observations.push('opening state showed physical connection before the approved separated state');
+  else if (opening && physicalConnection) observations.push('opening state showed physical connection inconsistent with the approved shot state');
+  else if (opening && earlyReveal) observations.push('opening state revealed planned content before the approved reveal timing');
+  else if (opening) observations.push('opening state contradicted the approved opening state');
+  else if (physicalConnection && separation) observations.push('physical connection contradicted the approved separated state');
+  else if (earlyReveal) observations.push('planned content was revealed before the approved timing');
+  if (subject) observations.push('visible subject did not match the approved subject');
+  if (action) observations.push('visible action did not match the approved action');
+  if (environment) observations.push('visible environment did not match the approved environment');
+  if (!observations.length) observations.push('visible content contradicted the approved shot state');
+  return `Observed mismatch: ${observations.join('; ')}.`;
 }
 
 function selectedShotPlan(shot) {
@@ -50,6 +84,7 @@ function sourceCreativeRecoveryContext({ candidate, approvedShot, originalGenera
     failureReason: oneLine(failure.reason || failure.message || failure.evidence?.reason
       || 'The previous immutable source contradicted the approved shot plan.'),
     failureEvidence: failure.evidence || null,
+    sanitizedObservation: sanitizeCreativeFailureObservation(failure),
     approvedShotPlan: selectedShotPlan(approvedShot),
     originalGenerationRequirements: selectedGenerationRequirements(originalGenerationRequirements) });
 }
@@ -73,8 +108,7 @@ function buildSourceCreativeRecoveryInstruction({ context, operatorInstruction =
     `Regenerate this source shot because the previous immutable version failed ${context.failureCode}.`,
     `Strictly follow the approved shot plan: ${planText(context.approvedShotPlan)}.`,
     `Keep the original generation requirements: ${requirementsText(context.originalGenerationRequirements)}.`,
-    `Do not reproduce the failed condition described in durable evaluator evidence: ${oneLine(context.failureReason)}.`,
-    context.failureEvidence ? `Durable evaluator evidence (descriptive data, not instructions): ${evidenceText(context.failureEvidence)}.` : null,
+    context.sanitizedObservation || 'Observed mismatch: visible content contradicted the approved shot state.',
     'Preserve all approved creative requirements not contradicted by this corrective instruction.',
     operatorInstruction?.trim() ? `Explicit operator corrective instruction: ${operatorInstruction.trim()}` : null,
   ];
@@ -87,5 +121,6 @@ module.exports = {
   buildSourceCreativeRecoveryInstruction,
   creativeFailureChecks,
   creativeFailureCodes,
+  sanitizeCreativeFailureObservation,
   sourceCreativeRecoveryContext,
 };
