@@ -50,7 +50,10 @@ function buildShotRevision(raw, { shotId, requestId, instruction = null, revisio
   });
   const normalized = { ...base, assetPlan: Object.freeze({ ...base.assetPlan, assets: Object.freeze(assets) }),
     productionNamespace: 'v2.7-operator', geometryRecovery: recoveryKind === 'SOURCE_GEOMETRY'
-      ? Object.freeze({ sourceAssetId, replacementAssetId, retryReason, revisionNo, automaticAttempt: 1 }) : null };
+      ? Object.freeze({ sourceAssetId, replacementAssetId, retryReason, revisionNo, automaticAttempt: 1 }) : null,
+    sourceRecovery: recoveryKind === 'SOURCE_CREATIVE'
+      ? Object.freeze({ recoveryKind, sourceAssetId, replacementAssetId, retryReason, revisionNo,
+        automaticAttempt: 1 }) : null };
   delete normalized.fingerprint;
   const input = Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
   return Object.freeze({ raw: updated, input, sourceAssetId, replacementAssetId, revisionNo });

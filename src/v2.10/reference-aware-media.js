@@ -56,7 +56,7 @@ class V210ReferenceAwareMediaExecutor {
           AND me.asset_id=sr.replacement_asset_id AND me.status='SUCCEEDED' AND me.brand_id=sr.brand_id
         JOIN v2_1.productions p ON p.id=sr.production_id
         WHERE sr.production_id=$1 AND sr.source_asset_id=$2
-          AND sr.recovery_kind IN ('SOURCE_GEOMETRY','SOURCE_CONTINUITY')
+          AND sr.recovery_kind IN ('SOURCE_GEOMETRY','SOURCE_CONTINUITY','SOURCE_CREATIVE')
           AND sr.status='SUCCEEDED' AND p.brand_id=$3 AND sr.brand_id=$3
           AND me.workspace_id=p.workspace_id ORDER BY sr.revision_no DESC LIMIT 1`,
       [productionId, assetId, brandId]);
