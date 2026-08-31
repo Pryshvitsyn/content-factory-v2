@@ -56,7 +56,10 @@ class AvatarStudioPostgresRepository {
   async listCharacters({ brandId = null, vertical = null } = {}) {
     const rows = (await this.db.query(`SELECT c.*,ls.current_level,ls.level_name,ls.blocking_failures,
       coalesce(jsonb_agg(DISTINCT bp.brand_id) FILTER (WHERE bp.allowed),'[]'::jsonb) AS allowed_brand_ids,
-      coalesce(bool_or(cr.status='APPROVED'),false) AS consent_approved
+      (coalesce(bool_or(cr.status='APPROVED'),false) OR EXISTS(SELECT 1 FROM avatar_studio.consent_events ce
+        WHERE ce.character_id=c.id AND ce.modality='FACE' AND ce.status='APPROVED' AND ce.event_type='GRANT'
+        AND (ce.expires_at IS NULL OR ce.expires_at>now()) AND NOT EXISTS(SELECT 1 FROM avatar_studio.consent_events newer
+          WHERE newer.character_id=ce.character_id AND newer.modality=ce.modality AND newer.recorded_at>ce.recorded_at))) AS consent_approved
       FROM avatar_studio.characters c JOIN avatar_studio.level_states ls ON ls.character_id=c.id
       JOIN avatar_studio.brand_permissions bp ON bp.character_id=c.id
       LEFT JOIN avatar_studio.consent_records cr ON cr.character_id=c.id
@@ -77,6 +80,7 @@ class AvatarStudioPostgresRepository {
     const tableQueries = [
       ['brandPermissions', 'SELECT brand_id,allowed,approved_by,approved_at FROM avatar_studio.brand_permissions WHERE character_id=$1'],
       ['consentRecords', 'SELECT * FROM avatar_studio.consent_records WHERE character_id=$1 ORDER BY recorded_at DESC'],
+      ['consentEvents', 'SELECT * FROM avatar_studio.consent_events WHERE character_id=$1 ORDER BY recorded_at DESC,id DESC'],
       ['sources', 'SELECT * FROM avatar_studio.source_assets WHERE character_id=$1 ORDER BY imported_at DESC'],
       ['bodyReferences', 'SELECT * FROM avatar_studio.body_references WHERE character_id=$1 ORDER BY created_at'],
       ['expressionReferences', 'SELECT * FROM avatar_studio.expression_references WHERE character_id=$1 ORDER BY created_at'],
@@ -91,7 +95,9 @@ class AvatarStudioPostgresRepository {
     tableQueries.forEach(([key], index) => { avatar[key] = results[index].rows.map(camel); });
     avatar.vertical = avatar.verticalCode; avatar.subjectType = avatar.subjectType; avatar.identity = avatar.identitySpec;
     avatar.brandIds = avatar.brandPermissions.filter((item) => item.allowed).map((item) => item.brandId);
-    avatar.consent = avatar.consentRecords.find((item) => item.status === 'APPROVED') || null;
+    const latestFaceEvent = avatar.consentEvents.find((item) => item.modality === 'FACE');
+    avatar.consent = (latestFaceEvent?.status === 'APPROVED' ? latestFaceEvent : null)
+      || avatar.consentRecords.find((item) => item.status === 'APPROVED') || null;
     const passports = (await this.db.query(`SELECT p.*,pc.decision,pc.approved_by,pc.approved_at
       FROM avatar_studio.passports p LEFT JOIN avatar_studio.passport_certifications pc ON pc.passport_id=p.id
       WHERE p.character_id=$1 ORDER BY p.candidate_no`, [id])).rows.map(camel);
@@ -104,6 +110,137 @@ class AvatarStudioPostgresRepository {
       missing_requirements=$6,blocking_failures=$7,evaluated_at=now() WHERE workspace_id=$1 AND character_id=$2`,
     [workspaceId, avatarId, state.currentLevel, state.currentLevelName, json(state.completedRequirements),
       json(state.missingRequirements), json(state.blockingFailures)]);
+  }
+
+  async appendIdentityVersion({ avatar, brandId, identity, identityHash, provenance, actor }) {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = (await client.query(`SELECT c.id,c.workspace_id FROM avatar_studio.characters c
+        WHERE c.id=$1 AND c.workspace_id=$2 AND EXISTS(SELECT 1 FROM avatar_studio.brand_permissions bp
+          WHERE bp.character_id=c.id AND bp.brand_id=$3 AND bp.allowed) FOR UPDATE`, [avatar.id,avatar.workspaceId,brandId])).rows[0];
+      if (!owner) throw new AvatarStudioError(404, 'AVATAR_NOT_FOUND', 'Avatar was not found in this brand scope');
+      const version = Number((await client.query('SELECT coalesce(max(version),0)+1 AS version FROM avatar_studio.character_versions WHERE character_id=$1', [avatar.id])).rows[0].version);
+      const row = (await client.query(`INSERT INTO avatar_studio.character_versions
+        (workspace_id,character_id,version,identity_spec,identity_hash,provenance,created_by)
+        VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [avatar.workspaceId,avatar.id,version,identity,identityHash,provenance,actor])).rows[0];
+      await client.query('COMMIT'); return camel(row);
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
+  }
+
+  async createIntake({ id, avatar, brandId, artifact, media, sourceType, sourceLocator, existingAssetId,
+    gate0, rightsStatus, provenance, actor }) {
+    const row = (await this.db.query(`INSERT INTO avatar_studio.asset_intakes
+      (id,workspace_id,brand_id,vertical_code,character_id,artifact_id,artifact_version,artifact_storage_key,content_hash,
+       original_filename,mime_type,extension,byte_size,width,height,duration_ms,source_type,source_locator,
+       existing_asset_registry_id,gate0_status,gate0_findings,gate0_policy_version,rights_status,provenance,uploader)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
+    [id,avatar.workspaceId,brandId,avatar.vertical,avatar.id,artifact.artifactId,artifact.version,artifact.storageKey,
+      artifact.contentHash,media.filename,media.mimeType,media.extension,media.byteSize,media.width,media.height,media.durationMs,
+      sourceType,sourceLocator || null,existingAssetId || null,gate0.status,json(gate0.findings),gate0.policyVersion,
+      rightsStatus,provenance,actor])).rows[0];
+    return this.intake({ id: row.id, brandId, avatarId: avatar.id });
+  }
+
+  async intake({ id, brandId, avatarId = null }) {
+    const row = (await this.db.query(`SELECT ai.*,
+      gre.action AS latest_review_action,gre.reason AS latest_review_reason,gre.decided_by,gre.decided_at,
+      CASE
+        WHEN ai.gate0_status='BLOCK' THEN 'BLOCK'
+        WHEN gre.action IN ('REJECT','KEEP_BLOCKED') THEN 'BLOCK'
+        WHEN ai.gate0_status='REVIEW' AND gre.action='APPROVE_FOR_USE' THEN 'PASS'
+        ELSE ai.gate0_status END AS effective_gate0_status,
+      CASE WHEN rights.id IS NOT NULL THEN 'VERIFIED' ELSE ai.rights_status END AS effective_rights_status
+      FROM avatar_studio.asset_intakes ai
+      LEFT JOIN LATERAL (SELECT * FROM avatar_studio.gate0_review_events e WHERE e.intake_asset_id=ai.id
+        AND e.action<>'MARK_RIGHTS_VERIFIED'
+        ORDER BY e.decided_at DESC,e.id DESC LIMIT 1) gre ON true
+      LEFT JOIN LATERAL (SELECT id FROM avatar_studio.gate0_review_events e WHERE e.intake_asset_id=ai.id
+        AND e.action='MARK_RIGHTS_VERIFIED' ORDER BY e.decided_at DESC,e.id DESC LIMIT 1) rights ON true
+      WHERE ai.id=$1 AND ai.brand_id=$2 AND ($3::uuid IS NULL OR ai.character_id=$3)`, [id,brandId,avatarId])).rows[0];
+    if (!row) return null;
+    const [reviews, consents] = await Promise.all([
+      this.db.query('SELECT * FROM avatar_studio.gate0_review_events WHERE intake_asset_id=$1 ORDER BY decided_at,id', [id]),
+      this.db.query(`SELECT DISTINCT ON (modality) * FROM avatar_studio.consent_events
+        WHERE character_id=$1 AND (intake_asset_id=$2 OR intake_asset_id IS NULL)
+        ORDER BY modality,recorded_at DESC,id DESC`, [row.character_id,id]),
+    ]);
+    const result = camel(row); result.reviewEvents = reviews.rows.map(camel); result.effectiveConsents = consents.rows.map(camel);
+    return result;
+  }
+
+  async listIntakes({ brandId, avatarId = null, reviewOnly = false }) {
+    const rows = (await this.db.query(`SELECT ai.id FROM avatar_studio.asset_intakes ai
+      WHERE ai.brand_id=$1 AND ($2::uuid IS NULL OR ai.character_id=$2)
+        AND (NOT $3::boolean OR (ai.gate0_status IN ('REVIEW','BLOCK') AND NOT EXISTS(
+          SELECT 1 FROM avatar_studio.gate0_review_events terminal WHERE terminal.intake_asset_id=ai.id
+          AND terminal.action IN ('APPROVE_FOR_USE','REJECT','KEEP_BLOCKED')))) ORDER BY ai.created_at DESC`,
+    [brandId,avatarId,reviewOnly])).rows;
+    return Promise.all(rows.map((row) => this.intake({ id: row.id, brandId, avatarId })));
+  }
+
+  async addReviewEvent({ intake, action, reason, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.gate0_review_events
+      (workspace_id,brand_id,intake_asset_id,action,reason,findings_snapshot,decided_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [intake.workspaceId,intake.brandId,intake.id,action,reason,
+      json(intake.gate0Findings),actor])).rows[0]);
+  }
+
+  async createConsentRequest({ intake, modality, tokenHash, disclosureText, expiresAt, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.consent_requests
+      (workspace_id,brand_id,character_id,intake_asset_id,modality,token_hash,disclosure_text,requested_by,expires_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,workspace_id,brand_id,character_id,intake_asset_id,modality,
+      disclosure_text,requested_by,expires_at,created_at`, [intake.workspaceId,intake.brandId,intake.characterId,intake.id,
+      modality,tokenHash,disclosureText,actor,expiresAt])).rows[0]);
+  }
+
+  async addConsentEvent({ intake, requestId = null, modality, eventType, status, subjectIdentity, rightsBasis,
+    allowedBrandIds, allowedVerticals, allowedChannels, allowedUseTypes, evidenceArtifactId, evidenceArtifactVersion,
+    evidenceNotes, expiresAt, supersedesEventId = null, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.consent_events
+      (workspace_id,brand_id,character_id,intake_asset_id,consent_request_id,modality,event_type,status,subject_identity,
+       rights_basis,allowed_brand_ids,allowed_verticals,allowed_channels,allowed_use_types,evidence_artifact_id,
+       evidence_artifact_version,evidence_notes,expires_at,supersedes_event_id,recorded_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+    [intake.workspaceId,intake.brandId,intake.characterId,intake.id,requestId,modality,eventType,status,subjectIdentity,
+      rightsBasis,json(allowedBrandIds),json(allowedVerticals),json(allowedChannels),json(allowedUseTypes),evidenceArtifactId || null,
+      evidenceArtifactVersion || null,evidenceNotes || null,expiresAt || null,supersedesEventId,actor])).rows[0]);
+  }
+
+  async listExistingAssets({ brandId, workspaceId }) {
+    return (await this.db.query(`SELECT ar.id,ar.asset_id AS "artifactId",ar.artifact_version AS "artifactVersion",
+      ar.artifact_storage_key AS "storageKey",ar.kind,ar.metadata,ar.created_at AS "createdAt",p.workspace_id AS "workspaceId",
+      p.brand_id AS "brandId" FROM v2_1.asset_registry ar JOIN v2_1.productions p ON p.id=ar.production_id
+      WHERE p.brand_id=$1 AND p.workspace_id=$2 AND ar.status='READY' ORDER BY ar.created_at DESC`, [brandId,workspaceId])).rows;
+  }
+
+  async existingAsset({ id, brandId, workspaceId }) {
+    return (await this.db.query(`SELECT ar.id,ar.asset_id AS "artifactId",ar.artifact_version AS "artifactVersion",
+      ar.artifact_storage_key AS "storageKey",ar.kind,ar.metadata,p.workspace_id AS "workspaceId",p.brand_id AS "brandId"
+      FROM v2_1.asset_registry ar JOIN v2_1.productions p ON p.id=ar.production_id
+      WHERE ar.id=$1 AND p.brand_id=$2 AND p.workspace_id=$3 AND ar.status='READY'`, [id,brandId,workspaceId])).rows[0] || null;
+  }
+
+  async useIntake({ avatar, intake, roles, actor }) {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const locked = (await client.query(`SELECT * FROM avatar_studio.asset_intakes
+        WHERE id=$1 AND character_id=$2 AND brand_id=$3 FOR SHARE`, [intake.id,avatar.id,intake.brandId])).rows[0];
+      if (!locked) throw new AvatarStudioError(404, 'INTAKE_NOT_FOUND', 'Asset intake was not found in this avatar scope');
+      const mediaType = String(intake.mimeType).split('/')[0];
+      const sourceType = intake.sourceType === 'EXISTING_ASSET' ? 'EXISTING_ARTIFACT'
+        : mediaType === 'image' ? 'IMAGE' : mediaType === 'video' ? 'VIDEO' : 'AUDIO';
+      const source = (await client.query(`INSERT INTO avatar_studio.source_assets
+        (workspace_id,character_id,brand_id,intake_asset_id,source_type,source_locator,artifact_id,artifact_version,
+         content_hash,gate0_status,gate0_findings,provenance,imported_by)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'PASS',$10,$11,$12) RETURNING *`,
+      [avatar.workspaceId,avatar.id,intake.brandId,intake.id,sourceType,intake.sourceLocator || null,intake.artifactId,
+        intake.artifactVersion,intake.contentHash,json(intake.gate0Findings),{ ...intake.provenance, intakeAssetId: intake.id },actor])).rows[0];
+      for (const role of roles) await client.query(`INSERT INTO avatar_studio.source_asset_roles(source_asset_id,role,assigned_by)
+        VALUES($1,$2,$3)`, [source.id,role,actor]);
+      await client.query('COMMIT'); const result = camel(source); result.roles = roles; return result;
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
   }
 
   async registerSource({ avatar, source, gate0, actor }) {
@@ -154,8 +291,8 @@ class AvatarStudioPostgresRepository {
       (workspace_id,character_id,name,clothing_description,footwear,accessories,allowed_brand_ids,allowed_verticals,prohibited_combinations,reference_artifacts,approval_status,provenance,created_by)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`; params = [...common,value.name,value.clothingDescription,value.footwear || null,json(value.accessories || []),json(value.allowedBrandIds || []),json(value.allowedVerticals || []),json(value.prohibitedCombinations || []),json(value.referenceArtifacts || []),value.approvalStatus,value.provenance || {},actor]; }
     else if (type === 'VOICE') { query = `INSERT INTO avatar_studio.voice_profiles
-      (workspace_id,character_id,name,source_type,language,source_artifact_id,source_artifact_version,consent_record_id,delivery_presets,approval_status,provenance,created_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`; params = [...common,value.name,value.sourceType,value.language,value.sourceArtifactId || null,value.sourceArtifactVersion || null,value.consentRecordId || null,json(value.deliveryPresets || []),value.approvalStatus,value.provenance || {},actor]; }
+      (workspace_id,character_id,name,source_type,language,source_artifact_id,source_artifact_version,consent_record_id,consent_event_id,delivery_presets,approval_status,provenance,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`; params = [...common,value.name,value.sourceType,value.language,value.sourceArtifactId || null,value.sourceArtifactVersion || null,value.consentRecordId || null,value.consentEventId || null,json(value.deliveryPresets || []),value.approvalStatus,value.provenance || {},actor]; }
     else if (type === 'LOCATION') { query = `INSERT INTO avatar_studio.location_packs
       (workspace_id,character_id,name,environment_artifact_id,environment_artifact_version,perspective,camera_height,lens_character,lighting_direction,lighting_temperature,time_of_day,reference_geometry,key_geometry_objects,rights_provenance,allowed_verticals,approval_status,created_by)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`; params = [...common,value.name,value.environmentArtifactId,value.environmentArtifactVersion,value.perspective,value.cameraHeight,value.lensCharacter,value.lightingDirection,value.lightingTemperature,value.timeOfDay || null,value.referenceGeometry,json(value.keyGeometryObjects || []),value.rightsProvenance,json(value.allowedVerticals || []),value.approvalStatus,actor]; }
@@ -169,7 +306,12 @@ class AvatarStudioPostgresRepository {
     return camel((await this.db.query(query, params)).rows[0]);
   }
 
-  async source({ id, avatarId }) { const row = (await this.db.query('SELECT * FROM avatar_studio.source_assets WHERE id=$1 AND character_id=$2', [id, avatarId])).rows[0]; return row ? camel(row) : null; }
+  async source({ id, avatarId }) {
+    const row = (await this.db.query('SELECT * FROM avatar_studio.source_assets WHERE id=$1 AND character_id=$2', [id, avatarId])).rows[0];
+    if (!row) return null; const result = camel(row);
+    result.roles = (await this.db.query('SELECT role FROM avatar_studio.source_asset_roles WHERE source_asset_id=$1 ORDER BY role', [id])).rows.map((item) => item.role);
+    return result;
+  }
 
   async storePlan({ avatar, plan, actor }) {
     const result = await this.db.query(`INSERT INTO avatar_studio.test_content_plans

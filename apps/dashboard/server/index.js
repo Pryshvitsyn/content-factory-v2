@@ -4,6 +4,7 @@ require('dotenv').config();
 const path = require('node:path');
 const { Pool } = require('pg');
 const { FilesystemStorageAdapter } = require('../../../src/storage/storage-adapter');
+const { ArtifactService } = require('../../../src/artifacts/artifact-service');
 const { ControlReviewService } = require('../../../src/v2.3/control-review-service');
 const { ProductionCommandError, ProductionCommandService } = require('../../../src/v2.7/production-command-service');
 const { QualityRecoveryService } = require('../../../src/v2.10.1/quality-recovery-service');
@@ -20,6 +21,8 @@ const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrat
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 const { AvatarStudioPostgresRepository } = require('../../../src/avatar-studio/postgres-repository');
 const { AvatarStudioService } = require('../../../src/avatar-studio/service');
+const { AvatarAssetIntakeService } = require('../../../src/avatar-studio/asset-intake-service');
+const { SafeUrlImporter } = require('../../../src/avatar-studio/safe-url-import');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -73,9 +76,12 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
   const avatarRepository = new AvatarStudioPostgresRepository({ db });
-  const avatarService = new AvatarStudioService({ repository: avatarRepository, actor });
+  const avatarAssetIntakeService = new AvatarAssetIntakeService({ repository: avatarRepository,
+    artifactService: new ArtifactService({ storage }), storage, mediaInspector: audioInspector,
+    safeUrlImporter: new SafeUrlImporter(), actor });
+  const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService, actor });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, avatarService, avatarRepository, v210Repository,
-    creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
+    avatarAssetIntakeService, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
     server: createControlServer({ service, creativeService, avatarService }) };
 }
 

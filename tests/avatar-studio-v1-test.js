@@ -49,9 +49,11 @@ function identityAndSeparationTests() {
 }
 
 function consentTests() {
+  assert.equal(canonicalCharacter({ vertical: 'TRAVEL', brandIds: [brandId], internalName: 'Real face',
+    subjectType: 'CONSENTED_REAL_PERSON', identity }).consent.status, 'REVIEW');
   assert.throws(() => canonicalCharacter({ vertical: 'TRAVEL', brandIds: [brandId], internalName: 'Real face',
     subjectType: 'CONSENTED_REAL_PERSON', identity, consent: { status: 'APPROVED', rightsBasis: 'verbal only' } }),
-  (error) => error.code === 'CONSENT_EVIDENCE_REQUIRED');
+    (error) => error.code === 'CONSENT_EVIDENCE_REQUIRED');
   assert.equal(canonicalCharacter({ vertical: 'TRAVEL', brandIds: [brandId], internalName: 'Real face',
     subjectType: 'CONSENTED_REAL_PERSON', identity, consent: { status: 'APPROVED', rightsBasis: 'signed release',
       evidenceArtifactId: 'consent-artifact', evidenceArtifactVersion: 1 } }).consent.status, 'APPROVED');
@@ -66,6 +68,8 @@ function gateZeroTests() {
 }
 
 function levelEngineTests() {
+  const provisional = evaluateAvatarLevels(avatarFixture({ identity: { ...identity, agePresentation: 'TO_BE_DEFINED', languages: ['und'] } }));
+  assert.equal(provisional.nextLevel.name, 'IDENTITY'); assert(provisional.missingRequirements.includes('IDENTITY_AGE_PRESENTATION'));
   const l0 = evaluateAvatarLevels(avatarFixture());
   assert.equal(l0.currentLevel, 0); assert.equal(l0.nextLevel.name, 'PASSPORT'); assert(l0.missingRequirements.includes('PASSPORT_CERTIFIED'));
   const incompletePassport = evaluateAvatarLevels(avatarFixture({ passports: [{ decision: 'CERTIFIED', panels: [{ angle: 'FRONTAL' },{ angle: 'PROFILE_90' }] }] }));
@@ -127,6 +131,10 @@ function migrationContractTests() {
   assert.match(sql, /REFERENCES continuity_snapshots\(id\)/, 'L7 must extend canonical continuity snapshots');
   assert.match(sql, /uq_avatar_one_certified_passport/);
   assert.match(sql, /reject_immutable_change/);
+  const intakeSql = fs.readFileSync(require.resolve('../migrations/20260831_avatar_studio_v1_1_asset_intake.sql'), 'utf8');
+  for (const table of ['asset_intakes','gate0_review_events','consent_requests','consent_events','source_asset_roles']) {
+    assert(intakeSql.includes(`avatar_studio.${table}`), `V1.1 migration must define ${table}`);
+  }
 }
 
 identityAndSeparationTests(); consentTests(); gateZeroTests(); levelEngineTests(); isolationTests();

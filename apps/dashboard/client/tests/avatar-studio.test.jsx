@@ -14,6 +14,7 @@ describe('Avatar Studio dashboard', () => {
     render(<AvatarStudio />);
     expect(screen.getByRole('heading', { name: 'Avatar Studio' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'LIBRARY' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'GATE 0 REVIEW' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'CREATE AVATAR' }));
     expect(screen.getByRole('heading', { name: 'Context' })).toBeTruthy();
     for (const name of ['Audience vertical','Allowed brand','Identity source type','Persona role','Intended channels']) {
@@ -23,6 +24,44 @@ describe('Avatar Studio dashboard', () => {
     expect(screen.getByRole('heading', { name: 'Plan-only Test Content' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'COMPILE PLAN · ZERO PAID CALLS' })).toBeTruthy();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/brands', expect.anything()));
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('provider'))).toBe(false);
+  });
+
+  it('completes synthetic browser intake without typing an artifact id', async () => {
+    const avatar = { id: 'avatar-1', internalName: 'Mara', vertical: 'PSYCHOLOGY_WELLBEING', subjectType: 'SYNTHETIC',
+      currentLevel: 0, currentLevelName: 'IDENTITY', brandIds: [brand.id] };
+    const intake = { asset: { id: 'intake-1', characterId: avatar.id, brandId: brand.id, effectiveGate0Status: 'PASS',
+      effectiveRightsStatus: 'NOT_REQUIRED', artifactId: 'avatar-source-immutable', artifactVersion: 1, contentHash: 'a'.repeat(64),
+      mimeType: 'image/jpeg', byteSize: 1234, width: 1080, height: 1350, durationMs: null, gate0Findings: [],
+      previewUrl: `/api/avatar-studio/intakes/intake-1/content?brandId=${brand.id}&avatarId=${avatar.id}` },
+      gate0: { status: 'PASS', findings: [], paidProviderCalls: 0, externalGenerationCalls: 0 } };
+    fetch.mockImplementation((url, options = {}) => {
+      if (url === '/api/brands') return response([brand]);
+      if (url === '/api/avatar-studio/avatars' && options.method === 'POST') return response(avatar);
+      if (String(url).endsWith('/intakes') && options.method === 'POST') return response(intake);
+      if (String(url).endsWith('/use') && options.method === 'POST') return response({ source: { id: 'source-1' }, paidProviderCalls: 0 });
+      if (String(url).endsWith('/identity') && options.method === 'POST') return response({ identityVersion: { version: 2 }, avatar });
+      return response([]);
+    });
+    render(<AvatarStudio />); await screen.findByRole('option', { name: 'Attune' });
+    fireEvent.click(screen.getByRole('button', { name: 'CREATE AVATAR' }));
+    fireEvent.change(screen.getByLabelText('Allowed brand'), { target: { value: brand.id } });
+    fireEvent.change(screen.getByLabelText('Internal avatar name'), { target: { value: 'Mara' } });
+    fireEvent.change(screen.getByLabelText('Persona role'), { target: { value: 'calm expert' } });
+    fireEvent.click(screen.getByRole('button', { name: 'START ASSET INTAKE' }));
+    await screen.findByRole('heading', { name: 'Asset intake' });
+    expect(screen.queryByLabelText(/artifact id/i)).toBeNull();
+    const file = new File([new Uint8Array([0xff,0xd8,0xff,0xd9])], 'mara.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByLabelText('Avatar source file'), { target: { files: [file] } });
+    await screen.findByRole('heading', { name: 'Gate 0, rights and source roles' });
+    expect(screen.getByAltText('Avatar source preview')).toBeTruthy(); expect(screen.getByText('PASS')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'USE AS AVATAR SOURCE' }));
+    await screen.findByRole('heading', { name: 'Identity' });
+    for (const [label,value] of [['Age presentation','late 30s'],['Personality','calm and precise'],
+      ['Visual direction','natural portrait'],['Prohibited uses','deception']]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: 'SAVE IMMUTABLE IDENTITY VERSION' }));
+    await screen.findByRole('heading', { name: 'Avatar source approved' });
+    expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/use'))).toBe(true);
     expect(fetch.mock.calls.some(([url]) => String(url).includes('provider'))).toBe(false);
   });
 

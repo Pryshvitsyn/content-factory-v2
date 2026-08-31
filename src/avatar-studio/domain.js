@@ -67,17 +67,17 @@ function canonicalCharacter(input = {}) {
   if (!SUBJECT_TYPES.includes(subjectType)) throw new AvatarStudioError(400, 'SUBJECT_TYPE_INVALID', 'Choose a supported avatar subject type');
   const brandIds = stringList('brandIds', input.brandIds, { required: true });
   const consent = Object.freeze({
-    status: String(input.consent?.status || (subjectType === 'SYNTHETIC' ? 'APPROVED' : '')).toUpperCase(),
+    status: String(input.consent?.status || (subjectType === 'SYNTHETIC' ? 'APPROVED' : 'REVIEW')).toUpperCase(),
     rightsBasis: requiredText('consent.rightsBasis', input.consent?.rightsBasis
-      || (subjectType === 'SYNTHETIC' ? 'SYNTHETIC_IDENTITY' : '')),
+      || (subjectType === 'SYNTHETIC' ? 'SYNTHETIC_IDENTITY' : 'UNVERIFIED_PENDING_CONSENT')),
     evidenceArtifactId: input.consent?.evidenceArtifactId || null,
     evidenceArtifactVersion: input.consent?.evidenceArtifactVersion || null,
     restrictions: stringList('consent.restrictions', input.consent?.restrictions),
   });
-  if (consent.status !== 'APPROVED') throw new AvatarStudioError(409, 'CONSENT_REQUIRED', 'Approved face/identity consent is required at L0');
-  if (subjectType !== 'SYNTHETIC' && (!consent.evidenceArtifactId || !consent.evidenceArtifactVersion)) {
-    throw new AvatarStudioError(409, 'CONSENT_EVIDENCE_REQUIRED', 'Real-person avatars require immutable consent evidence');
-  }
+  if (!['APPROVED','REVIEW'].includes(consent.status)) throw new AvatarStudioError(400, 'CONSENT_STATUS_INVALID', 'Initial consent status must be APPROVED or REVIEW');
+  if (subjectType !== 'SYNTHETIC' && consent.status === 'APPROVED'
+    && (!consent.evidenceArtifactId || !consent.evidenceArtifactVersion)) throw new AvatarStudioError(409,
+    'CONSENT_EVIDENCE_REQUIRED', 'Approved real-person avatars require immutable consent evidence');
   return Object.freeze({
     internalName: requiredText('internalName', input.internalName), vertical, subjectType, brandIds,
     intendedChannels: stringList('intendedChannels', input.intendedChannels),

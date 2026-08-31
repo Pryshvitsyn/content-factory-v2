@@ -1,7 +1,7 @@
 'use strict';
 
 const { AUDIENCE_VERTICALS, AvatarStudioError, PERFORMANCE_PACKS, assertBrandPermission,
-  canonicalCharacter, fingerprint, requiredText } = require('./domain');
+  canonicalCharacter, canonicalIdentity, fingerprint, requiredText } = require('./domain');
 const { assertGateUsable, inspectGateZero } = require('./gate-zero');
 const { evaluateAvatarLevels } = require('./level-engine');
 const { compilePlanOnlyTest } = require('./plan-compiler');
@@ -15,9 +15,9 @@ function approval(value) {
 }
 
 class AvatarStudioService {
-  constructor({ repository, actor = 'local-operator' } = {}) {
+  constructor({ repository, assetIntakeService = null, actor = 'local-operator' } = {}) {
     if (!repository) throw new Error('AvatarStudioService requires repository');
-    this.repository = repository; this.actor = actor;
+    this.repository = repository; this.assetIntakeService = assetIntakeService; this.actor = actor;
   }
 
   async verticals() { return this.repository.verticals(); }
@@ -29,11 +29,59 @@ class AvatarStudioService {
 
   async create(input) {
     const character = canonicalCharacter(input);
-    if (character.subjectType !== 'SYNTHETIC' && input.humanApproval !== true) {
-      throw new AvatarStudioError(409, 'HUMAN_APPROVAL_REQUIRED', 'Real-person identity and consent require explicit human approval');
-    }
     const created = await this.repository.createCharacter({ character, identityHash: fingerprint(character.identity), actor: this.actor });
     return this.refresh(created.id);
+  }
+
+  async updateIdentity({ avatarId, brandId, identity, provenance = {} } = {}) {
+    const avatar = await this.avatar({ id: avatarId, brandId });
+    const canonical = canonicalIdentity(identity || {});
+    const version = await this.repository.appendIdentityVersion({ avatar, brandId, identity: canonical,
+      identityHash: fingerprint(canonical), provenance: { ...provenance, source: provenance.source || 'AVATAR_STUDIO_IDENTITY_STEP' }, actor: this.actor });
+    return Object.freeze({ identityVersion: version, avatar: await this.refresh(avatar.id, brandId) });
+  }
+
+  requireIntake() {
+    if (!this.assetIntakeService) throw new AvatarStudioError(503, 'ASSET_INTAKE_UNAVAILABLE', 'Avatar asset intake is not configured');
+    return this.assetIntakeService;
+  }
+
+  async intakeAsset(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().intake({ avatar, ...input });
+  }
+  async listIntakes(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().list({ avatar, ...input });
+  }
+  async reviewQueue(input = {}) { return this.requireIntake().reviewQueue(input); }
+  async existingAssets(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().existingAssets({ avatar, ...input });
+  }
+  async reviewIntake(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().review({ avatar, ...input });
+  }
+  async requestConsent(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().createConsentRequest({ avatar, ...input });
+  }
+  async grantConsent(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().grantConsent({ avatar, ...input });
+  }
+  async revokeConsent(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().revokeConsent({ avatar, ...input });
+  }
+  async useIntake(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().use({ avatar, ...input });
+  }
+  async intakeContent(input = {}) {
+    const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
+    return this.requireIntake().content({ avatar, ...input });
   }
 
   async avatar({ id, brandId }) {
@@ -104,7 +152,9 @@ class AvatarStudioService {
     }
     if (normalizedType === 'VOICE' && value.sourceType !== 'SYNTHETIC') {
       const consent = avatar.consentRecords.find((item) => item.id === value.consentRecordId && item.status === 'APPROVED'
-        && ['VOICE','FACE_AND_VOICE'].includes(item.scope));
+        && ['VOICE','FACE_AND_VOICE'].includes(item.scope)) || (avatar.consentEvents || []).find((item) => item.id === value.consentEventId
+        && item.modality === 'VOICE' && item.status === 'APPROVED' && item.eventType === 'GRANT'
+        && (!item.expiresAt || new Date(item.expiresAt) > new Date()));
       if (!consent) throw new AvatarStudioError(409, 'VOICE_CONSENT_REQUIRED', 'Owned or cloned voices require approved immutable voice consent');
     }
     if (normalizedType === 'WARDROBE') {
@@ -133,6 +183,11 @@ class AvatarStudioService {
     const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
     const reference = await this.repository.source({ id: input.referenceSourceId, avatarId: avatar.id });
     if (!reference) throw new AvatarStudioError(404, 'SOURCE_NOT_FOUND', 'Reference source was not found in this avatar scope');
+    if (reference.intakeAssetId && this.assetIntakeService) {
+      const intake = await this.repository.intake({ id: reference.intakeAssetId, brandId: input.brandId, avatarId: avatar.id });
+      const eligibility = this.assetIntakeService.eligibility(intake, avatar, reference.roles || []);
+      if (!eligibility.eligible) throw new AvatarStudioError(409, 'SOURCE_CONSENT_REVOKED', 'Source is no longer eligible for future generation plans', eligibility);
+    }
     const continuity = avatar.continuityReadiness.find((item) => item.approvalStatus === 'APPROVED');
     const planAvatar = { ...avatar, continuityEvidence: continuity ? {
       identity: continuity.identityStatus, wardrobe: continuity.wardrobeStatus, props: continuity.propStatus,

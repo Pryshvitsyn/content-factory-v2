@@ -25,6 +25,25 @@ function inspectGateZero(input = {}) {
     externalCalls: 0, inspectedAt: new Date().toISOString(), policyVersion: 'GATE_0_AVATAR_STUDIO_V1' });
 }
 
+function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, provenance = {}, subjectType = 'SYNTHETIC' } = {}) {
+  const base = inspectGateZero({ sourceLocator, text: media.embeddedText || 'immutable media asset',
+    metadata: { filename: media.filename, mimeType: media.mimeType, extension: media.extension,
+      detectedMime: media.detectedMime, byteSize: media.byteSize }, provenance });
+  const findings = [...(media.findings || []), ...base.findings];
+  if (sourceType === 'SAFE_URL_IMPORT') findings.push({ severity: 'REVIEW', code: 'EXTERNAL_URL_SOURCE' });
+  if (!provenance.owner && subjectType !== 'SYNTHETIC') findings.push({ severity: 'REVIEW', code: 'PROVENANCE_UNCERTAIN' });
+  if (subjectType !== 'SYNTHETIC' && media.kind === 'image') findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' });
+  if (subjectType !== 'SYNTHETIC' && media.kind === 'audio') findings.push({ severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
+  if (subjectType !== 'SYNTHETIC' && media.kind === 'video') {
+    findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' }, { severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
+  }
+  const unique = [...new Map(findings.map((item) => [`${item.severity}:${item.code}`, Object.freeze({ severity: item.severity, code: item.code })])).values()];
+  const status = unique.some((item) => item.severity === 'BLOCK') ? 'BLOCK'
+    : unique.some((item) => item.severity === 'REVIEW') ? 'REVIEW' : 'PASS';
+  return Object.freeze({ ...base, status, findings: Object.freeze(unique), policyVersion: 'GATE_0_AVATAR_STUDIO_V1_1',
+    externalCalls: sourceType === 'SAFE_URL_IMPORT' ? 1 : 0, paidProviderCalls: 0 });
+}
+
 function assertGateUsable(source, { allowReview = true } = {}) {
   const status = source?.gate0Status || source?.gate0_status || source?.gate0?.status;
   if (status === 'BLOCK') throw new AvatarStudioError(409, 'GATE0_BLOCKED', 'Blocked source cannot be used by Avatar Studio');
@@ -33,4 +52,4 @@ function assertGateUsable(source, { allowReview = true } = {}) {
   return true;
 }
 
-module.exports = { RULES, assertGateUsable, inspectGateZero };
+module.exports = { RULES, assertGateUsable, inspectAssetGateZero, inspectGateZero };

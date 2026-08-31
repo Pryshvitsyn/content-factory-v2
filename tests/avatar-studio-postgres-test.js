@@ -6,11 +6,16 @@ const path = require('node:path');
 const { Pool } = require('pg');
 const { AvatarStudioPostgresRepository } = require('../src/avatar-studio/postgres-repository');
 const { AvatarStudioService } = require('../src/avatar-studio/service');
+const { AvatarAssetIntakeService } = require('../src/avatar-studio/asset-intake-service');
+const { ArtifactService } = require('../src/artifacts/artifact-service');
+const { FilesystemStorageAdapter } = require('../src/storage/storage-adapter');
 
 const WORKSPACE_ID = 'a0000000-0000-4000-8000-000000000001';
 const BRAND_ID = 'a0000000-0000-4000-8000-000000000002';
 const OTHER_BRAND_ID = 'a0000000-0000-4000-8000-000000000003';
 const SNAPSHOT_ID = 'a0000000-0000-4000-8000-000000000004';
+const OTHER_WORKSPACE_ID = 'a0000000-0000-4000-8000-000000000005';
+const CROSS_WORKSPACE_BRAND_ID = 'a0000000-0000-4000-8000-000000000006';
 
 function assertDisposable() {
   const name = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).pathname.slice(1) : process.env.PGDATABASE;
@@ -27,21 +32,69 @@ async function main() {
     password: process.env.PGPASSWORD, database: process.env.PGDATABASE,
   });
   let paidProviderCalls = 0;
+  const storageRoot = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'avatar-studio-pg-artifacts-'));
   try {
     await db.query('DROP SCHEMA IF EXISTS avatar_studio CASCADE');
     await db.query(await fs.readFile(path.resolve('migrations/20260831_avatar_studio_v1.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260831_avatar_studio_v1_1_asset_intake.sql'), 'utf8'));
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Avatar Studio disposable') ON CONFLICT(id) DO NOTHING`, [WORKSPACE_ID]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Attune Avatar Test','attune-avatar-test','ACTIVE')
       ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [BRAND_ID, WORKSPACE_ID]);
 
     const repository = new AvatarStudioPostgresRepository({ db });
-    const service = new AvatarStudioService({ repository, actor: 'avatar-test-operator' });
+    const storage = new FilesystemStorageAdapter({ root: storageRoot });
+    const intakeService = new AvatarAssetIntakeService({ repository, artifactService: new ArtifactService({ storage }),
+      storage, actor: 'avatar-test-operator' });
+    const service = new AvatarStudioService({ repository, assetIntakeService: intakeService, actor: 'avatar-test-operator' });
     const l0 = await service.create({ vertical: 'PSYCHOLOGY_WELLBEING', brandIds: [BRAND_ID], internalName: 'Mara Fixture',
-      subjectType: 'SYNTHETIC', identity: { agePresentation: 'late 30s', personality: 'calm and precise',
-        role: 'behavioral coach', languages: ['en'], visualDirection: 'natural face and stable proportions', permanentAttributes: {},
+      subjectType: 'SYNTHETIC', identity: { agePresentation: 'TO_BE_DEFINED', personality: 'TO_BE_DEFINED',
+        role: 'behavioral coach', languages: ['und'], visualDirection: 'TO_BE_DEFINED', permanentAttributes: {},
         prohibitedUses: ['deception'] }, consent: { status: 'APPROVED', rightsBasis: 'SYNTHETIC_IDENTITY' },
       provenance: { source: 'POSTGRES_TEST_FIXTURE' } });
-    assert.equal(l0.currentLevel, 0); assert.equal(l0.nextLevel.name, 'PASSPORT');
+    assert.equal(l0.currentLevel, 0); assert.equal(l0.nextLevel.name, 'IDENTITY');
+
+    const png = Buffer.alloc(40); Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(png);
+    png.writeUInt32BE(13,8); png.write('IHDR',12,'ascii'); png.writeUInt32BE(2,16); png.writeUInt32BE(3,20);
+    const intake = await service.intakeAsset({ avatarId: l0.id, brandId: BRAND_ID, sourceType: 'UPLOAD',
+      file: { name: 'mara-l0.png', mimeType: 'image/png', contentBase64: png.toString('base64') },
+      provenance: { owner: 'SYNTHETIC', source: 'POSTGRES_BROWSER_FIXTURE' } });
+    assert.equal(intake.gate0.status,'PASS'); assert.equal(intake.asset.width,2); assert.equal(intake.asset.height,3);
+    const intakeSource = await service.useIntake({ avatarId: l0.id, brandId: BRAND_ID, intakeId: intake.asset.id,
+      roles: ['IDENTITY','PASSPORT_SOURCE'] });
+    assert.deepEqual(intakeSource.source.roles,['IDENTITY','PASSPORT_SOURCE']);
+    const resolvedIdentity = await service.updateIdentity({ avatarId: l0.id, brandId: BRAND_ID, identity: {
+      agePresentation: 'late 30s', personality: 'calm and precise', role: 'behavioral coach', languages: ['en'],
+      visualDirection: 'natural face and stable proportions', permanentAttributes: {}, prohibitedUses: ['deception'] },
+      provenance: { source: 'POSTGRES_IDENTITY_AFTER_INTAKE' } });
+    assert.equal(resolvedIdentity.identityVersion.version,2); assert.equal(resolvedIdentity.avatar.nextLevel.name,'PASSPORT');
+    const intakeRow = (await db.query('SELECT * FROM avatar_studio.asset_intakes WHERE id=$1',[intake.asset.id])).rows[0];
+    assert.equal(intakeRow.brand_id,BRAND_ID); assert.equal(intakeRow.workspace_id,WORKSPACE_ID);
+    await assert.rejects(() => db.query('UPDATE avatar_studio.asset_intakes SET original_filename=$2 WHERE id=$1',
+      [intake.asset.id,'mutated.png']), (error) => error.code === 'P0001');
+
+    const real = await service.create({ vertical: 'PSYCHOLOGY_WELLBEING', brandIds: [BRAND_ID], internalName: 'Real Person Draft',
+      subjectType: 'CONSENTED_REAL_PERSON', identity: { agePresentation: 'adult', personality: 'warm', role: 'host', languages: ['en'],
+        visualDirection: 'natural portrait', permanentAttributes: {}, prohibitedUses: ['deception'] },
+      consent: { status: 'REVIEW', rightsBasis: 'UNVERIFIED_PENDING_CONSENT' }, provenance: { source: 'POSTGRES_TEST_FIXTURE' } });
+    const realIntake = await service.intakeAsset({ avatarId: real.id, brandId: BRAND_ID, sourceType: 'UPLOAD',
+      file: { name: 'real-person.png', mimeType: 'image/png', contentBase64: png.toString('base64') }, provenance: {} });
+    assert.equal(realIntake.gate0.status,'REVIEW');
+    await service.reviewIntake({ avatarId: real.id, brandId: BRAND_ID, intakeId: realIntake.asset.id,
+      action: 'APPROVE_FOR_USE', reason: 'Human reviewed security and provenance findings', humanApproval: true });
+    await assert.rejects(() => service.useIntake({ avatarId: real.id, brandId: BRAND_ID, intakeId: realIntake.asset.id,
+      roles: ['IDENTITY'] }), (error) => error.code === 'ASSET_NOT_ELIGIBLE');
+    const grant = await service.grantConsent({ avatarId: real.id, brandId: BRAND_ID, intakeId: realIntake.asset.id,
+      modality: 'FACE', subjectIdentity: { name: 'Fixture Person' }, rightsBasis: 'SIGNED_RELEASE', allowedBrandIds: [BRAND_ID],
+      allowedVerticals: ['PSYCHOLOGY_WELLBEING'], allowedChannels: ['TEST'], allowedUseTypes: ['AVATAR_IDENTITY'],
+      evidenceNotes: 'Disposable integration fixture', disclosureAccepted: true, humanApproval: true });
+    assert.equal(grant.event.status,'APPROVED');
+    await service.useIntake({ avatarId: real.id, brandId: BRAND_ID, intakeId: realIntake.asset.id, roles: ['IDENTITY'] });
+    await service.revokeConsent({ avatarId: real.id, brandId: BRAND_ID, intakeId: realIntake.asset.id, modality: 'FACE',
+      reason: 'Integration fixture revocation', humanApproval: true });
+    await assert.rejects(() => service.useIntake({ avatarId: real.id, brandId: BRAND_ID, intakeId: realIntake.asset.id,
+      roles: ['IDENTITY'] }), (error) => error.code === 'ASSET_NOT_ELIGIBLE');
+    assert.equal(Number((await db.query(`SELECT count(*) AS count FROM avatar_studio.consent_events
+      WHERE character_id=$1 AND modality='FACE'`,[real.id])).rows[0].count),2,'grant and revocation must both remain append-only');
 
     const imported = await service.importSource({ avatarId: l0.id, brandId: BRAND_ID, source: {
       sourceType: 'SYNTHETIC_TRAITS', sourceLocator: `fixture://avatar/${l0.id}/identity`,
@@ -118,8 +171,15 @@ async function main() {
       VALUES($1,$2,'TRAVEL','avatar-test-operator')`, [WORKSPACE_ID, OTHER_BRAND_ID]);
     await assert.rejects(() => db.query(`INSERT INTO avatar_studio.brand_permissions(workspace_id,character_id,brand_id,approved_by)
       VALUES($1,$2,$3,'avatar-test-operator')`, [WORKSPACE_ID, l0.id, OTHER_BRAND_ID]), (error) => error.code === 'P0001');
+    await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Other disposable workspace') ON CONFLICT(id) DO NOTHING`, [OTHER_WORKSPACE_ID]);
+    await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Other Workspace Brand','other-workspace-brand','ACTIVE')
+      ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [CROSS_WORKSPACE_BRAND_ID, OTHER_WORKSPACE_ID]);
+    await assert.rejects(() => service.create({ vertical: 'PSYCHOLOGY_WELLBEING', brandIds: [BRAND_ID,CROSS_WORKSPACE_BRAND_ID],
+      internalName: 'Cross Workspace Forbidden', subjectType: 'SYNTHETIC', identity: { agePresentation: 'adult', personality: 'calm',
+        role: 'host', languages: ['en'], visualDirection: 'portrait', prohibitedUses: ['deception'] },
+      consent: { status: 'APPROVED', rightsBasis: 'SYNTHETIC_IDENTITY' } }), (error) => error.code === 'WORKSPACE_ISOLATION_VIOLATION');
     console.log(`Avatar Studio PostgreSQL L0 -> L1 -> L7 passed (${l0.id}); durable multi-shot plan ${plan.id}; paid/external calls = 0`);
-  } finally { await db.end(); }
+  } finally { await db.end(); await fs.rm(storageRoot,{ recursive:true,force:true }); }
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

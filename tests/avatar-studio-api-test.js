@@ -23,7 +23,17 @@ async function main() {
     async verticals() { return [{ code: 'TRAVEL' }]; },
     async list(value) { calls.push(['list', value]); return []; },
     async create(value) { calls.push(['create', value]); return { id: 'avatar-1', currentLevel: 0 }; },
+    async updateIdentity(value) { calls.push(['updateIdentity', value]); return { identityVersion: { version: 2 } }; },
     async avatar(value) { calls.push(['avatar', value]); return { id: value.id }; },
+    async reviewQueue(value) { calls.push(['reviewQueue', value]); return []; },
+    async listIntakes(value) { calls.push(['listIntakes', value]); return []; },
+    async existingAssets(value) { calls.push(['existingAssets', value]); return []; },
+    async intakeAsset(value) { calls.push(['intakeAsset', value]); return { asset: { id: 'intake-1' }, gate0: { status: 'PASS' } }; },
+    async reviewIntake(value) { calls.push(['reviewIntake', value]); return { event: { action: value.action } }; },
+    async requestConsent(value) { calls.push(['requestConsent', value]); return { externalCalls: 0 }; },
+    async grantConsent(value) { calls.push(['grantConsent', value]); return { event: { status: 'APPROVED' } }; },
+    async revokeConsent(value) { calls.push(['revokeConsent', value]); return { event: { status: 'REVOKED' } }; },
+    async useIntake(value) { calls.push(['useIntake', value]); return { paidProviderCalls: 0, externalGenerationCalls: 0 }; },
     async importSource(value) { calls.push(['source', value]); return { gate0: { status: 'PASS', externalCalls: 0 } }; },
     async registerPassport(value) { calls.push(['passport', value]); return { passport: { id: 'passport-1' } }; },
     async certifyPassport(value) { calls.push(['certify', value]); return { avatar: { currentLevel: 1 } }; },
@@ -36,13 +46,33 @@ async function main() {
     assert.equal((await request(server, 'GET', '/api/avatar-studio/verticals')).status, 200);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars?brandId=brand-1&vertical=TRAVEL')).status, 200);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars', { internalName: 'Mara' })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity',
+      { brandId: 'brand-1', identity: { personality: 'calm' } })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/sources', { brandId: 'brand-1' })).status, 201);
+    assert.equal((await request(server, 'GET', '/api/avatar-studio/gate0-reviews?brandId=brand-1')).status, 200);
+    assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/intakes?brandId=brand-1')).status, 200);
+    assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/existing-assets?brandId=brand-1')).status, 200);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes',
+      { brandId: 'brand-1', sourceType: 'UPLOAD', file: { contentBase64: 'AA==' } })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes/intake-1/review',
+      { brandId: 'brand-1', action: 'APPROVE_FOR_USE' })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes/intake-1/consent-requests',
+      { brandId: 'brand-1', modality: 'FACE' })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes/intake-1/consents',
+      { brandId: 'brand-1', modality: 'FACE' })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes/intake-1/revoke-consent',
+      { brandId: 'brand-1', modality: 'FACE' })).status, 201);
+    const use = await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes/intake-1/use',
+      { brandId: 'brand-1', roles: ['IDENTITY'] });
+    assert.equal(use.status, 201); assert.equal(use.payload.paidProviderCalls, 0);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passports/passport-1/certify',
       { brandId: 'brand-1', humanApproval: true })).status, 201);
     const plan = await request(server, 'POST', '/api/avatar-studio/test-content/plan', { brandId: 'brand-1' });
     assert.equal(plan.status, 201); assert.equal(plan.payload.externalCallCount, 0);
     assert.deepEqual(calls.find(([name]) => name === 'list')[1], { brandId: 'brand-1', vertical: 'TRAVEL' });
     assert.equal(calls.find(([name]) => name === 'certify')[1].passportId, 'passport-1');
+    assert.equal(calls.find(([name]) => name === 'reviewIntake')[1].intakeId, 'intake-1');
+    assert.deepEqual(calls.find(([name]) => name === 'useIntake')[1].roles, ['IDENTITY']);
     assert.equal(providerCalls, 0);
   } finally { await new Promise((resolve) => server.close(resolve)); }
   console.log('Avatar Studio dashboard API routing passed; provider calls = 0');
