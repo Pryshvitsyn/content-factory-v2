@@ -70,6 +70,9 @@ function levelEngineTests() {
   assert.equal(l0.currentLevel, 0); assert.equal(l0.nextLevel.name, 'PASSPORT'); assert(l0.missingRequirements.includes('PASSPORT_CERTIFIED'));
   const incompletePassport = evaluateAvatarLevels(avatarFixture({ passports: [{ decision: 'CERTIFIED', panels: [{ angle: 'FRONTAL' },{ angle: 'PROFILE_90' }] }] }));
   assert.equal(incompletePassport.currentLevel, 0, 'three distinct passport angles are mandatory');
+  const chosenPassport = evaluateAvatarLevels(avatarFixture({ passports: [{ decision: 'REJECTED', panels: [] },
+    { decision: 'CERTIFIED', panels: [{ angle: 'FRONTAL' },{ angle: 'THREE_QUARTER_45' },{ angle: 'PROFILE_90' }] }] }));
+  assert.equal(chosenPassport.currentLevel, 1, 'one explicitly chosen candidate advances the avatar');
   const all = evaluateAvatarLevels(l7Avatar());
   assert.equal(all.currentLevel, 7); assert.equal(all.nextLevel, null); assert.equal(all.blockingFailures.length, 0);
   const blocked = evaluateAvatarLevels(avatarFixture({ sources: [{ gate0Status: 'BLOCK' }] }));
@@ -122,6 +125,7 @@ function migrationContractTests() {
   }
   assert.match(sql, /CHECK \(external_call_count = 0\)/);
   assert.match(sql, /REFERENCES continuity_snapshots\(id\)/, 'L7 must extend canonical continuity snapshots');
+  assert.match(sql, /uq_avatar_one_certified_passport/);
   assert.match(sql, /reject_immutable_change/);
 }
 

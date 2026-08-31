@@ -254,6 +254,8 @@ CREATE INDEX IF NOT EXISTS idx_avatar_characters_vertical ON avatar_studio.chara
 CREATE INDEX IF NOT EXISTS idx_avatar_permissions_brand ON avatar_studio.brand_permissions(workspace_id,brand_id,allowed);
 CREATE INDEX IF NOT EXISTS idx_avatar_sources_character ON avatar_studio.source_assets(character_id,imported_at);
 CREATE INDEX IF NOT EXISTS idx_avatar_passports_character ON avatar_studio.passports(character_id,candidate_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_avatar_one_certified_passport
+  ON avatar_studio.passport_certifications(character_id) WHERE decision='CERTIFIED';
 
 CREATE OR REPLACE FUNCTION avatar_studio.enforce_brand_vertical_scope() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE brand_workspace uuid; brand_vertical text; avatar_workspace uuid; avatar_vertical text;

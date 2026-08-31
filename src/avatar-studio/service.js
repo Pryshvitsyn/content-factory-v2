@@ -87,6 +87,9 @@ class AvatarStudioService {
     const avatar = await this.avatar({ id: avatarId, brandId });
     const candidate = avatar.passports.find((item) => item.id === passportId);
     if (!candidate) throw new AvatarStudioError(404, 'PASSPORT_NOT_FOUND', 'Passport candidate was not found');
+    if (normalized === 'CERTIFIED' && avatar.passports.some((item) => item.decision === 'CERTIFIED' && item.id !== passportId)) {
+      throw new AvatarStudioError(409, 'PASSPORT_ALREADY_CERTIFIED', 'This avatar already has one immutable certified passport');
+    }
     if (candidate.decision) throw new AvatarStudioError(409, 'PASSPORT_ALREADY_DECIDED', 'Passport decision is immutable');
     if (candidate.panels.length !== 3) throw new AvatarStudioError(409, 'PASSPORT_ANGLES_INCOMPLETE', 'All passport panels are required before certification');
     const certification = await this.repository.certifyPassport({ avatar, passportId, decision: normalized, notes, actor: this.actor });

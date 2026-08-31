@@ -54,6 +54,13 @@ async function main() {
         { angle: 'PROFILE_90', artifactId: 'fixture-passport-90', artifactVersion: 1 }],
       qa: { samePerson: true, temporaryElementsExcluded: true } });
     assert.equal(candidate.avatar.currentLevel, 0, 'registration alone must not level up without human certification');
+    const alternate = await service.registerPassport({ avatarId: l0.id, brandId: BRAND_ID, sourceId: imported.source.id,
+      panels: [{ angle: 'FRONTAL', artifactId: 'fixture-alt-front', artifactVersion: 1 },
+        { angle: 'THREE_QUARTER_45', artifactId: 'fixture-alt-45', artifactVersion: 1 },
+        { angle: 'PROFILE_90', artifactId: 'fixture-alt-90', artifactVersion: 1 }], qa: { candidate: 'alternate' } });
+    const rejected = await service.certifyPassport({ avatarId: l0.id, brandId: BRAND_ID,
+      passportId: alternate.passport.id, decision: 'REJECTED', humanApproval: true, notes: 'Alternate not selected' });
+    assert.equal(rejected.avatar.currentLevel, 0, 'rejecting an alternate candidate must not level up');
     const certified = await service.certifyPassport({ avatarId: l0.id, brandId: BRAND_ID,
       passportId: candidate.passport.id, decision: 'CERTIFIED', humanApproval: true, notes: 'Exact fixture passport approved' });
     assert.equal(certified.avatar.currentLevel, 1); assert.equal(certified.avatar.nextLevel.name, 'BODY_EXPRESSIONS');
