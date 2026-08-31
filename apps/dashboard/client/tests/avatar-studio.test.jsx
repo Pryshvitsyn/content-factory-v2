@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AvatarStudio, LevelLadder } from '../src/AvatarStudio';
+import { AvatarDetail, AvatarStudio, LevelLadder } from '../src/AvatarStudio';
 
 const brand = { id: '11111111-1111-4111-8111-111111111111', name: 'Attune' };
 function response(payload, ok = true) { return Promise.resolve({ ok, status: ok ? 200 : 400, json: async () => payload }); }
@@ -32,5 +32,15 @@ describe('Avatar Studio dashboard', () => {
     expect(screen.getByText('MULTISHOT CONTINUITY')).toBeTruthy();
     expect(screen.getAllByText('COMPLETE')).toHaveLength(4);
     expect(screen.getByText('NEXT')).toBeTruthy();
+  });
+
+  it('shows exactly one actionable next-level workflow on Avatar Detail', () => {
+    render(<AvatarDetail brandId={brand.id} close={() => {}} onUpdated={() => {}} avatar={{ id: 'avatar-1', internalName: 'Mara',
+      vertical: 'PSYCHOLOGY_WELLBEING', currentLevel: 1, currentLevelName: 'PASSPORT', nextLevel: { level: 2, name: 'BODY_EXPRESSIONS' },
+      completedRequirements: [], missingRequirements: ['BODY_CHEST_UP'], blockingFailures: [], consent: { status: 'APPROVED' } }} />);
+    expect(screen.getByRole('heading', { name: 'Next level · L2 BODY_EXPRESSIONS' })).toBeTruthy();
+    expect(screen.getByLabelText('Chest-up artifact ID')).toBeTruthy();
+    expect(screen.queryByLabelText('Wardrobe pack name')).toBeNull();
+    expect(screen.getByRole('button', { name: 'APPROVE LEVEL 2' })).toBeTruthy();
   });
 });

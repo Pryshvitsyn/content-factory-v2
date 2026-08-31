@@ -20,14 +20,55 @@ function LevelLadder({ avatar }) {
   </article>)}</div>;
 }
 
-function AvatarDetail({ avatar, close }) {
+function LevelUpWorkflow({ avatar, brandId, onUpdated }) {
+  const next = (avatar.levelState || avatar).nextLevel; const [busy, setBusy] = useState(false); const [error, setError] = useState(null);
+  const [form, setForm] = useState({ chest: '', standing: '', seated: '', neutral: '', warm: '', serious: '', wardrobeName: '', clothing: '',
+    voiceName: '', voiceLanguage: 'en', voiceSourceType: 'SYNTHETIC', consentRecordId: '', locationName: '', locationArtifact: '',
+    perspective: 'centered eye-level', cameraHeight: 'eye-level', lensCharacter: 'natural 50mm', lightDirection: 'camera left',
+    lightTemperature: '4300K', width: '1080', height: '1920', preset: 'CALM_EXPERT', snapshotId: '', approved: false });
+  if (!next) return <section className="level-up-workflow"><h3>First-slice levels complete</h3><p>L7 is ready. Production remains behind a separate preflight and human approval.</p></section>;
+  const change = (key,value) => setForm((current) => ({ ...current, [key]: value }));
+  async function add(type, value) { return api(`/api/avatar-studio/avatars/${avatar.id}/level-assets`, { method: 'POST', body: JSON.stringify({ brandId, type, value: { ...value, approvalStatus: 'APPROVED' }, humanApproval: true }) }); }
+  async function submit(event) {
+    event.preventDefault(); setBusy(true); setError(null); try { let result;
+      if (next.level === 2) {
+        for (const [kind,artifactId] of [['CHEST_UP',form.chest],['FULL_BODY_STANDING',form.standing],['SEATED',form.seated]]) result = await add('BODY', { kind, artifactId, artifactVersion: 1, provenance: { source: 'AVATAR_DETAIL_LEVEL_UP' } });
+        for (const [expression,artifactId] of [['NEUTRAL',form.neutral],['WARM_SMILE',form.warm],['CONCERNED_SERIOUS',form.serious]]) result = await add('EXPRESSION', { expression, artifactId, artifactVersion: 1, provenance: { source: 'AVATAR_DETAIL_LEVEL_UP' } });
+      } else if (next.level === 3) result = await add('WARDROBE', { name: form.wardrobeName, clothingDescription: form.clothing,
+        allowedBrandIds: [brandId], allowedVerticals: [avatar.vertical], provenance: { source: 'AVATAR_DETAIL_LEVEL_UP' } });
+      else if (next.level === 4) result = await add('VOICE', { name: form.voiceName, language: form.voiceLanguage,
+        sourceType: form.voiceSourceType, consentRecordId: form.consentRecordId || null, deliveryPresets: ['CALM_EXPERT'], provenance: { source: 'AVATAR_DETAIL_LEVEL_UP' } });
+      else if (next.level === 5) result = await add('LOCATION', { name: form.locationName, environmentArtifactId: form.locationArtifact,
+        environmentArtifactVersion: 1, perspective: { description: form.perspective }, cameraHeight: form.cameraHeight,
+        lensCharacter: form.lensCharacter, lightingDirection: form.lightDirection, lightingTemperature: form.lightTemperature,
+        referenceGeometry: { width: Number(form.width), height: Number(form.height) }, keyGeometryObjects: [],
+        rightsProvenance: { attestedBy: 'dashboard-operator' }, allowedVerticals: [avatar.vertical] });
+      else if (next.level === 6) result = await add('PERFORMANCE', { preset: form.preset, motionSpec: {}, failureNotes: [], provenance: { source: 'AVATAR_DETAIL_LEVEL_UP' } });
+      else if (next.level === 7) result = await add('CONTINUITY', { continuitySnapshotId: form.snapshotId, identity: { status: 'PASS' },
+        wardrobe: { status: 'PASS' }, props: { status: 'PASS' }, location: { status: 'PASS' }, geometry: { status: 'PASS' },
+        voice: { status: 'PASS' }, lipSync: { status: 'PASS' }, evidence: { source: 'CANONICAL_CONTINUITY_SNAPSHOT' } });
+      onUpdated(result.avatar);
+    } catch (cause) { setError(cause); } finally { setBusy(false); }
+  }
+  if (next.level === 1) return <section className="level-up-workflow"><h3>Next level · L1 PASSPORT</h3><p>Use Create Avatar to register Gate 0 source evidence, compare multiple three-angle candidates, and make the immutable human certification.</p></section>;
+  return <form className="level-up-workflow avatar-form" onSubmit={submit}><span className="eyebrow">EXACTLY ONE NEXT-LEVEL WORKFLOW</span><h3>Next level · L{next.level} {next.name}</h3><ErrorPanel error={error} /><div className="form-grid">
+    {next.level === 2 ? <>{[['Chest-up artifact ID','chest'],['Full-body standing artifact ID','standing'],['Seated artifact ID','seated'],['Neutral expression artifact ID','neutral'],['Warm expression artifact ID','warm'],['Serious expression artifact ID','serious']].map(([label,key]) => <Input key={key} label={label} value={form[key]} onChange={(v) => change(key,v)} />)}</> : null}
+    {next.level === 3 ? <><Input label="Wardrobe pack name" value={form.wardrobeName} onChange={(v) => change('wardrobeName',v)} /><Input label="Clothing description" value={form.clothing} onChange={(v) => change('clothing',v)} /></> : null}
+    {next.level === 4 ? <><Input label="Voice profile name" value={form.voiceName} onChange={(v) => change('voiceName',v)} /><Input label="Voice language" value={form.voiceLanguage} onChange={(v) => change('voiceLanguage',v)} /><Select label="Voice source type" value={form.voiceSourceType} onChange={(v) => change('voiceSourceType',v)}><option>SYNTHETIC</option><option>OWNED_RECORDING</option><option>CONSENTED_CLONE</option></Select>{form.voiceSourceType !== 'SYNTHETIC' ? <Select label="Voice consent record" value={form.consentRecordId} onChange={(v) => change('consentRecordId',v)}><option value="">Choose approved consent</option>{(avatar.consentRecords || []).filter((item) => item.status === 'APPROVED').map((item) => <option value={item.id} key={item.id}>{item.scope} · {item.id}</option>)}</Select> : null}</> : null}
+    {next.level === 5 ? <>{[['Location pack name','locationName'],['Environment artifact ID','locationArtifact'],['Perspective','perspective'],['Camera height','cameraHeight'],['Lens character','lensCharacter'],['Lighting direction','lightDirection'],['Lighting temperature','lightTemperature'],['Reference width','width'],['Reference height','height']].map(([label,key]) => <Input key={key} label={label} value={form[key]} onChange={(v) => change(key,v)} />)}</> : null}
+    {next.level === 6 ? <Select label="Performance preset" value={form.preset} onChange={(v) => change('preset',v)}>{['CALM_EXPERT','ENERGETIC_WARM','QUIET_FRIENDLY','FIRM_DIRECT','WALKING_VLOGGER','PRODUCT_DEMO','REACTION'].map((item) => <option key={item}>{item}</option>)}</Select> : null}
+    {next.level === 7 ? <><Input label="Canonical continuity snapshot ID" value={form.snapshotId} onChange={(v) => change('snapshotId',v)} /><label className="check wide"><input aria-label="Approve all L7 continuity families" required type="checkbox" checked={form.approved} onChange={(event) => change('approved',event.target.checked)} />I reviewed identity, wardrobe, props, location geometry, voice and lip sync evidence.</label></> : null}
+  </div><div className="warning-panel">Submitting records an explicit human approval. It never starts provider generation or publication.</div><button className="primary" disabled={busy || (next.level === 7 && !form.approved)} type="submit">{busy ? 'RECORDING…' : `APPROVE LEVEL ${next.level}`}</button></form>;
+}
+
+function AvatarDetail({ avatar, brandId, close, onUpdated }) {
   if (!avatar) return null;
   const state = avatar.levelState || avatar;
   return <section className="avatar-detail"><div className="avatar-detail-head"><div><span className="eyebrow">AVATAR DETAIL</span><h2>{avatar.internalName}</h2></div><button className="secondary" onClick={close}>CLOSE</button></div>
     <div className="avatar-summary"><div><span>CURRENT LEVEL</span><strong>L{state.currentLevel} · {state.currentLevelName || state.levelName}</strong></div><div><span>NEXT LEVEL</span><strong>{state.nextLevel ? `L${state.nextLevel.level} · ${state.nextLevel.name}` : 'MAX FIRST-SLICE LEVEL'}</strong></div><div><span>VERTICAL</span><strong>{VERTICAL_LABELS[avatar.vertical || avatar.verticalCode]}</strong></div><div><span>CONSENT</span><Badge value={avatar.consentApproved || avatar.consent?.status || 'APPROVED'} /></div></div>
     <LevelLadder avatar={avatar} />
     <div className="avatar-requirements"><article><h3>Completed requirements</h3>{(state.completedRequirements || []).map((item) => <code key={item}>{item}</code>)}</article><article><h3>Missing requirements</h3>{(state.missingRequirements || []).length ? state.missingRequirements.map((item) => <code key={item}>{item}</code>) : <small>None</small>}</article><article><h3>Blocking failures</h3>{(state.blockingFailures || []).length ? state.blockingFailures.map((item) => <code key={item}>{item}</code>) : <small>None</small>}</article></div>
-    <div className="avatar-pack-grid">{[['Passport candidates',avatar.passports],['Wardrobe packs',avatar.wardrobes],['Voice profiles',avatar.voiceProfiles],['Location packs',avatar.locations],['Performance packs',avatar.performancePacks]].map(([label,items]) => <article key={label}><span>{label}</span><strong>{items?.length || 0}</strong></article>)}</div>
+    <div className="avatar-pack-grid">{[['Passport candidates',avatar.passports],['Wardrobe packs',avatar.wardrobes],['Voice profiles',avatar.voiceProfiles],['Location packs',avatar.locations],['Performance packs',avatar.performancePacks]].map(([label,items]) => <article key={label}><span>{label}</span><strong>{items?.length || 0}</strong></article>)}</div><LevelUpWorkflow avatar={avatar} brandId={brandId} onUpdated={onUpdated} />
   </section>;
 }
 
@@ -39,7 +80,7 @@ function AvatarLibrary({ brands, selectedBrand, setSelectedBrand, revision }) {
   }, [selectedBrand, revision]);
   async function open(item) { setError(null); try { setSelected(await api(`/api/avatar-studio/avatars/${item.id}?brandId=${encodeURIComponent(selectedBrand)}`)); } catch (cause) { setError(cause); } }
   return <><section className="panel avatar-library-filter"><Select label="Library brand scope" value={selectedBrand} onChange={setSelectedBrand}><option value="">Choose explicit brand scope</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</Select></section><ErrorPanel error={error} />
-    {selected ? <AvatarDetail avatar={selected} close={() => setSelected(null)} /> : <section className="avatar-library">{items.length ? items.map((item) => <button onClick={() => open(item)} key={item.id}><span className="eyebrow">{VERTICAL_LABELS[item.verticalCode]}</span><h2>{item.internalName}</h2><div><Badge value={item.subjectType} /><Badge value={item.consentApproved ? 'CONSENT APPROVED' : 'CONSENT BLOCKED'} /></div><strong>L{item.currentLevel} · {item.levelName}</strong>{item.blockingFailures?.length ? <small>{item.blockingFailures.join(' · ')}</small> : <small>Ready for next-level workflow</small>}</button>) : <div className="empty">{selectedBrand ? 'No avatars in this brand scope.' : 'Choose a brand to open the Avatar Library.'}</div>}</section>}</>;
+    {selected ? <AvatarDetail avatar={selected} brandId={selectedBrand} onUpdated={setSelected} close={() => setSelected(null)} /> : <section className="avatar-library">{items.length ? items.map((item) => <button onClick={() => open(item)} key={item.id}><span className="eyebrow">{VERTICAL_LABELS[item.verticalCode]}</span><h2>{item.internalName}</h2><div><Badge value={item.subjectType} /><Badge value={item.consentApproved ? 'CONSENT APPROVED' : 'CONSENT BLOCKED'} /></div><strong>L{item.currentLevel} · {item.levelName}</strong>{item.blockingFailures?.length ? <small>{item.blockingFailures.join(' · ')}</small> : <small>Ready for next-level workflow</small>}</button>) : <div className="empty">{selectedBrand ? 'No avatars in this brand scope.' : 'Choose a brand to open the Avatar Library.'}</div>}</section>}</>;
 }
 
 function CreateAvatar({ brands, onCreated }) {
@@ -110,4 +151,4 @@ export function AvatarStudio() {
   return <main><header className="page-header"><span className="eyebrow">PERSISTENT PERSONAS · LEVELS 0–7</span><h1>Avatar Studio</h1></header><p className="page-note">Identity, consent, references and level approvals remain brand-scoped, versioned and plan-only until a separate production preflight.</p><ErrorPanel error={error} /><div className="avatar-tabs">{tabs.map((item) => <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item}</button>)}</div>{tab === 'LIBRARY' ? <AvatarLibrary brands={brands} selectedBrand={selectedBrand} setSelectedBrand={setSelectedBrand} revision={revision} /> : null}{tab === 'CREATE AVATAR' ? <CreateAvatar brands={brands} onCreated={() => setRevision((value) => value + 1)} /> : null}{tab === 'TEST CONTENT' ? <TestContent brands={brands} /> : null}</main>;
 }
 
-export { AvatarDetail, AvatarLibrary, CreateAvatar, LevelLadder, TestContent };
+export { AvatarDetail, AvatarLibrary, CreateAvatar, LevelLadder, LevelUpWorkflow, TestContent };
