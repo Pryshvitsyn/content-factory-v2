@@ -8,7 +8,6 @@ const { buildOperatorProductionInput } = require('../src/v2.7/operator-productio
 const { ProductionCommandService } = require('../src/v2.7/production-command-service');
 const { QualityRecoveryService } = require('../src/v2.10.1/quality-recovery-service');
 const { V210ReferenceAwareMediaExecutor } = require('../src/v2.10/reference-aware-media');
-const { SOURCE_CREATIVE_RECOVERY_INSTRUCTION } = require('../src/v2.10.4/source-creative-recovery');
 
 const W = '10000000-0000-4000-8000-000000000001';
 const B = 'a03def76-bd3d-4c8e-b00a-ec77616c5191';
@@ -17,19 +16,30 @@ const J = 'bb4aff78-a7f8-4b8b-9405-b3957644104e';
 const REQUEST = '41000000-0000-4000-8000-000000000004';
 const ORIGINAL_ARTIFACT = 'brand:a03def76-bd3d-4c8e-b00a-ec77616c5191:asset:video-1';
 const ORIGINAL_HASH = 'e80c0ffbe5f9fb4a951113d6ab6b2e3d0acbaaed99881c467795c3a334b8e455';
+const ATTUNE_OPERATOR_INSTRUCTION = 'Opening frame must show clear physical separation and unresolved tension. The couple are seated with visible space between them. No embrace, cuddling, arm around shoulders, handholding, touching, leaning into each other, affectionate physical contact, or smiling together in the opening state. The woman looks away or remains emotionally distant; the partner notices without touching her. Preserve ambiguity, hesitation, and pre-connection tension. Connection may develop only later if required by the approved shot plan.';
 
 function rawInput() {
-  const brand = { id: B, workspaceId: W, name: 'Attune' };
-  const request = { requestId: REQUEST, brandId: B, renderMode: 'QUALITY', title: 'Tune Into Her',
+  const brand = { id: B, workspaceId: W, name: 'Northstar Ceramics' };
+  const request = { requestId: REQUEST, brandId: B, renderMode: 'QUALITY', title: 'Kiln Reveal',
     objective: 'ENGAGEMENT', platform: 'Instagram Reels', targetDurationSeconds: 10, aspectRatio: '9:16',
-    hook: 'A tense opening moment', coreMessage: 'Attention helps',
-    creativeBrief: 'A couple moves from unresolved tension to calm attention in one apartment.',
-    cta: "Don't guess. Tune in.", captionsEnabled: false, musicEnabled: false };
+    hook: 'A ceramic artist opens a kiln after a long firing', coreMessage: 'Careful craft makes every result meaningful',
+    creativeBrief: 'A solo ceramic artist discovers a newly fired blue bowl in a working pottery studio.',
+    cta: 'Make something lasting.', captionsEnabled: false, musicEnabled: false };
   const built = buildOperatorProductionInput(request, brand, { qualityProfile: { provider: 'replicate',
     model: 'alibaba/wan-3', name: 'STANDARD', resolution: '720p', capability: 'TEXT_TO_VIDEO' } });
   const raw = structuredClone(built.canonicalRawInput);
   raw.scenes[0].shots[0].asset_id = 'video-1';
-  raw.creative_plan.shots[0].assetId = 'video-1';
+  Object.assign(raw.creative_plan.shots[0], { assetId: 'video-1',
+    purpose: 'Reveal anticipation before the finished ceramic piece is visible',
+    subject: 'A solo ceramic artist wearing a clay-marked indigo apron',
+    subjectDescription: 'One ceramic artist with an indigo apron and tied-back hair',
+    action: 'The artist slowly opens the kiln while the blue bowl remains inside',
+    environment: 'A working pottery studio with shelves of unfired clay and a closed kiln',
+    emotionalIntent: 'Quiet anticipation and concentration before the reveal' });
+  Object.assign(raw.scenes[0].shots[0], { subject: raw.creative_plan.shots[0].subject,
+    action: raw.creative_plan.shots[0].action });
+  raw.scenes[0].shots[0].video.prompt = 'Approved shot: a solo ceramic artist in an indigo apron slowly opens a closed kiln in a working pottery studio. The blue bowl remains inside until the reveal. Preserve quiet anticipation.';
+  raw.creative_plan.shots[0].generationPrompt = raw.scenes[0].shots[0].video.prompt;
   return raw;
 }
 
@@ -38,7 +48,8 @@ function failedCandidate() {
     deterministicVisual: { status: 'PASS', checks: [{ code: 'SOURCE_MEDIA_READABLE', status: 'PASS' }] },
     temporal: { status: 'PASS', checks: [{ code: 'TEMPORAL_STABILITY', status: 'PASS' }] },
     semantic: { status: 'FAIL', checks: [{ code: 'CREATIVE_PLAN_MISMATCH', status: 'FAIL',
-      reason: 'The couple are already embracing and holding hands in the opening frame.' }],
+      reason: 'The kiln is already empty and the finished bowl is visible before the planned reveal.',
+      evidence: { observedCondition: 'Empty kiln and finished bowl visible in the opening frame' } }],
     metadata: { provider: 'openai', model: 'mock-semantic', externalCalls: 1 } } };
 }
 
@@ -66,6 +77,8 @@ async function classificationTest() {
   assert.equal(plan.semanticEvaluations, 1);
   assert.equal(plan.maximumExternalCalls, 2);
   assert.equal(plan.existingFailedArtifact, 'PRESERVED_IMMUTABLY');
+  assert.match(plan.failureReason, /kiln is already empty/);
+  assert.equal(plan.approvedShotPlan.subject, 'A solo ceramic artist wearing a clay-marked indigo apron');
   assert.equal(plan.sameProduction, true);
   assert.equal(plan.autoPublish, false);
   assert.equal(semanticFactoryCalls, 0, 'classification/preflight performs zero external calls');
@@ -77,14 +90,14 @@ async function classificationTest() {
   assert.equal(bounded.eligible, false); assert.equal(bounded.automaticCreativeAttemptsMaximum, 1);
 }
 
-function commandHarness({ qualityResult }) {
+function commandHarness({ qualityResult, operatorInstruction = null }) {
   const source = failedProduction();
   let scheduled = null; let preparedInput = null; let providerCalls = 0; let evaluatorCalls = 0;
-  let completion = null; let failure = null;
+  let completion = null; let failure = null; let ensuredRecord = null;
   const repository = { db: {}, async executionSafety() { return { ambiguousExecutions: 0 }; },
     async latestShotRevision() { return null; }, async nextShotRevision() { return 1; },
     async countCreativeRecoveries() { return 0; }, async getShotRegenerationByRequest() { return null; },
-    async ensureShotRegeneration(record) { return { id: 'regen-1', status: 'PREPARED', ...record }; },
+    async ensureShotRegeneration(record) { ensuredRecord = record; return { id: 'regen-1', status: 'PREPARED', ...record }; },
     async claimShotRegeneration() { return { id: 'regen-1' }; },
     async sourceMediaExecution() { return { artifact_id: ORIGINAL_ARTIFACT, artifact_version: 1,
       artifact_storage_key: 'immutable/video-1.mp4', artifact_content_hash: ORIGINAL_HASH }; },
@@ -100,8 +113,12 @@ function commandHarness({ qualityResult }) {
       expectedSemanticEvaluations: 1, expectedQualityEvaluatorCalls: 1, provider: 'replicate',
       model: 'alibaba/wan-3', resolution: '720p', semanticEvaluatorProvider: 'mock', semanticEvaluatorModel: 'mock-v1' } }; } },
   mediaExecutor: { async execute({ asset }) { providerCalls += 1;
-    assert.match(asset.generation_requirements.prompt, /Opening frame must show clear physical separation/);
-    assert.match(asset.generation_requirements.prompt, /No embrace, cuddling/);
+    assert.match(asset.generation_requirements.prompt, /previous immutable version failed CREATIVE_PLAN_MISMATCH/);
+    assert.match(asset.generation_requirements.prompt, /kiln is already empty and the finished bowl is visible/);
+    assert.match(asset.generation_requirements.prompt, /solo ceramic artist wearing a clay-marked indigo apron/);
+    if (operatorInstruction) assert.ok(asset.generation_requirements.prompt.includes(operatorInstruction));
+    else assert.doesNotMatch(asset.generation_requirements.prompt, /couple|woman|partner|embrace|handholding/i,
+      'fictional brand recovery must not receive Attune-specific wording');
     return { bytes: Buffer.from('fresh-replacement-bytes'), contentType: 'video/mp4',
       artifact: { artifactId: `brand:${B}:asset:${asset.asset_id}`, version: 2,
         storageKey: `immutable/${asset.asset_id}.mp4`, contentHash: crypto.createHash('sha256').update('fresh-replacement-bytes').digest('hex') },
@@ -113,7 +130,7 @@ function commandHarness({ qualityResult }) {
     return qualityResult;
   } } });
   return { command, repository, source, state: () => ({ scheduled, preparedInput, providerCalls, evaluatorCalls,
-    completion, failure, options: null }) };
+    completion, failure, ensuredRecord }) };
 }
 
 async function executionTest() {
@@ -124,8 +141,13 @@ async function executionTest() {
   assert.equal(preflight.expectedVideoGenerations, 1); assert.equal(preflight.expectedSemanticEvaluations, 1);
   assert.equal(preflight.maximumExternalCalls, 2); assert.equal(preflight.providerCalls, 0);
   assert.equal(preflight.sameProduction, true); assert.equal(preflight.autoPublish, false);
-  assert.match(pass.state().preparedInput.assetPlan.assets.find((asset) => asset.asset_id === preflight.replacementAssetId)
-    .generation_requirements.prompt, new RegExp(SOURCE_CREATIVE_RECOVERY_INSTRUCTION.slice(0, 70)));
+  const genericPrompt = pass.state().preparedInput.assetPlan.assets.find((asset) => asset.asset_id === preflight.replacementAssetId)
+    .generation_requirements.prompt;
+  assert.match(genericPrompt, /Strictly follow the approved shot plan/);
+  assert.match(genericPrompt, /Do not reproduce the failed condition described in durable evaluator evidence/);
+  assert.match(genericPrompt, /Empty kiln and finished bowl visible in the opening frame/);
+  assert.match(genericPrompt, /provider=replicate/);
+  assert.doesNotMatch(genericPrompt, /couple|woman|partner|embrace|handholding/i);
   assert.equal(pass.state().providerCalls, 0, 'preflight has no provider call');
 
   const accepted = await pass.command.regenerateShot({ productionId: P, brandId: B, shotId: 'operator-shot-1',
@@ -153,6 +175,23 @@ async function executionTest() {
   assert.equal(fail.state().providerCalls, 1); assert.equal(fail.state().evaluatorCalls, 1);
   assert.equal(fail.state().completion, null, 'failed replacement cannot resume the job');
   assert.equal(fail.state().failure.error.details.quality.semantic.checks[0].code, 'CREATIVE_PLAN_MISMATCH');
+}
+
+async function explicitOperatorInstructionTest() {
+  const pass = commandHarness({ operatorInstruction: ATTUNE_OPERATOR_INSTRUCTION,
+    qualityResult: { status: 'PASS', disposition: 'ACCEPT', deterministicVisual: { status: 'PASS' },
+      temporal: { status: 'PASS' }, semantic: { status: 'PASS' } } });
+  const args = { productionId: P, brandId: B, shotId: 'operator-shot-1', requestId: REQUEST,
+    recoveryReason: 'SOURCE_CREATIVE', instruction: ATTUNE_OPERATOR_INSTRUCTION };
+  const preflight = await pass.command.preflightShotRegeneration(args);
+  assert.equal(preflight.operatorCorrectiveInstruction, ATTUNE_OPERATOR_INSTRUCTION);
+  assert.match(pass.state().preparedInput.assetPlan.assets.find((asset) => asset.asset_id === preflight.replacementAssetId)
+    .generation_requirements.prompt, /Explicit operator corrective instruction: Opening frame must show clear physical separation/);
+  await pass.command.regenerateShot({ ...args, preflightId: preflight.preflightId, confirmation: true });
+  assert.ok(pass.state().ensuredRecord.instruction.includes(ATTUNE_OPERATOR_INSTRUCTION),
+    'explicit operator correction is persisted in immutable recovery input');
+  await pass.state().scheduled();
+  assert.equal(pass.state().providerCalls, 1, 'explicit Attune correction reaches the mocked provider exactly once');
 }
 
 async function acceptedReplacementTest() {
@@ -183,11 +222,16 @@ async function acceptedReplacementTest() {
 
 function dashboardContractTest() {
   const ui = fs.readFileSync(path.join(__dirname, '../apps/dashboard/client/src/QualityRecoveryConsole.jsx'), 'utf8');
+  const engine = fs.readFileSync(path.join(__dirname, '../src/v2.10.4/source-creative-recovery.js'), 'utf8');
   const wiring = fs.readFileSync(path.join(__dirname, '../apps/dashboard/server/index.js'), 'utf8');
   assert.match(ui, /CREATIVE PLAN MISMATCH/);
   assert.match(ui, /SOURCE_CREATIVE/);
   assert.match(ui, /Maximum replacement external calls/);
-  assert.match(ui, /Opening frame must show clear physical separation/);
+  assert.match(ui, /Durable mismatch reason/);
+  assert.match(ui, /Operator corrective instruction/);
+  assert.match(ui, /<textarea/);
+  assert.doesNotMatch(ui, /couple|woman looks away|partner notices|No embrace|handholding/i);
+  assert.doesNotMatch(engine, /couple|woman looks away|partner notices|No embrace|handholding/i);
   assert.match(ui, /CONTINUE SAME EXECUTION/);
   assert.match(wiring, /SOURCE_CREATIVE/);
   assert.doesNotMatch(ui, /CREATIVE PLAN MISMATCH[\s\S]{0,160}RE-EVALUATE EXISTING ASSET/);
@@ -196,6 +240,7 @@ function dashboardContractTest() {
 async function main() {
   await classificationTest();
   await executionTest();
+  await explicitOperatorInstructionTest();
   await acceptedReplacementTest();
   dashboardContractTest();
   console.log('V2.10.4 source creative recovery classification, bounded replacement, fresh validation, immutable lineage, and remaining-only resume passed; real external calls = 0');

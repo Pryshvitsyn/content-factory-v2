@@ -5,7 +5,8 @@ const { ArtifactService } = require('../artifacts/artifact-service');
 const { VisualQualityEvaluator } = require('../v2.9/visual-quality-evaluator');
 const { createSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator-factory');
 const { persistVisualQualityEvidence } = require('../../worker/v2.1-master-production');
-const { SOURCE_CREATIVE_RECOVERY_KIND, creativeFailureCodes } = require('../v2.10.4/source-creative-recovery');
+const { SOURCE_CREATIVE_RECOVERY_KIND, creativeFailureCodes,
+  sourceCreativeRecoveryContext } = require('../v2.10.4/source-creative-recovery');
 
 const QUALITY_RECOVERY_VERSION = 'v2.10.1';
 const RECOVERABLE_ERROR = 'SOURCE_QUALITY_VALIDATION_FAILED';
@@ -248,6 +249,14 @@ class QualityRecoveryService {
     }
     const creativeFailures = creativeFailureCodes(candidate);
     if (creativeFailures.length) {
+      const raw = item.jobPayload?.canonicalRawInput || {};
+      const resolvedShotId = shotIdForAsset(item, candidate.assetId);
+      const rawShot = (raw.scenes || []).flatMap((scene) => scene.shots || [])
+        .find((shot) => shot.shot_id === resolvedShotId || shot.asset_id === candidate.assetId) || null;
+      const approvedShot = raw.creative_plan?.shots?.find((shot) => shot.shotId === resolvedShotId
+        || shot.assetId === candidate.assetId) || null;
+      const creativeContext = sourceCreativeRecoveryContext({ candidate, approvedShot,
+        originalGenerationRequirements: rawShot?.video || null });
       const prior = typeof this.repository.latestSuccessfulCreativeRecovery === 'function'
         ? await this.repository.latestSuccessfulCreativeRecovery(item.id, item.brandId, candidate.assetId) : null;
       if (prior) return Object.freeze({ eligible: false, recovered: true, action: 'CONTINUE_SAME_EXECUTION',
@@ -263,8 +272,12 @@ class QualityRecoveryService {
         status: attempts < 1 ? 'READY' : 'BLOCKED', reason: attempts < 1
           ? 'The immutable source visibly contradicts the approved creative plan; re-evaluating the same bytes cannot repair it.'
           : 'The one automatic creative replacement allowance has already been used; explicit operator escalation is required.',
-        assetId: candidate.assetId, shotId: shotIdForAsset(item, candidate.assetId),
+        assetId: candidate.assetId, shotId: resolvedShotId,
         recoveryKind: SOURCE_CREATIVE_RECOVERY_KIND, hardFailureCodes: creativeFailures,
+        failureReason: creativeContext?.failureReason || null,
+        failureEvidence: creativeContext?.failureEvidence || null,
+        approvedShotPlan: creativeContext?.approvedShotPlan || null,
+        originalGenerationRequirements: creativeContext?.originalGenerationRequirements || null,
         existingMedia: 'CREATIVE_REJECTED_IMMUTABLE_VERSION_PRESERVED',
         existingFailedArtifact: 'PRESERVED_IMMUTABLY', existingGoodAssetsReused: true,
         videoRegenerations: 1, newVideoGenerations: 1, semanticEvidence: 'NOT_REUSED_FOR_REPLACEMENT',

@@ -11,8 +11,9 @@ const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
 const { partialMediaPlan, reusableSemanticPass, retryPlan,
   sourceArtifactFromExecution } = require('../v2.9/semantic-evaluation-retry');
 const { V210ReferenceAwareMediaExecutor } = require('../v2.10/reference-aware-media');
-const { SOURCE_CREATIVE_FAILURE_CODE, SOURCE_CREATIVE_RECOVERY_INSTRUCTION,
-  SOURCE_CREATIVE_RECOVERY_KIND, creativeFailureCodes } = require('../v2.10.4/source-creative-recovery');
+const { SOURCE_CREATIVE_FAILURE_CODE, SOURCE_CREATIVE_RECOVERY_KIND,
+  buildSourceCreativeRecoveryInstruction, creativeFailureCodes,
+  sourceCreativeRecoveryContext } = require('../v2.10.4/source-creative-recovery');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BOUNDED_SOURCE_RECOVERY_KINDS = Object.freeze(new Set(['SOURCE_GEOMETRY', SOURCE_CREATIVE_RECOVERY_KIND]));
 
@@ -36,8 +37,12 @@ function creativeFailureForShot(source, raw, shotId) {
   const failed = (source.jobError?.details?.sourceQuality?.shots || []).filter((item) => item.status === 'FAIL');
   if (failed.length !== 1) return null;
   const candidate = failed.find((item) => item.assetId === shot?.asset_id);
-  return creativeFailureCodes(candidate).includes(SOURCE_CREATIVE_FAILURE_CODE)
-    ? Object.freeze({ candidate, code: SOURCE_CREATIVE_FAILURE_CODE }) : null;
+  if (!creativeFailureCodes(candidate).includes(SOURCE_CREATIVE_FAILURE_CODE)) return null;
+  const approvedShot = raw.creative_plan?.shots?.find((item) => item.shotId === shotId
+    || item.assetId === shot.asset_id) || null;
+  const context = sourceCreativeRecoveryContext({ candidate, approvedShot,
+    originalGenerationRequirements: shot.video });
+  return context ? Object.freeze({ candidate, code: SOURCE_CREATIVE_FAILURE_CODE, context }) : null;
 }
 
 class ProductionCommandError extends Error {
@@ -507,8 +512,8 @@ class ProductionCommandService {
       }
     }
     const correctiveInstruction = creativeRecovery
-      ? [SOURCE_CREATIVE_RECOVERY_INSTRUCTION, instruction?.trim()]
-        .filter((value, index, all) => value && all.indexOf(value) === index).join('\n')
+      ? buildSourceCreativeRecoveryInstruction({ context: creativeFailure.context,
+        operatorInstruction: instruction?.trim() || null })
       : instruction?.trim() || null;
     if (correctiveInstruction && correctiveInstruction.length > 2400) throw new ProductionCommandError(400,
       'V27_INPUT_INVALID', 'Combined shot regeneration instruction must be at most 2400 characters');
@@ -535,7 +540,8 @@ class ProductionCommandService {
         'Bounded source recovery must generate exactly one video, no audio, and no other paid media');
     }
     return { source, revision, prepared, geometryRecovery, creativeRecovery, sourceRecovery,
-      recoveryKind: sourceRecovery ? recoveryReason : null, retryReason, correctiveInstruction };
+      recoveryKind: sourceRecovery ? recoveryReason : null, retryReason, correctiveInstruction,
+      creativeRecoveryContext: creativeFailure?.context || null };
   }
 
   async preflightShotRegeneration(args) {
@@ -558,6 +564,8 @@ class ProductionCommandService {
       recoveryAction: command.sourceRecovery ? 'REGENERATE_FAILED_SHOT' : 'REGENERATE_SHOT',
       recoveryKind: command.recoveryKind, existingFailedArtifact: command.sourceRecovery ? 'PRESERVED_IMMUTABLY' : null,
       existingGoodAssetsReused: command.sourceRecovery, sameProduction: command.sourceRecovery,
+      creativeRecoveryContext: command.creativeRecoveryContext,
+      operatorCorrectiveInstruction: command.creativeRecovery ? args.instruction?.trim() || null : null,
       automaticGeometryAttemptsMaximum: command.geometryRecovery ? 1 : null,
       automaticCreativeAttemptsMaximum: command.creativeRecovery ? 1 : null });
   }

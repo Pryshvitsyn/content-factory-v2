@@ -32,6 +32,11 @@
 .quality-recovery-console__item dd { margin:2px 0 0; font-size:11px; overflow-wrap:anywhere; }
 .quality-recovery-console__item button { width:100%; min-height:40px; border-radius:10px; font-weight:700; }
 .quality-recovery-console__recovered { padding:9px 10px; border-radius:10px; background:rgba(132,204,22,.09); color:#d7f7a0; font-size:11px; line-height:1.4; }
+.quality-recovery-console__creative-context { display:grid; gap:7px; padding:10px; border-radius:10px; background:rgba(255,255,255,.04); }
+.quality-recovery-console__creative-context strong,
+.quality-recovery-console__creative-context label { font-size:10px; letter-spacing:.04em; }
+.quality-recovery-console__creative-context p { margin:0; font-size:11px; line-height:1.45; opacity:.8; }
+.quality-recovery-console__creative-context textarea { width:100%; resize:vertical; box-sizing:border-box; border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:9px; background:rgba(0,0,0,.2); color:inherit; font:inherit; line-height:1.4; }
 
 /* When free evidence recovery exists, visually de-emphasize paid shot regeneration until the operator resolves evidence first. */
 .quality-recovery-available .shot-inspector > .regenerate { opacity:.38; filter:saturate(.45); }

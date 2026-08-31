@@ -12,7 +12,7 @@ function regenerationCopy(plan, shotPlan) {
   const continuity = plan.recoveryKind === 'SOURCE_CONTINUITY';
   const creative = plan.recoveryKind === 'SOURCE_CREATIVE';
   if (continuity) return `CROSS-SHOT CONTINUITY FAILED\n${(plan.hardFailureCodes || []).join(', ') || 'continuity drift'}\n\nRecovery:\nREGENERATE FAILED SHOT\n\nEstimated new video generations: ${shotPlan.expectedVideoGenerations}\nExisting good assets reused: yes\nRejected version preserved: yes\nReplacement source QA: required\nCross-shot continuity: required before downstream shot acceptance\nAutomatic continuity retry loop: disabled\nEvery replacement requires operator confirmation\n\nExternal calls (preflight maximum): ${shotPlan.expectedExternalCalls}\nCost: ${shotPlan.costStatus || 'UNKNOWN'}`;
-  if (creative) return `CREATIVE PLAN MISMATCH\n${(plan.hardFailureCodes || []).join(', ') || 'CREATIVE_PLAN_MISMATCH'}\n\nRecovery kind:\nSOURCE_CREATIVE\n\nAction:\nREGENERATE FAILED SHOT\n\nSource: ${plan.assetId}\nExpected new video generations: 1\nExpected semantic evaluations: 1\nMaximum replacement external calls: ${shotPlan.maximumExternalCalls || shotPlan.expectedExternalCalls}\nExisting failed artifact: PRESERVED IMMUTABLY\nExisting good assets: REUSED\nSame production: YES\nAuto-publish: false\nHuman approval required: true\n\nCost: ${shotPlan.costStatus || 'UNKNOWN'}`;
+  if (creative) return `CREATIVE PLAN MISMATCH\n${(plan.hardFailureCodes || []).join(', ') || 'CREATIVE_PLAN_MISMATCH'}\n\nDurable mismatch reason:\n${plan.failureReason || 'No evaluator reason was recorded.'}\n\nOperator corrective instruction:\n${shotPlan.operatorCorrectiveInstruction || 'None supplied; recovery uses the approved plan and durable mismatch evidence.'}\n\nRecovery kind:\nSOURCE_CREATIVE\n\nAction:\nREGENERATE FAILED SHOT\n\nSource: ${plan.assetId}\nExpected new video generations: 1\nExpected semantic evaluations: 1\nMaximum replacement external calls: ${shotPlan.maximumExternalCalls || shotPlan.expectedExternalCalls}\nExisting failed artifact: PRESERVED IMMUTABLY\nExisting good assets: REUSED\nSame production: YES\nAuto-publish: false\nHuman approval required: true\n\nCost: ${shotPlan.costStatus || 'UNKNOWN'}`;
   return `SOURCE GEOMETRY FAILED\n${plan.actualWidth || '?'}×${plan.actualHeight || '?'}\nExpected ${plan.expectedAspectRatio}\n\nRecovery:\nREGENERATE FAILED SHOT\n\nEstimated new video generations: ${shotPlan.expectedVideoGenerations}\nExisting good assets reused: yes\nExisting semantic evidence reused: no (replacement is revalidated)\nMaximum automatic geometry attempts: 1\nRequires paid provider confirmation: yes\n\nExternal calls: ${shotPlan.expectedExternalCalls}\nCost: ${shotPlan.costStatus || 'UNKNOWN'}`;
 }
 
@@ -20,6 +20,7 @@ export function QualityRecoveryConsole() {
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(null);
   const [message, setMessage] = useState(null);
+  const [creativeInstructions, setCreativeInstructions] = useState({});
   const [visible, setVisible] = useState(window.location.hash.includes('Productions'));
 
   async function load() {
@@ -60,7 +61,7 @@ export function QualityRecoveryConsole() {
         const instruction = continuity
           ? 'V2.10.3 cross-shot continuity recovery; preserve approved creative, accepted predecessors, character identity, wardrobe, environment, realism and acting language.'
           : creative
-            ? 'Opening frame must show clear physical separation and unresolved tension. The couple are seated with visible space between them. No embrace, cuddling, arm around shoulders, handholding, touching, leaning into each other, affectionate physical contact, or smiling together in the opening state. The woman looks away or remains emotionally distant; the partner notices without touching her. Preserve ambiguity, hesitation, and pre-connection tension. Connection may develop only later if required by the approved shot plan.'
+            ? creativeInstructions[item.id]?.trim() || null
             : 'V2.10.2 deterministic source-geometry recovery; preserve approved creative and established continuity.';
         const recoveryReason = continuity ? null : creative ? 'SOURCE_CREATIVE' : 'SOURCE_GEOMETRY';
         const shotPath = `/api/productions/${item.id}/shots/${encodeURIComponent(plan.shotId)}`;
@@ -119,6 +120,15 @@ export function QualityRecoveryConsole() {
         <div><small>{item.brandName}</small><strong>{item.title || item.name}</strong><code>{item.id.slice(0, 8)}</code></div>
         <dl><div><dt>Source</dt><dd>{recovery.assetId || recovery.evidence?.artifactId || 'immutable media'}</dd></div><div><dt>Media</dt><dd>{recovery.existingMedia || 'REUSED'}</dd></div><div><dt>Recovery</dt><dd>{recovery.recoveryKind || 'EVIDENCE_ONLY'}</dd></div><div><dt>Disposition</dt><dd>{recovery.disposition || recoveryLabel(item)}</dd></div></dl>
         {recovery.hardFailureCodes?.length ? <small>{recovery.hardFailureCodes.join(' · ')}</small> : null}
+        {recovery.eligible && recovery.recoveryKind === 'SOURCE_CREATIVE' ? <div className="quality-recovery-console__creative-context">
+          <strong>Durable mismatch reason</strong>
+          <p>{recovery.failureReason || 'No evaluator reason was recorded.'}</p>
+          <label htmlFor={`creative-recovery-${item.id}`}>Operator corrective instruction <small>optional · editable before paid confirmation</small></label>
+          <textarea id={`creative-recovery-${item.id}`} rows={5} maxLength={1200}
+            placeholder="Add shot-specific corrective constraints. Nothing brand- or subject-specific is injected automatically."
+            value={creativeInstructions[item.id] || ''}
+            onChange={(event) => setCreativeInstructions((current) => ({ ...current, [item.id]: event.target.value }))} />
+        </div> : null}
         {recovery.eligible ? <button disabled={busy === item.id} onClick={() => recover(item)}>{recovery.action === 'REGENERATE_SHOT' ? 'REGENERATE FAILED SHOT · 1 VIDEO' : 'RE-EVALUATE EXISTING ASSET · 0 VIDEO CALLS'}</button>
           : recovery.recovered ? <><div className="quality-recovery-console__recovered">{['SOURCE_GEOMETRY','SOURCE_CREATIVE'].includes(recovery.recoveryKind)
             ? '✓ Failed source replaced immutably · exact production identity preserved'
