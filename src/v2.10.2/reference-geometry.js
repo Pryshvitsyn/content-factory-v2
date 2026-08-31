@@ -181,6 +181,21 @@ function referenceEvidence({ result, expectedAspectRatio, source = {}, reference
     rotationEvidence: result.rotationEvidence || null });
 }
 
+function validateLocationReferenceGeometry(location = {}) {
+  const reference = location.referenceGeometry || location.reference_geometry || {};
+  const checks = [];
+  let decoded = null;
+  try { decoded = geometry(reference.width, reference.height); checks.push(Object.freeze({ code: 'LOCATION_REFERENCE_GEOMETRY', status: 'PASS' })); }
+  catch (error) { checks.push(Object.freeze({ code: 'LOCATION_REFERENCE_GEOMETRY', status: 'FAIL', reason: error.message })); }
+  for (const [code, value] of [
+    ['LOCATION_PERSPECTIVE', location.perspective], ['LOCATION_LIGHT_DIRECTION', location.lightingDirection || location.lighting_direction],
+    ['LOCATION_LIGHT_TEMPERATURE', location.lightingTemperature || location.lighting_temperature],
+  ]) checks.push(Object.freeze({ code, status: value && (typeof value !== 'object' || Object.keys(value).length) ? 'PASS' : 'FAIL' }));
+  return Object.freeze({ status: checks.every((check) => check.status === 'PASS') ? 'PASS' : 'FAIL',
+    geometry: decoded, checks: Object.freeze(checks), contract: 'V2.10.2_REFERENCE_GEOMETRY' });
+}
+
 module.exports = { ASPECT_TOLERANCE, MAX_SAFE_RELATIVE_ASPECT_DELTA, FfmpegReferenceGeometryNormalizer,
   NORMALIZATION_VERSION, ReferenceGeometryError, compatible, expectedOrientation, geometry,
-  normalizeRotationDegrees, parseAspectRatio, referenceEvidence, relativeAspectDelta, targetDimensions };
+  normalizeRotationDegrees, parseAspectRatio, referenceEvidence, relativeAspectDelta, targetDimensions,
+  validateLocationReferenceGeometry };

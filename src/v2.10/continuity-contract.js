@@ -44,4 +44,19 @@ function resolveReferenceEvidence({ brief: input, shotIndex, artifacts = [] } = 
     storageKey: artifact.storageKey, contentHash: artifact.contentHash });
 }
 
-module.exports = { resolveReferenceEvidence, validateContinuity };
+function validateAvatarContinuityReadiness(input = {}) {
+  const required = Object.freeze([
+    ['identity','AVATAR_IDENTITY_CONTINUITY'], ['wardrobe','AVATAR_WARDROBE_CONTINUITY'],
+    ['props','AVATAR_PROP_CONTINUITY'], ['location','AVATAR_LOCATION_CONTINUITY'],
+    ['geometry','AVATAR_GEOMETRY_CONTINUITY'], ['voice','AVATAR_VOICE_CONTINUITY'], ['lipSync','AVATAR_LIP_SYNC'],
+  ]);
+  const checks = required.map(([field, code]) => Object.freeze({ code,
+    status: String(input[field]?.status || input[field] || '').toUpperCase() === 'PASS' ? 'PASS' : 'FAIL' }));
+  const shotContinuity = input.brief && input.provider ? validateContinuity(input.brief, input.provider) : null;
+  if (shotContinuity?.status === 'BLOCKED') checks.push(Object.freeze({ code: 'EXISTING_SHOT_CONTINUITY', status: 'FAIL',
+    reason: 'Existing V2.10 shot continuity contract is blocked.' }));
+  return Object.freeze({ status: checks.every((item) => item.status === 'PASS') ? 'PASS' : 'FAIL',
+    checks: Object.freeze(checks), shotContinuity, engine: 'V2.10_CONTINUITY_CONTRACT' });
+}
+
+module.exports = { resolveReferenceEvidence, validateAvatarContinuityReadiness, validateContinuity };
