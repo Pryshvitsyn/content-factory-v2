@@ -14,6 +14,7 @@ describe('Avatar Studio dashboard', () => {
     render(<AvatarStudio />);
     expect(screen.getByRole('heading', { name: 'Avatar Studio' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'LIBRARY' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'PASSPORT LAB' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'GATE 0 REVIEW' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'CREATE AVATAR' }));
     expect(screen.getByRole('heading', { name: 'Context' })).toBeTruthy();
@@ -41,6 +42,7 @@ describe('Avatar Studio dashboard', () => {
       if (String(url).endsWith('/intakes') && options.method === 'POST') return response(intake);
       if (String(url).endsWith('/use') && options.method === 'POST') return response({ source: { id: 'source-1' }, paidProviderCalls: 0 });
       if (String(url).endsWith('/identity') && options.method === 'POST') return response({ identityVersion: { version: 2 }, avatar });
+      if (String(url).endsWith('/identity-locks') && options.method === 'POST') return response({ identityLock: { id: 'lock-1' }, avatar });
       return response([]);
     });
     render(<AvatarStudio />); await screen.findByRole('option', { name: 'Attune' });
@@ -60,9 +62,64 @@ describe('Avatar Studio dashboard', () => {
     for (const [label,value] of [['Age presentation','late 30s'],['Personality','calm and precise'],
       ['Visual direction','natural portrait'],['Prohibited uses','deception']]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
     fireEvent.click(screen.getByRole('button', { name: 'SAVE IMMUTABLE IDENTITY VERSION' }));
-    await screen.findByRole('heading', { name: 'Avatar source approved' });
+    await screen.findByRole('heading', { name: 'Identity Lock' });
+    fireEvent.click(screen.getByRole('button', { name: 'SAVE IMMUTABLE IDENTITY LOCK' }));
+    await screen.findByRole('heading', { name: 'Ready for Passport Lab' });
     expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/use'))).toBe(true);
     expect(fetch.mock.calls.some(([url]) => String(url).includes('provider'))).toBe(false);
+  });
+
+  it('opens a real Passport Lab and keeps L0 before human certification', async () => {
+    const avatar = { id:'avatar-1',internalName:'Mara',vertical:'PSYCHOLOGY_WELLBEING',subjectType:'SYNTHETIC',currentLevel:0,
+      currentLevelName:'IDENTITY',identityVersionId:'identity-v2',version:2,sources:[{id:'source-1',brandId:brand.id,gate0Status:'PASS',
+        roles:['IDENTITY','PASSPORT_SOURCE'],artifactId:'source-artifact',artifactVersion:1}],identityLocks:[],passportCandidates:[] };
+    fetch.mockImplementation((url) => {
+      if (url === '/api/brands') return response([brand]);
+      if (String(url).startsWith('/api/avatar-studio/avatars?')) return response([{id:'avatar-1',internalName:'Mara',currentLevel:0}]);
+      if (String(url).includes('/passport-lab?')) return response(avatar);
+      return response([]);
+    });
+    render(<AvatarStudio />); await screen.findByRole('option',{name:'Attune'});
+    fireEvent.click(screen.getByRole('button',{name:'PASSPORT LAB'}));
+    fireEvent.change(screen.getByLabelText('Passport brand scope'),{target:{value:brand.id}});
+    await screen.findByRole('option',{name:'Mara · L0'});
+    fireEvent.change(screen.getByLabelText('Passport avatar'),{target:{value:'avatar-1'}});
+    await screen.findByRole('heading',{name:'Mara · Passport Lab'});
+    expect(screen.getByText('CERTIFIED PASSPORT REQUIRED')).toBeTruthy();
+    expect(screen.getByRole('button',{name:'SAVE IMMUTABLE IDENTITY LOCK'})).toBeTruthy();
+    expect(screen.queryByText('PASSPORT COMPLETE · NEXT L2 BODY + EXPRESSIONS')).toBeNull();
+  });
+
+  it('runs guided candidate comparison and displays L1 only after human certification', async () => {
+    let certified=false;
+    const lab=()=>({id:'avatar-1',internalName:'Mara',vertical:'PSYCHOLOGY_WELLBEING',subjectType:'SYNTHETIC',
+      currentLevel:certified?1:0,currentLevelName:certified?'PASSPORT':'IDENTITY',identityVersionId:'identity-v2',version:2,
+      sources:[{id:'source-1',brandId:brand.id,gate0Status:'PASS',roles:['IDENTITY','PASSPORT_SOURCE'],artifactId:'source-artifact',artifactVersion:1}],
+      identityLocks:[{id:'lock-1',identityVersionId:'identity-v2',version:1,permanentAttributes:{nose:'preserve'},temporaryAttributes:{hat:'exclude'},uncertainAttributes:{}}],
+      passportGenerationSpecs:[{id:'plan-1',plannedExternalCallCount:4,promptVersion:'AVATAR_PASSPORT_BASE@1.0.0',costPlan:{knownTotalCost:null}}],
+      passportCandidates:[{id:'candidate-b',previewUrl:'/candidate-b.png',qaSnapshotId:'qa-1',qaStatus:'WARN',qaWarnings:['PROFILE_IDENTITY'],
+        qaBlockingFailures:[],humanReviewState:'KEPT',certificationState:certified?'CERTIFIED':'UNCERTIFIED',samePersonConfidence:null,
+        provider:'MANUAL_UPLOAD',model:'none',promptVersion:'AVATAR_PASSPORT_BASE@1.0.0',specVersion:'v1',costStatus:'UNKNOWN',createdAt:'2026-09-01'}]});
+    fetch.mockImplementation((url,options={})=>{
+      if(url==='/api/brands')return response([brand]);
+      if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([{id:'avatar-1',internalName:'Mara',currentLevel:0}]);
+      if(String(url).includes('/passport-lab?'))return response(lab());
+      if(String(url).endsWith('/certify')&&options.method==='POST'){certified=true;return response({avatar:lab(),paidProviderCalls:0,externalGenerationCalls:0});}
+      return response([]);
+    });
+    render(<AvatarStudio/>);await screen.findByRole('option',{name:'Attune'});fireEvent.click(screen.getByRole('button',{name:'PASSPORT LAB'}));
+    fireEvent.change(screen.getByLabelText('Passport brand scope'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Mara · L0'});
+    fireEvent.change(screen.getByLabelText('Passport avatar'),{target:{value:'avatar-1'}});await screen.findByAltText('Passport candidate A');
+    expect(screen.getByText('CERTIFIED PASSPORT REQUIRED')).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'COMPARE'}));
+    for(const label of ['Clearly the source identity','Clearly the same person','Profile cannot be mistaken for another human',
+      'All three are one identity','I explicitly certify this exact immutable candidate and acknowledge its recorded QA warnings.']) {
+      fireEvent.click(screen.getByLabelText(label));
+    }
+    fireEvent.click(screen.getByRole('button',{name:'HUMAN-CERTIFY THIS PASSPORT'}));
+    await screen.findByText('PASSPORT COMPLETE · NEXT L2 BODY + EXPRESSIONS');
+    const call=fetch.mock.calls.find(([url])=>String(url).endsWith('/passport-candidates/candidate-b/certify'));
+    expect(call).toBeTruthy();const body=JSON.parse(call[1].body);expect(body.humanApproval).toBe(true);expect(body.explicitConfirmation).toBe(true);
+    expect(body.guidedReview).toMatchObject({frontal:true,threeQuarter:true,profile:true,allThree:true});
   });
 
   it('shows all explicit L0-L7 states and next-level focus', () => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
+import { PassportLab } from './PassportLab';
 import './AvatarStudio.css';
 
 const LEVEL_NAMES = ['IDENTITY','PASSPORT','BODY EXPRESSIONS','WARDROBE','VOICE','LOCATIONS','PERFORMANCE','MULTISHOT CONTINUITY'];
@@ -95,9 +96,11 @@ function CreateAvatar({ brands, onCreated }) {
   const [consentEvidence, setConsentEvidence] = useState(null); const [consentLink, setConsentLink] = useState(null);
   const [form, setForm] = useState({ vertical: 'PSYCHOLOGY_WELLBEING', brandId: '', internalName: '', subjectType: 'SYNTHETIC',
     role: '', intendedChannels: 'Instagram Reels', agePresentation: '', personality: '', languages: 'en', visualDirection: '',
-    prohibitedUses: 'deception, political endorsement', consentName: '', consentBasis: 'SIGNED_RELEASE', consentEvidence: '', consentDisclosure: false });
+    prohibitedUses: 'deception, political endorsement', consentName: '', consentBasis: 'SIGNED_RELEASE', consentEvidence: '', consentDisclosure: false,
+    lockPermanent: 'facialStructure=preserve, apparentAge=preserve, nose=preserve, jaw=preserve, hairline=preserve',
+    lockTemporary: 'hat=exclude, jacket=exclude, wardrobe=exclude, background=exclude, lighting=exclude', lockUncertain: 'glasses=operator decision' });
   const change = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const steps = ['Context','Asset intake','Gate 0 + consent','Identity','Approved source'];
+  const steps = ['Context','Asset intake','Gate 0 + consent','Identity','Identity Lock','Passport Lab ready'];
   useEffect(() => { if (mode !== 'EXISTING_ASSET' || !avatar) return;
     api(`/api/avatar-studio/avatars/${avatar.id}/existing-assets?brandId=${encodeURIComponent(form.brandId)}`).then(setExisting).catch(setError);
   }, [mode, avatar, form.brandId]);
@@ -163,7 +166,14 @@ function CreateAvatar({ brands, onCreated }) {
         languages: form.languages.split(',').map((item) => item.trim()), visualDirection: form.visualDirection,
         permanentAttributes: {}, prohibitedUses: form.prohibitedUses.split(',').map((item) => item.trim()) },
       provenance: { source: 'AVATAR_STUDIO_IDENTITY_AFTER_INTAKE', intakeAssetId: intake.asset.id } }) });
-      setAvatar(result.avatar); setStep(4); onCreated();
+      setAvatar(result.avatar); setStep(4);
+    } catch (cause) { setError(cause); } finally { setBusy(false); } }
+  function classifications(value) { return Object.fromEntries(String(value).split(',').map((item) => item.trim()).filter(Boolean).map((item) => {
+    const [key,...rest] = item.split('='); return [key.trim(),rest.join('=').trim() || 'explicit operator classification']; })); }
+  async function saveIdentityLock() { setBusy(true); setError(null); try { const result = await api(`/api/avatar-studio/avatars/${avatar.id}/identity-locks`, { method: 'POST', body: JSON.stringify({
+      brandId: form.brandId, permanent: classifications(form.lockPermanent), temporary: classifications(form.lockTemporary),
+      uncertain: classifications(form.lockUncertain), notes: 'Classified in Create Avatar wizard', humanApproval: true,
+      provenance: { source: 'CREATE_AVATAR_IDENTITY_LOCK_STEP' } }) }); setAvatar(result.avatar); setStep(5); onCreated();
     } catch (cause) { setError(cause); } finally { setBusy(false); } }
   function toggleRole(role) { setRoles((current) => current.includes(role) ? current.filter((item) => item !== role) : [...current, role]); }
   const gateStatus = intake?.asset?.effectiveGate0Status || intake?.gate0?.status;
@@ -181,7 +191,8 @@ function CreateAvatar({ brands, onCreated }) {
       <fieldset className="source-roles"><legend>Explicit source roles</legend>{['IDENTITY','PASSPORT_SOURCE','VOICE_SOURCE','WARDROBE','PRODUCT','LOCATION','STYLE_REFERENCE','PREVIOUS_SHOT'].map((role) => <label key={role}><input type="checkbox" checked={roles.includes(role)} onChange={() => toggleRole(role)} />{role.replaceAll('_',' ')}</label>)}</fieldset>
       <button className="primary" disabled={busy || gateStatus !== 'PASS' || !roles.length} onClick={useSource}>USE AS AVATAR SOURCE</button></div> : null}
     {step === 3 ? <div className="panel avatar-form"><h2>Identity</h2><p className="page-note">The approved source is evidence, not identity text. Define permanent traits now; wardrobe, accessories, props and environment remain separate.</p><div className="form-grid"><Input label="Age presentation" value={form.agePresentation} onChange={(v) => change('agePresentation', v)} /><Input label="Personality" value={form.personality} onChange={(v) => change('personality', v)} /><Input label="Languages" value={form.languages} onChange={(v) => change('languages', v)} /><Input label="Visual direction" value={form.visualDirection} onChange={(v) => change('visualDirection', v)} /><Input label="Prohibited uses" value={form.prohibitedUses} onChange={(v) => change('prohibitedUses', v)} /></div><button className="primary" disabled={busy} onClick={saveIdentity}>{busy ? 'SAVING IDENTITY…' : 'SAVE IMMUTABLE IDENTITY VERSION'}</button></div> : null}
-    {step === 4 ? <div className="panel avatar-form"><h2>Avatar source approved</h2><Badge value="READY" /><p>The immutable artifact is assigned to {roles.join(' + ')}, and the resolved Identity is stored as a new immutable version. No provider was called. Passport Lab is the next slice.</p><LevelLadder avatar={avatar} /></div> : null}
+    {step === 4 ? <div className="panel avatar-form"><h2>Identity Lock</h2><p className="page-note">Classify what is permanent, temporary and uncertain. A hat, jacket, wardrobe, background or location never becomes identity by accident.</p><label>PERMANENT<textarea aria-label="Wizard Identity Lock permanent" rows="4" value={form.lockPermanent} onChange={(event) => change('lockPermanent',event.target.value)} /></label><label>TEMPORARY / NON-IDENTITY<textarea aria-label="Wizard Identity Lock temporary" rows="4" value={form.lockTemporary} onChange={(event) => change('lockTemporary',event.target.value)} /></label><label>UNCERTAIN<textarea aria-label="Wizard Identity Lock uncertain" rows="3" value={form.lockUncertain} onChange={(event) => change('lockUncertain',event.target.value)} /></label><button className="primary" disabled={busy} onClick={saveIdentityLock}>{busy ? 'LOCKING…' : 'SAVE IMMUTABLE IDENTITY LOCK'}</button></div> : null}
+    {step === 5 ? <div className="panel avatar-form"><h2>Ready for Passport Lab</h2><Badge value="L0 IDENTITY" /><p>The source, Identity version and Identity Lock are immutable. The avatar remains L0. Only human certification of one valid Passport Lab candidate can create L1.</p><LevelLadder avatar={avatar} /></div> : null}
   </section>;
 }
 
@@ -207,8 +218,8 @@ function TestContent({ brands }) {
 export function AvatarStudio() {
   const [tab, setTab] = useState('LIBRARY'); const [brands, setBrands] = useState([]); const [selectedBrand, setSelectedBrand] = useState(''); const [revision, setRevision] = useState(0); const [error, setError] = useState(null);
   useEffect(() => { api('/api/brands').then(setBrands).catch(setError); }, []);
-  const tabs = useMemo(() => ['LIBRARY','CREATE AVATAR','GATE 0 REVIEW','TEST CONTENT'], []);
-  return <main><header className="page-header"><span className="eyebrow">PERSISTENT PERSONAS · LEVELS 0–7</span><h1>Avatar Studio</h1></header><p className="page-note">Identity, consent, references and level approvals remain brand-scoped, versioned and plan-only until a separate production preflight.</p><ErrorPanel error={error} /><div className="avatar-tabs">{tabs.map((item) => <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item}</button>)}</div>{tab === 'LIBRARY' ? <AvatarLibrary brands={brands} selectedBrand={selectedBrand} setSelectedBrand={setSelectedBrand} revision={revision} /> : null}{tab === 'CREATE AVATAR' ? <CreateAvatar brands={brands} onCreated={() => setRevision((value) => value + 1)} /> : null}{tab === 'GATE 0 REVIEW' ? <Gate0ReviewQueue brands={brands} /> : null}{tab === 'TEST CONTENT' ? <TestContent brands={brands} /> : null}</main>;
+  const tabs = useMemo(() => ['LIBRARY','CREATE AVATAR','PASSPORT LAB','GATE 0 REVIEW','TEST CONTENT'], []);
+  return <main><header className="page-header"><span className="eyebrow">PERSISTENT PERSONAS · LEVELS 0–7</span><h1>Avatar Studio</h1></header><p className="page-note">Identity, consent, references and level approvals remain brand-scoped, versioned and plan-only until a separate production preflight.</p><ErrorPanel error={error} /><div className="avatar-tabs">{tabs.map((item) => <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item}</button>)}</div>{tab === 'LIBRARY' ? <AvatarLibrary brands={brands} selectedBrand={selectedBrand} setSelectedBrand={setSelectedBrand} revision={revision} /> : null}{tab === 'CREATE AVATAR' ? <CreateAvatar brands={brands} onCreated={() => setRevision((value) => value + 1)} /> : null}{tab === 'PASSPORT LAB' ? <PassportLab brands={brands} /> : null}{tab === 'GATE 0 REVIEW' ? <Gate0ReviewQueue brands={brands} /> : null}{tab === 'TEST CONTENT' ? <TestContent brands={brands} /> : null}</main>;
 }
 
 export { AvatarDetail, AvatarLibrary, CreateAvatar, Gate0ReviewQueue, LevelLadder, LevelUpWorkflow, TestContent };
