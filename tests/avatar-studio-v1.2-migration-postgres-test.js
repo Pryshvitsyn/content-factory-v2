@@ -7,7 +7,7 @@ const {Pool}=require('pg');
 
 const WORKSPACE='b0000000-0000-4000-8000-000000000001';
 const BRAND='b0000000-0000-4000-8000-000000000002';
-const CHARACTER='b0000000-0000-4000-8000-000000000003';
+const CHARACTER='f9f5733b-d873-4ba1-a0ae-2323dfe6a725';
 
 function assertDisposable(){const name=process.env.DATABASE_URL?new URL(process.env.DATABASE_URL).pathname.slice(1):process.env.PGDATABASE;
   if(process.env.CONTENT_FACTORY_TEST_DATABASE!=='1'||!name||name==='content_os')throw new Error('Disposable PostgreSQL database required');}
@@ -24,7 +24,7 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
     await db.query(`INSERT INTO avatar_studio.brand_verticals(workspace_id,brand_id,vertical_code,assigned_by)
       VALUES($1,$2,'PSYCHOLOGY_WELLBEING','migration-test')`,[WORKSPACE,BRAND]);
     await db.query(`INSERT INTO avatar_studio.characters(id,workspace_id,vertical_code,internal_name,subject_type,created_by)
-      VALUES($1,$2,'PSYCHOLOGY_WELLBEING','Populated Avatar','SYNTHETIC','migration-test')`,[CHARACTER,WORKSPACE]);
+      VALUES($1,$2,'PSYCHOLOGY_WELLBEING','SMOKE_TEST_01_DO_NOT_REUSE','SYNTHETIC','migration-test')`,[CHARACTER,WORKSPACE]);
     await db.query(`INSERT INTO avatar_studio.character_versions(workspace_id,character_id,version,identity_spec,identity_hash,provenance,created_by)
       VALUES($1,$2,1,$3,'identity-hash','{"source":"migration-test"}','migration-test')`,[WORKSPACE,CHARACTER,{
       agePresentation:'adult',personality:'calm',role:'host',languages:['en'],visualDirection:'natural',permanentAttributes:{},prohibitedUses:['deception']}]);
@@ -41,6 +41,8 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab_controlled_execution.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'),'utf8'));
     const after=Number((await db.query('SELECT count(*) AS count FROM avatar_studio.characters WHERE id=$1',[CHARACTER])).rows[0].count);
     assert.equal(before,1);assert.equal(after,1,'populated V1.1 avatar must survive upgrade and reapplication');
     for(const table of ['identity_lock_versions','passport_generation_specs','passport_candidates','passport_qa_snapshots',
@@ -52,6 +54,13 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
       'mouth_calibration_qa','mouth_calibration_certifications','l2_pack_certification_events','l2_generation_executions',
       'l2_generation_execution_approvals','l2_generation_attempts','l2_generation_attempt_events','l2_generation_results'])
       assert.equal((await db.query('SELECT to_regclass($1) AS name',[`avatar_studio.${table}`])).rows[0].name,`avatar_studio.${table}`);
+    assert.equal((await db.query("SELECT to_regclass('avatar_studio.character_provenance_events') AS name")).rows[0].name,
+      'avatar_studio.character_provenance_events');
+    const provenance=(await db.query('SELECT * FROM avatar_studio.character_provenance_events WHERE character_id=$1',[CHARACTER])).rows;
+    assert.equal(provenance.length,1);assert.equal(provenance[0].subject_classification,'REAL_PERSON_DERIVED');
+    assert.equal(provenance[0].production_eligibility,'BLOCKED');
+    await assert.rejects(()=>db.query(`UPDATE avatar_studio.character_provenance_events SET reason='rewritten' WHERE character_id=$1`,[CHARACTER]),
+      (error)=>error.code==='P0001','provenance correction evidence must remain immutable');
     await assert.rejects(()=>db.query(`UPDATE avatar_studio.level_states SET current_level=1,level_name='PASSPORT' WHERE character_id=$1`,[CHARACTER]),
       (error)=>error.code==='P0001'&&error.message.includes('CERTIFIED_PASSPORT_REQUIRED'));
     assert.equal((await db.query('SELECT current_level FROM avatar_studio.level_states WHERE character_id=$1',[CHARACTER])).rows[0].current_level,0);

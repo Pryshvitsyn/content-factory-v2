@@ -8,6 +8,7 @@ const { PASSPORT_PROMPT_VERSION, PASSPORT_SPEC_VERSION } = require('./passport-p
 const { PASSPORT_CALLS_PER_CANDIDATE, PASSPORT_PROVIDER_STRATEGY,
   compilePassportProviderRequest } = require('./passport-provider-compiler');
 const { estimateOpenAIImagePlan } = require('../v2.9.2/pricing-registry');
+const { PASSPORT_OUTPUT } = require('./passport-contract');
 
 const FAILURE_CLASSIFICATIONS = Object.freeze(['PROVIDER_CONFIGURATION','PROVIDER_AUTH','PROVIDER_CAPABILITY',
   'PROVIDER_TIMEOUT','PROVIDER_RATE_LIMIT','PROVIDER_REJECTED_INPUT','PROVIDER_OUTPUT_INVALID','ARTIFACT_INGEST_FAILED',
@@ -84,6 +85,8 @@ class PassportExecutionService {
     if (!avatar || avatar.workspaceId !== scope.workspaceId || avatar.verticalCode !== scope.vertical
       || avatar.identityVersionId !== scope.identityVersionId) throw new AvatarStudioError(409,
       'PASSPORT_EXECUTION_SCOPE_MISMATCH', 'Workspace, brand, vertical, avatar or Identity Version scope is stale');
+    if (avatar.productionEligibility === 'BLOCKED') throw new AvatarStudioError(409,
+      'AVATAR_PROVENANCE_NOT_PRODUCTION_ELIGIBLE','This avatar is explicitly non-production until provenance and consent are established');
     return avatar;
   }
 
@@ -134,7 +137,7 @@ class PassportExecutionService {
         contentHash: intake.contentHash, gate0Status: intake.effectiveGate0Status }));
     }
     const plannedCost = spec.preferredModel === 'gpt-image-2'
-      ? estimateOpenAIImagePlan({ model: spec.preferredModel, size: '1536x1024', quality: 'high', count: candidateCount,
+      ? estimateOpenAIImagePlan({ model: spec.preferredModel, size: PASSPORT_OUTPUT.size, quality: 'high', count: candidateCount,
         referenceImageCount: sourceAssets.length }) : null;
     const perCandidate = numberOrNull(spec.costPlan?.knownPricePerCandidate);
     const knownTotalCost = plannedCost?.knownTotalCost ?? (perCandidate == null ? null : Number((perCandidate * candidateCount).toFixed(6)));

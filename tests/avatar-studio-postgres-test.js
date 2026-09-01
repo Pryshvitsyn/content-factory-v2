@@ -44,6 +44,7 @@ async function main() {
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab_controlled_execution.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'), 'utf8'));
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Avatar Studio disposable') ON CONFLICT(id) DO NOTHING`, [WORKSPACE_ID]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Attune Avatar Test','attune-avatar-test','ACTIVE')
       ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [BRAND_ID, WORKSPACE_ID]);
@@ -82,6 +83,9 @@ async function main() {
       visualDirection: 'natural face and stable proportions', permanentAttributes: {}, prohibitedUses: ['deception'] },
       provenance: { source: 'POSTGRES_IDENTITY_AFTER_INTAKE' } });
     assert.equal(resolvedIdentity.identityVersion.version,2); assert.equal(resolvedIdentity.avatar.nextLevel.name,'IDENTITY');
+    const selectorRows = await service.list({ brandId: BRAND_ID });
+    assert.equal(selectorRows.filter((item) => item.id === l0.id).length,1,
+      'multiple Identity Versions and consent joins must not duplicate one logical avatar selector row');
     const identityLock = await service.createIdentityLock({ avatarId:l0.id,brandId:BRAND_ID,humanApproval:true,
       permanent:{facialStructure:'preserve',apparentAge:'late 30s',nose:'preserve',jaw:'preserve',hairline:'preserve'},
       temporary:{hat:'exclude',jacket:'exclude',wardrobe:'exclude',background:'exclude'},uncertain:{glasses:'human decision'},
@@ -133,6 +137,9 @@ async function main() {
       explicitConfirmation:true,unknownCostAcknowledged:true}); assert.equal(mockProviderCalls,0);
     const generatedMock=await service.generatePassportCandidates({...executionScope,executionId:preflight.executionId});
     assert.equal(generatedMock.status,'GENERATED'); assert.equal(mockProviderCalls,1); assert.equal(generatedMock.successCount,1);
+    const restoredExecution=(await repository.listPassportExecutions({avatarId:l0.id,brandId:BRAND_ID}))[0];
+    assert.equal(restoredExecution.status,'GENERATED');assert.equal(restoredExecution.approvalRecorded,true);
+    assert(restoredExecution.approvalApprovedAt,'reload must reconstruct durable approval for an executed generation');
     assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,'provider-generated + automatic QA remains L0');
     for(const table of ['passport_generation_executions','passport_execution_approvals','passport_provider_attempts',
       'passport_execution_results']) assert.equal(Number((await db.query(`SELECT count(*) AS count FROM avatar_studio.${table}`)).rows[0].count),1);
@@ -160,8 +167,13 @@ async function main() {
     const qaB=await service.runPassportQa({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id});
     assert.equal(qaB.analysis.status,'WARN'); assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,
       'automated QA PASS/WARN must not create L1');
-    await service.reviewPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id,
+    const keptOnce=await service.reviewPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id,
       action:'KEEP',humanNote:'Keep for guided comparison',humanApproval:true});
+    const keptTwice=await service.reviewPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id,
+      action:'KEEP',humanNote:'Repeated click',humanApproval:true});
+    assert.equal(keptTwice.reviewEvent.id,keptOnce.reviewEvent.id);assert.equal(keptTwice.idempotent,true);
+    assert.equal(Number((await db.query(`SELECT count(*) AS count FROM avatar_studio.passport_candidate_review_events
+      WHERE candidate_id=$1 AND qa_snapshot_id=$2 AND action='KEEP'`,[candidates[1].id,qaB.qaSnapshot.id])).rows[0].count),1);
     assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,'KEEP must not create L1');
     const certified=await service.certifyPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id,
       guidedReview:{frontal:true,threeQuarter:true,profile:true,allThree:true},warningsAcknowledged:qaB.analysis.warnings,

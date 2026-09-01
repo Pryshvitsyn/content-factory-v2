@@ -2,9 +2,10 @@
 
 const { geometry } = require('../v2.10.2/reference-geometry');
 const { validatePassportIdentityContinuity } = require('../v2.10/continuity-contract');
+const { PASSPORT_OUTPUT, PASSPORT_PANEL_COUNT } = require('./passport-contract');
 
 function panelRegions(width, height) {
-  const base = Math.floor(width / 3); const remainder = width - base * 3;
+  const base = Math.floor(width / PASSPORT_PANEL_COUNT); const remainder = width - base * PASSPORT_PANEL_COUNT;
   return Object.freeze([
     Object.freeze({ view: 'FRONTAL', x: 0, y: 0, width: base, height }),
     Object.freeze({ view: 'THREE_QUARTER_45', x: base, y: 0, width: base, height }),
@@ -18,8 +19,10 @@ function analyzePassportCandidate({ width, height, observations = {}, profileDri
     decoded = geometry(width,height);
     if (decoded.orientation !== 'LANDSCAPE') geometryFailures.push('PASSPORT_NOT_HORIZONTAL');
     if (decoded.width < 900 || decoded.height < 300) geometryWarnings.push('PASSPORT_RESOLUTION_LOW');
-    const panelAspect = (decoded.width / 3) / decoded.height;
-    if (panelAspect < 0.55 || panelAspect > 1.35) geometryWarnings.push('PASSPORT_PANEL_GEOMETRY_UNUSUAL');
+    const panelAspect = (decoded.width / PASSPORT_PANEL_COUNT) / decoded.height;
+    if (panelAspect < PASSPORT_OUTPUT.minimumPanelAspectRatio || panelAspect > PASSPORT_OUTPUT.maximumPanelAspectRatio) {
+      geometryWarnings.push('PASSPORT_PANEL_GEOMETRY_UNUSUAL');
+    }
   } catch (error) { geometryFailures.push('IMAGE_DIMENSIONS_INVALID'); }
   const continuity = validatePassportIdentityContinuity({ observations, profileDrift, evidence,
     noseChanged: observations.NOSE_CHANGED === true, jawChanged: observations.JAW_CHANGED === true,

@@ -1,6 +1,7 @@
 'use strict';
 
 const { AvatarStudioError, fingerprint } = require('./domain');
+const { PASSPORT_OUTPUT } = require('./passport-contract');
 
 const PASSPORT_PROVIDER_STRATEGY = 'ONE_EDIT_CALL_PER_THREE_VIEW_COMPOSITE';
 const PASSPORT_CALLS_PER_CANDIDATE = 1;
@@ -27,7 +28,7 @@ function compilePassportProviderRequest({ generationSpec, sourceImages, candidat
     visual_style: 'photorealistic, neutral studio, natural skin, tack sharp, no text',
     negative_prompt: typeof generationSpec.negativeConstraints === 'string'
       ? generationSpec.negativeConstraints : generationSpec.negativeConstraints?.canonical,
-    size: '1536x1024', quality: 'high',
+    size: PASSPORT_OUTPUT.size, quality: 'high',
   };
   const minimal = {
     capability: 'multi-view-identity-reference', provider: generationSpec.preferredProvider,

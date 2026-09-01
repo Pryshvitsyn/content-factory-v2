@@ -288,6 +288,10 @@ class AvatarStudioService {
     const candidate = await this.repository.passportCandidate({ id:candidateId,avatarId:avatar.id,brandId });
     if (!candidate) throw new AvatarStudioError(404,'PASSPORT_CANDIDATE_NOT_FOUND','Passport candidate was not found in this scope');
     const qa = await this.repository.latestPassportQa({ candidateId });
+    const latest = this.repository.latestPassportReview ? await this.repository.latestPassportReview({ candidateId }) : null;
+    if (normalized === 'KEEP' && latest?.action === 'KEEP' && latest.qaSnapshotId === qa?.id) {
+      return Object.freeze({ reviewEvent:latest,avatar:await this.refresh(avatar.id,brandId),idempotent:true });
+    }
     const event = await this.repository.addPassportReviewEvent({ candidate,qaSnapshotId:qa?.id,action:normalized,
       rejectionReason:normalized === 'REJECT' ? String(rejectionReason).toUpperCase() : null,humanNote,guidedReview,actor:this.actor });
     return Object.freeze({ reviewEvent:event,avatar:await this.refresh(avatar.id,brandId) });
@@ -301,6 +305,8 @@ class AvatarStudioService {
     if (!requiredSteps.every((key) => guidedReview[key] === true)) throw new AvatarStudioError(409,'GUIDED_PASSPORT_REVIEW_REQUIRED',
       'Complete frontal, 45-degree, profile and all-three human review; uncertainty must reject');
     const avatar = await this.avatar({ id:avatarId,brandId });
+    if (avatar.productionEligibility === 'BLOCKED') throw new AvatarStudioError(409,'AVATAR_PROVENANCE_NOT_PRODUCTION_ELIGIBLE',
+      'This avatar is explicitly non-production until real-person provenance and consent are established through a superseding immutable event');
     if ((avatar.passportCertificationEvents || []).some((item) => item.identityVersionId === avatar.identityVersionId)) {
       throw new AvatarStudioError(409,'PASSPORT_ALREADY_CERTIFIED','Exactly one passport may be certified for the current Identity Version');
     }

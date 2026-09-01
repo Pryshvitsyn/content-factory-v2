@@ -7,6 +7,7 @@ const repair = require('./prompts/AVATAR_PASSPORT_REPAIR.v1.json');
 const { AvatarStudioError, fingerprint } = require('./domain');
 const { CAPABILITIES } = require('../v2.8/capabilities');
 const { estimateOpenAIImagePlan } = require('../v2.9.2/pricing-registry');
+const { PASSPORT_OUTPUT } = require('./passport-contract');
 
 const PASSPORT_SPEC_VERSION = 'avatar-passport-generation-spec-v1';
 const PASSPORT_PROMPT_VERSION = [base,identityLockPrompt,negative,repair].map((item) => `${item.id}@${item.version}`).join('+');
@@ -56,7 +57,7 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
   const cameraSpecification = Object.freeze({ height: 'EYE_LEVEL', lensEquivalentMm: 85, distance: 'SAME_ALL_PANELS',
     headScale: 'SAME_ALL_PANELS', eyeLine: 'SAME_ALL_PANELS' });
   const costPlan = providerPlan.model === 'gpt-image-2'
-    ? estimateOpenAIImagePlan({ model: providerPlan.model, size: '1536x1024', quality: 'high', count,
+    ? estimateOpenAIImagePlan({ model: providerPlan.model, size: PASSPORT_OUTPUT.size, quality: 'high', count,
       referenceImageCount: sourceAssets.length })
     : Object.freeze({ status: 'UNKNOWN', knownPricePerCandidate: providerPlan.knownPricePerCandidate, knownTotalCost: null,
       knownSubtotalCost: 0, unknownElements: Object.freeze(['PROVIDER_PRICE_PER_CANDIDATE','TOTAL_COST']), currency: 'USD',

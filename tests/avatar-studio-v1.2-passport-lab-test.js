@@ -6,6 +6,7 @@ const { canonicalIdentityLock } = require('../src/avatar-studio/domain');
 const { evaluateAvatarLevels } = require('../src/avatar-studio/level-engine');
 const { compilePassportGenerationSpec } = require('../src/avatar-studio/passport-plan-compiler');
 const { analyzePassportCandidate, panelRegions } = require('../src/avatar-studio/passport-qa');
+const { PASSPORT_OUTPUT } = require('../src/avatar-studio/passport-contract');
 const { ProviderCatalog } = require('../src/v2.8/provider-catalog');
 const { CAPABILITIES, normalizeCapability } = require('../src/v2.8/capabilities');
 
@@ -71,6 +72,12 @@ assert.deepEqual(panelRegions(3000,1000).map((item)=>[item.view,item.x,item.widt
 const local=analyzePassportCandidate({width:3000,height:1000});
 assert.equal(local.status,'WARN'); assert.equal(local.panelRegions.length,3); assert.equal(local.engine,'V2.10_CONTINUITY_CONTRACT');
 assert.equal(local.reasoning.geometryContract,'V2.10.2_REFERENCE_GEOMETRY'); assert.equal(local.samePersonConfidence,null);
+const canonicalGeometry=analyzePassportCandidate({width:PASSPORT_OUTPUT.width,height:PASSPORT_OUTPUT.height});
+assert(!canonicalGeometry.warnings.includes('PASSPORT_PANEL_GEOMETRY_UNUSUAL'),
+  'canonical 1536x1024 three-panel output must satisfy its own QA geometry contract');
+const malformedGeometry=analyzePassportCandidate({width:1536,height:1536});
+assert(malformedGeometry.warnings.includes('PASSPORT_PANEL_GEOMETRY_UNUSUAL'));
+assert(malformedGeometry.blockingFailures.includes('PASSPORT_NOT_HORIZONTAL'));
 const scored=analyzePassportCandidate({width:3000,height:1000,observations:{SOURCE_SIMILARITY:.93,FRONTAL_IDENTITY:.94,
   THREE_QUARTER_IDENTITY:.91,PROFILE_IDENTITY:.9,CROSS_PANEL_IDENTITY:.92}});
 assert(scored.samePersonConfidence>.9); assert.notEqual(scored.status,'REJECT');

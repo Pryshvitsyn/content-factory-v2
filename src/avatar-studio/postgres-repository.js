@@ -55,6 +55,8 @@ class AvatarStudioPostgresRepository {
 
   async listCharacters({ brandId = null, vertical = null } = {}) {
     const rows = (await this.db.query(`SELECT c.*,ls.current_level,ls.level_name,ls.blocking_failures,
+      provenance.production_eligibility,provenance.subject_classification AS effective_subject_classification,
+      provenance.reason AS provenance_safety_reason,
       coalesce(jsonb_agg(DISTINCT bp.brand_id) FILTER (WHERE bp.allowed),'[]'::jsonb) AS allowed_brand_ids,
       (coalesce(bool_or(cr.status='APPROVED'),false) OR EXISTS(SELECT 1 FROM avatar_studio.consent_events ce
         WHERE ce.character_id=c.id AND ce.modality='FACE' AND ce.status='APPROVED' AND ce.event_type='GRANT'
@@ -63,8 +65,12 @@ class AvatarStudioPostgresRepository {
       FROM avatar_studio.characters c JOIN avatar_studio.level_states ls ON ls.character_id=c.id
       JOIN avatar_studio.brand_permissions bp ON bp.character_id=c.id
       LEFT JOIN avatar_studio.consent_records cr ON cr.character_id=c.id
+      LEFT JOIN LATERAL (SELECT production_eligibility,subject_classification,reason
+        FROM avatar_studio.character_provenance_events pe WHERE pe.character_id=c.id
+        ORDER BY pe.recorded_at DESC,pe.id DESC LIMIT 1) provenance ON true
       WHERE ($1::uuid IS NULL OR (bp.brand_id=$1 AND bp.allowed)) AND ($2::text IS NULL OR c.vertical_code=$2)
-      GROUP BY c.id,ls.character_id ORDER BY c.created_at DESC`, [brandId, vertical])).rows;
+      GROUP BY c.id,ls.character_id,provenance.production_eligibility,provenance.subject_classification,provenance.reason
+      ORDER BY c.created_at DESC`, [brandId, vertical])).rows;
     return rows.map(camel);
   }
 
@@ -81,6 +87,7 @@ class AvatarStudioPostgresRepository {
       ['brandPermissions', 'SELECT brand_id,allowed,approved_by,approved_at FROM avatar_studio.brand_permissions WHERE character_id=$1'],
       ['consentRecords', 'SELECT * FROM avatar_studio.consent_records WHERE character_id=$1 ORDER BY recorded_at DESC'],
       ['consentEvents', 'SELECT * FROM avatar_studio.consent_events WHERE character_id=$1 ORDER BY recorded_at DESC,id DESC'],
+      ['provenanceEvents', 'SELECT * FROM avatar_studio.character_provenance_events WHERE character_id=$1 ORDER BY recorded_at DESC,id DESC'],
       ['sources', 'SELECT * FROM avatar_studio.source_assets WHERE character_id=$1 ORDER BY imported_at DESC'],
       ['bodyReferences', 'SELECT * FROM avatar_studio.body_references WHERE character_id=$1 ORDER BY created_at'],
       ['expressionReferences', 'SELECT * FROM avatar_studio.expression_references WHERE character_id=$1 ORDER BY created_at'],
@@ -111,6 +118,8 @@ class AvatarStudioPostgresRepository {
     const latestFaceEvent = avatar.consentEvents.find((item) => item.modality === 'FACE');
     avatar.consent = (latestFaceEvent?.status === 'APPROVED' ? latestFaceEvent : null)
       || avatar.consentRecords.find((item) => item.status === 'APPROVED') || null;
+    avatar.provenanceSafety = avatar.provenanceEvents[0] || null;
+    avatar.productionEligibility = avatar.provenanceSafety?.productionEligibility || 'NOT_RESTRICTED';
     const passports = (await this.db.query(`SELECT p.*,pc.decision,pc.approved_by,pc.approved_at
       FROM avatar_studio.passports p LEFT JOIN avatar_studio.passport_certifications pc ON pc.passport_id=p.id
       WHERE p.character_id=$1 ORDER BY p.candidate_no`, [id])).rows.map(camel);
@@ -587,9 +596,11 @@ class AvatarStudioPostgresRepository {
     const rows=(await this.db.query(`SELECT e.id,e.workspace_id,e.brand_id,e.vertical_code,e.character_id,e.identity_version_id,
       e.identity_lock_version_id,e.generation_spec_id,e.provider,e.model,e.adapter_family,e.capability,e.profile,
       e.candidate_count,e.calls_per_candidate,e.total_planned_calls,e.cost_plan,e.maximum_allowed_cost,e.preflight_fingerprint,
-      e.created_at,latest.status,coalesce(attempts.count,0)::int AS calls_executed,coalesce(results.count,0)::int AS success_count
+      e.created_at,latest.status,(approval.id IS NOT NULL) AS approval_recorded,approval.approved_at AS approval_approved_at,
+      coalesce(attempts.count,0)::int AS calls_executed,coalesce(results.count,0)::int AS success_count
       FROM avatar_studio.passport_generation_executions e
       LEFT JOIN LATERAL (SELECT status FROM avatar_studio.passport_execution_events x WHERE x.execution_id=e.id ORDER BY x.recorded_at DESC,x.id DESC LIMIT 1) latest ON true
+      LEFT JOIN LATERAL (SELECT id,approved_at FROM avatar_studio.passport_execution_approvals a WHERE a.execution_id=e.id LIMIT 1) approval ON true
       LEFT JOIN LATERAL (SELECT count(*) FROM avatar_studio.passport_provider_attempts a WHERE a.execution_id=e.id) attempts ON true
       LEFT JOIN LATERAL (SELECT count(*) FROM avatar_studio.passport_execution_results r WHERE r.execution_id=e.id) results ON true
       WHERE e.character_id=$1 AND ($2::uuid IS NULL OR e.brand_id=$2) ORDER BY e.created_at DESC`,[avatarId,brandId])).rows;
@@ -621,6 +632,12 @@ class AvatarStudioPostgresRepository {
   async latestPassportQa({ candidateId }) {
     const row = (await this.db.query(`SELECT * FROM avatar_studio.passport_qa_snapshots WHERE candidate_id=$1
       ORDER BY created_at DESC,id DESC LIMIT 1`,[candidateId])).rows[0];
+    return row ? camel(row) : null;
+  }
+
+  async latestPassportReview({ candidateId }) {
+    const row = (await this.db.query(`SELECT * FROM avatar_studio.passport_candidate_review_events WHERE candidate_id=$1
+      ORDER BY decided_at DESC,id DESC LIMIT 1`,[candidateId])).rows[0];
     return row ? camel(row) : null;
   }
 

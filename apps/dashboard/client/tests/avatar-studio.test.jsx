@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AvatarDetail, AvatarStudio, LevelLadder } from '../src/AvatarStudio';
+import { approvalDisplay } from '../src/PassportLab';
 
 const brand = { id: '11111111-1111-4111-8111-111111111111', name: 'Attune' };
 function response(payload, ok = true) { return Promise.resolve({ ok, status: ok ? 200 : 400, json: async () => payload }); }
@@ -9,6 +10,12 @@ function response(payload, ok = true) { return Promise.resolve({ ok, status: ok 
 describe('Avatar Studio dashboard', () => {
   beforeEach(() => { vi.stubGlobal('fetch', vi.fn(() => response([brand]))); });
   afterEach(() => vi.unstubAllGlobals());
+
+  it('restores durable approval state for completed executions', () => {
+    expect(approvalDisplay({status:'AWAITING_APPROVAL',approvalRecorded:false})).toBe('REQUIRED');
+    expect(approvalDisplay({status:'APPROVED',approvalRecorded:true})).toBe('RECORDED');
+    expect(approvalDisplay({status:'GENERATED',approvalRecorded:true})).toBe('RECORDED · EXECUTED');
+  });
 
   it('renders the Library, Create Avatar and plan-only Test Content screens', async () => {
     render(<AvatarStudio />);

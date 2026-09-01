@@ -193,6 +193,12 @@ async function main() {
       (e)=>e.code==='CONSENT_INVALIDATED');
   } finally { await fs.rm(consent.directory,{recursive:true,force:true}); }
 
+  const provenance=await fixture(); try { provenance.repository.avatar.productionEligibility='BLOCKED';
+    await assert.rejects(()=>provenance.service.preflight({...scope(),generationSpecId:SPEC,maximumAllowedCost:10,executionCandidateCount:1}),
+      (e)=>e.code==='AVATAR_PROVENANCE_NOT_PRODUCTION_ELIGIBLE');
+    assert.equal(provenance.mockCalls,0,'non-production provenance blocks before provider execution');
+  } finally { await fs.rm(provenance.directory,{recursive:true,force:true}); }
+
   for (const badScope of [{...scope(),workspaceId:'other-workspace'},{...scope(),brandId:'other-brand'},
     {...scope(),vertical:'TRAVEL'}, {...scope(),avatarId:'other-avatar'}]) {
     const isolated=await fixture(); try { await assert.rejects(()=>isolated.service.preflight({...badScope,generationSpecId:SPEC,

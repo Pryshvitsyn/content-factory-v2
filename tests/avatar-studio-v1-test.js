@@ -81,6 +81,8 @@ function levelEngineTests() {
   assert.equal(all.currentLevel, 7); assert.equal(all.nextLevel, null); assert.equal(all.blockingFailures.length, 0);
   const blocked = evaluateAvatarLevels(avatarFixture({ sources: [{ gate0Status: 'BLOCK' }] }));
   assert(blocked.blockingFailures.includes('GATE0_BLOCKED_SOURCE'));
+  const provenanceBlocked = evaluateAvatarLevels(avatarFixture({ productionEligibility: 'BLOCKED' }));
+  assert(provenanceBlocked.blockingFailures.includes('PROVENANCE_NOT_PRODUCTION_ELIGIBLE'));
   assert(blocked.levels.every((level) => Array.isArray(level.requirements)));
 }
 
@@ -135,6 +137,10 @@ function migrationContractTests() {
   for (const table of ['asset_intakes','gate0_review_events','consent_requests','consent_events','source_asset_roles']) {
     assert(intakeSql.includes(`avatar_studio.${table}`), `V1.1 migration must define ${table}`);
   }
+  const provenanceSql = fs.readFileSync(require.resolve('../migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'),'utf8');
+  assert(provenanceSql.includes('avatar_studio.character_provenance_events'));
+  assert.match(provenanceSql,/NON_PRODUCTION_ENFORCED/);
+  assert.match(provenanceSql,/AVATAR_PROVENANCE_NOT_PRODUCTION_ELIGIBLE/);
 }
 
 identityAndSeparationTests(); consentTests(); gateZeroTests(); levelEngineTests(); isolationTests();

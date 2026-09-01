@@ -95,6 +95,7 @@ function evaluateAvatarLevels(avatar = {}) {
   if ((avatar.consentRecords || []).some((item) => ['REVOKED','EXPIRED'].includes(item.status))
     || (avatar.consentEvents || []).some((item) => ['REVOKED','EXPIRED'].includes(item.status))) blockingFailures.push('CONSENT_NOT_VALID');
   if ((avatar.continuityReadiness || []).some((item) => item.approvalStatus === 'REJECTED' || item.approval_status === 'REJECTED')) blockingFailures.push('CONTINUITY_REJECTED');
+  if ((avatar.productionEligibility || avatar.production_eligibility) === 'BLOCKED') blockingFailures.push('PROVENANCE_NOT_PRODUCTION_ELIGIBLE');
   const current = levels[currentLevel]; const next = levels[completedLevel + 1] || null;
   return Object.freeze({ currentLevel, currentLevelName: current.name,
     completedRequirements: Object.freeze(levels.slice(0, Math.max(1, completedLevel + 1)).flatMap((item) => item.requirements.filter((r) => r.status === 'COMPLETE').map((r) => r.code))),
