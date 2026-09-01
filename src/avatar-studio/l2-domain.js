@@ -1,6 +1,7 @@
 'use strict';
 
 const { AvatarStudioError, fingerprint } = require('./domain');
+const { estimateOpenAIImagePlan } = require('../v2.9.2/pricing-registry');
 
 const BODY_REFERENCE_TYPES = Object.freeze(['CHEST_UP_NEUTRAL','FULL_BODY_STANDING_NEUTRAL','SEATED_NEUTRAL']);
 const EXPRESSION_TYPES = Object.freeze(['NEUTRAL','WARM_SMILE','SERIOUS_CONCERNED','ENERGETIC_POSITIVE']);
@@ -92,18 +93,23 @@ function canonicalL2GenerationSpec({ kind,referenceType,avatar,bodyBuild,passpor
   const framing=assetKind==='BODY'?{
     CHEST_UP_NEUTRAL:'CHEST_UP_HEAD_AND_SHOULDERS_VISIBLE',FULL_BODY_STANDING_NEUTRAL:'HEAD_TO_FEET_FULLY_VISIBLE',
     SEATED_NEUTRAL:'NATURAL_SEATED_TORSO_LEGS_HANDS_READABLE'}[target]:'HEAD_AND_SHOULDERS_FIXED_CAMERA';
+  const outputSize=assetKind==='BODY'?'1024x1536':'1024x1024';
+  const costPlan=preferredModel==='gpt-image-2'?estimateOpenAIImagePlan({model:preferredModel,size:outputSize,quality:'high',count,
+    referenceImageCount:1}):Object.freeze({status:'UNKNOWN',knownTotalCost:null,knownSubtotalCost:0,
+    unknownElements:Object.freeze(['PROVIDER_PRICE_PER_CALL','TOTAL_COST']),currency:'USD',inventedCosts:false,unknownIsZero:false});
   const canonical={schemaVersion:'avatar-l2-generation-spec-v1',workspaceId:avatar.workspaceId,brandId:passport.brandId,
     audienceVertical:avatar.vertical,avatarId:avatar.id,identityVersionId:avatar.identityVersionId,
     passportCertificationEventId:passport.id,passportArtifactId:passport.sourceArtifactId,
     passportArtifactVersion:passport.sourceArtifactVersion,identityLockVersionId:identityLock.id,
+    identityConstraints:identityLock.permanentAttributes||identityLock.permanent||{},
+    temporaryExclusions:identityLock.temporaryAttributes||identityLock.temporary||{},
     bodyBuildVersionId:bodyBuild.id,kind:assetKind,referenceType:target,bodyBuild:bodyBuild.profile||bodyBuild.bodyBuild||bodyBuild,
     framing,pose:target,expression:assetKind==='BODY'?'NEUTRAL':target,camera:'EYE_LEVEL_NATURAL_PERSPECTIVE',
     light:'SOFT_EVEN_NEUTRAL',background:'NEUTRAL_STUDIO',clothingPolicy:L2_NEUTRAL_REFERENCE_OUTFIT,
     negativeConstraints:Object.freeze(['identity drift','age drift','body build drift','beautification','idealization','sexualization',
       'logos','patterns','accessories','anatomy defects','distortion']),providerCapability:capability,promptVersion:'avatar-l2-reference-prompt-v1',
     specVersion:'avatar-l2-generation-spec-v1',preferredProvider,preferredModel,requestedCandidateCount:count,
-    callsPerCandidate:1,totalPlannedCalls:count,costPlan:Object.freeze({status:'UNKNOWN',knownTotalCost:null,
-      unknownElements:Object.freeze(['PROVIDER_PRICE_PER_CALL','TOTAL_COST']),currency:'USD',inventedCosts:false}),
+    callsPerCandidate:1,totalPlannedCalls:count,costPlan,
     approvalState:'EXECUTION_APPROVAL_REQUIRED',executionAuthorized:false,originalGenerationSpecId,repairDelta:repairDelta||null,
     provenance:Object.freeze({source:'AVATAR_STUDIO_L2_PLAN_ONLY',actor,providerCallsExecuted:0})};
   return Object.freeze({...canonical,planFingerprint:fingerprint(canonical),paidProviderCalls:0,externalGenerationCalls:0});

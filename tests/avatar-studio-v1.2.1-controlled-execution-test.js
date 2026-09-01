@@ -39,7 +39,7 @@ class MemoryRepository {
       identityVersionId:IDENTITY,identityLockVersionId:LOCK,sourceAssetIds:['source-1'],requestedCandidateCount:4,
       studioSpecification:{composition:'ONE_HORIZONTAL_THREE_PANEL_COMPOSITE'},cameraSpecification:{height:'EYE_LEVEL'},
       identityConstraints:{nose:'preserve'},negativeConstraints:{canonical:'no text',temporaryExclusions:{hat:'exclude'}},
-      preferredProvider:'openai',preferredModel:'gpt-image-1',promptVersion:PASSPORT_PROMPT_VERSION,
+      preferredProvider:'openai',preferredModel:'gpt-image-2',promptVersion:PASSPORT_PROMPT_VERSION,
       specVersion:PASSPORT_SPEC_VERSION,planFingerprint:'plan-fingerprint',costPlan:{status:'UNKNOWN',knownPricePerCandidate:null},
       repairDelta:null,originalGenerationSpecId:null};
     this.sources=new Map([['source-1',{id:'source-1',brandId:BRAND,characterId:AVATAR,intakeAssetId:'source-intake',
@@ -115,7 +115,7 @@ async function fixture({gateway,catalogOptions}={}) {
     effectiveGate0Status:'PASS',gate0Status:'PASS',effectiveRightsStatus:'NOT_REQUIRED',effectiveConsents:[],provenance:{}});
   let mockCalls=0;
   const providerGateway=gateway||{async generate({idempotencyKey}){mockCalls+=1; const ordinal=Number(idempotencyKey.split(':').at(-1));
-    return {provider:'openai-media',model:'gpt-image-1',capability:'multi-view-identity-reference',output:png(3000,1000,`candidate-${ordinal}`),
+    return {provider:'openai-media',model:'gpt-image-2',capability:'multi-view-identity-reference',output:png(3000,1000,`candidate-${ordinal}`),
       contentType:'image/png',requestId:`mock-request-${ordinal}`,usage:null,provenance:{mock:true}};}};
   const intakeService=new AvatarAssetIntakeService({repository,artifactService:artifacts,storage,actor:'test-operator'});
   const service=new PassportExecutionService({repository,providerCatalog:catalog(catalogOptions),providerGateway,
@@ -136,7 +136,9 @@ async function main() {
     const preflight=await fx.service.preflight({...scope(),generationSpecId:SPEC,maximumAllowedCost:10,executionCandidateCount:4});
     assert.equal(fx.mockCalls,0,'preflight causes zero provider calls');
     assert.equal(preflight.callsPerCandidate,1); assert.equal(preflight.totalPlannedCalls,4);
-    assert.equal(preflight.costPlan.status,'UNKNOWN'); assert.equal(preflight.costPlan.knownTotalCost,null);
+    assert.equal(preflight.costPlan.status,'PARTIAL'); assert.equal(preflight.costPlan.knownTotalCost,null);
+    assert.equal(preflight.costPlan.knownSubtotalCost,0);
+    assert.equal(preflight.costPlan.estimatedOutputCost,0.66);
     assert.equal(preflight.costPlan.unknownIsZero,false); assert(preflight.costPlan.unknownElements.includes('TOTAL_COST'));
     const smokeProposal=await fx.service.preflight({...scope(),generationSpecId:SPEC,maximumAllowedCost:10,executionCandidateCount:1});
     assert.notEqual(smokeProposal.preflightFingerprint,preflight.preflightFingerprint,
@@ -216,7 +218,8 @@ async function main() {
     await assert.rejects(()=>gate.service.generate({...scope(),executionId:p.executionId}),(e)=>e.code==='GATE0_INVALIDATED');
   } finally { await fs.rm(gate.directory,{recursive:true,force:true}); }
 
-  const cost=await fixture(); try { cost.repository.spec.costPlan={status:'KNOWN',knownPricePerCandidate:2};
+  const cost=await fixture(); try { cost.repository.spec.preferredModel='legacy-fixed-price-mock';
+    cost.repository.spec.costPlan={status:'KNOWN',knownPricePerCandidate:2};
     const p=await cost.service.preflight({...scope(),generationSpecId:SPEC,maximumAllowedCost:8,executionCandidateCount:4});
     assert.equal(p.costPlan.knownTotalCost,8); assert.equal(p.costPlan.knownPricePerCall,2);
     await assert.rejects(()=>cost.service.preflight({...scope(),generationSpecId:SPEC,maximumAllowedCost:7,executionCandidateCount:4}),
@@ -229,14 +232,14 @@ async function main() {
 
   const partial=await fixture({gateway:{calls:0,async generate({idempotencyKey}){this.calls+=1; const ordinal=Number(idempotencyKey.split(':').at(-1));
     if(ordinal===4)throw Object.assign(new Error('timeout'),{code:'PROVIDER_TIMEOUT'});
-    return {provider:'openai-media',model:'gpt-image-1',output:png(3000,1000,`partial-${ordinal}`),contentType:'image/png',requestId:`partial-${ordinal}`};}}});
+    return {provider:'openai-media',model:'gpt-image-2',output:png(3000,1000,`partial-${ordinal}`),contentType:'image/png',requestId:`partial-${ordinal}`};}}});
   try { const p=await approveReady(partial); const result=await partial.service.generate({...scope(),executionId:p.executionId});
     assert.equal(result.status,'PARTIAL_SUCCESS'); assert.equal(result.successCount,3); assert.equal(result.failureCount,1);
     assert.equal(partial.repository.candidates.length,3); assert.equal(result.automaticRetries,0); assert.equal(partial.repository.attempts.length,4);
     assert.equal(result.failures[0].classification,'PROVIDER_TIMEOUT');
   } finally { await fs.rm(partial.directory,{recursive:true,force:true}); }
 
-  const invalid=await fixture({gateway:{async generate(){return {provider:'openai-media',model:'gpt-image-1',
+  const invalid=await fixture({gateway:{async generate(){return {provider:'openai-media',model:'gpt-image-2',
     output:Buffer.from('not-an-image'),contentType:'image/png',requestId:'invalid'};}}});
   try { const p=await approveReady(invalid,{count:1}); const result=await invalid.service.generate({...scope(),executionId:p.executionId});
     assert.equal(result.status,'FAILED'); assert.equal(result.failures[0].classification,'PROVIDER_OUTPUT_INVALID');

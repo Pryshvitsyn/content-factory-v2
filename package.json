@@ -5,7 +5,8 @@
   "main": "index.js",
   "directories": { "test": "tests" },
   "scripts": {
-    "test:avatar-studio": "node tests/avatar-studio-v1-test.js && node tests/avatar-studio-v1.1-intake-test.js && node tests/avatar-studio-v1.2-passport-lab-test.js && node tests/avatar-studio-v1.2.1-controlled-execution-test.js && node tests/avatar-studio-v1.3-body-expressions-test.js && node tests/avatar-studio-api-test.js && vitest run --config apps/dashboard/client/vite.config.js tests/avatar-studio.test.jsx",
+    "test:avatar-studio": "PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-v1-test.js && PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-v1.1-intake-test.js && PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-v1.2-passport-lab-test.js && PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-v1.2.1-controlled-execution-test.js && PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-v1.3-body-expressions-test.js && PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-v1.3.1-image-provider-readiness-test.js && PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-api-test.js && PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 vitest run --config apps/dashboard/client/vite.config.js tests/avatar-studio.test.jsx",
+    "test:avatar-studio:v1.3.1": "PAID_PROVIDER_CALLS=0 EXTERNAL_GENERATION_CALLS=0 node tests/avatar-studio-v1.3.1-image-provider-readiness-test.js",
     "test:avatar-studio:postgres": "node tests/avatar-studio-postgres-test.js",
     "test:avatar-studio:migrations": "node tests/avatar-studio-v1.2-migration-postgres-test.js",
     "test:v2.10.3": "node tests/v2.10.3-cross-shot-continuity-test.js && node tests/v2.10.3-dashboard-continuity-ui-test.js && node tests/v2.10.3-dashboard-quality-recovery-wiring-test.js",

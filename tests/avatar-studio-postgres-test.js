@@ -54,7 +54,7 @@ async function main() {
       storage, actor: 'avatar-test-operator' });
     const providerCatalog = new ProviderCatalog({ env: { OPENAI_API_KEY: 'mock-provider-only-never-sent' } });
     const passportExecutionService = new PassportExecutionService({ repository, providerCatalog,
-      providerGateway: { async generate() { mockProviderCalls += 1; return { provider:'openai-media',model:'gpt-image-1',
+      providerGateway: { async generate() { mockProviderCalls += 1; return { provider:'openai-media',model:'gpt-image-2',
         output:composite,contentType:'image/png',requestId:`mock-postgres-${mockProviderCalls}`,usage:null }; } },
       assetIntakeService:intakeService,storage,env:{LIVE_PAID_GENERATION:'true'},actor:'avatar-test-operator' });
     const l2Service = new AvatarL2Service({ repository,providerCatalog,providerGateway:{async generate(){mockProviderCalls+=1;}},
@@ -118,9 +118,9 @@ async function main() {
       WHERE character_id=$1 AND modality='FACE'`,[real.id])).rows[0].count),2,'grant and revocation must both remain append-only');
 
     const passportPlan = await service.planPassportGeneration({ avatarId:l0.id,brandId:BRAND_ID,
-      sourceAssetIds:[intakeSource.source.id],requestedCandidateCount:4,preferredProvider:'openai',preferredModel:'gpt-image-1' });
+      sourceAssetIds:[intakeSource.source.id],requestedCandidateCount:4,preferredProvider:'openai',preferredModel:'gpt-image-2' });
     assert.equal(passportPlan.plannedExternalCallCount,4); assert.equal(passportPlan.externalGenerationCalls,0);
-    assert.equal(passportPlan.paidProviderCalls,0); assert.equal(passportPlan.costPlan.status,'UNKNOWN');
+    assert.equal(passportPlan.paidProviderCalls,0); assert.equal(passportPlan.costPlan.status,'PARTIAL');
     assert.equal(passportPlan.executionAuthorized,false);
     const composite = Buffer.alloc(40); Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(composite);
     composite.writeUInt32BE(13,8); composite.write('IHDR',12,'ascii'); composite.writeUInt32BE(3000,16); composite.writeUInt32BE(1000,20);
@@ -128,7 +128,7 @@ async function main() {
       identityVersionId:identityLock.avatar.identityVersionId};
     const preflight=await service.preflightPassportGeneration({...executionScope,generationSpecId:passportPlan.id,
       executionCandidateCount:1,maximumAllowedCost:5});
-    assert.equal(mockProviderCalls,0); assert.equal(preflight.totalPlannedCalls,1); assert.equal(preflight.costPlan.status,'UNKNOWN');
+    assert.equal(mockProviderCalls,0); assert.equal(preflight.totalPlannedCalls,1); assert.equal(preflight.costPlan.status,'PARTIAL');
     await service.approvePassportGeneration({...executionScope,executionId:preflight.executionId,
       explicitConfirmation:true,unknownCostAcknowledged:true}); assert.equal(mockProviderCalls,0);
     const generatedMock=await service.generatePassportCandidates({...executionScope,executionId:preflight.executionId});

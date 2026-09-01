@@ -47,6 +47,10 @@ class AvatarL2Service {
     const bodyBuild=(avatar.bodyBuildVersions||[]).find((item)=>item.identityVersionId===avatar.identityVersionId
       && item.passportCertificationEventId===passport.id);
     if(!bodyBuild)throw new AvatarStudioError(409,'CURRENT_BODY_BUILD_REQUIRED','Approve a Body Build profile for the current Passport first');
+    const capability=String(kind||'').toUpperCase()==='BODY'?'CHARACTER_BODY_REFERENCE':String(kind||'').toUpperCase()==='EXPRESSION'
+      ?'CHARACTER_EXPRESSION_REFERENCE':'MOUTH_SHAPE_REFERENCE';
+    if(!preferredProvider&&!preferredModel){const current=this.providerCatalog.preferredModel?.({provider:'openai',capability,profile:'PREMIUM'});
+      if(current){preferredProvider=current.provider;preferredModel=current.modelId;}}
     const spec=canonicalL2GenerationSpec({kind,referenceType,avatar,bodyBuild,passport,identityLock,requestedCandidateCount,
       preferredProvider,preferredModel,originalGenerationSpecId,repairDelta,actor:this.actor});
     if(preferredProvider||preferredModel){if(!preferredProvider||!preferredModel)throw new AvatarStudioError(400,'L2_PROVIDER_SELECTION_INCOMPLETE',
@@ -131,8 +135,14 @@ class AvatarL2Service {
     if(spec.identityVersionId!==avatar.identityVersionId||spec.passportCertificationEventId!==passport.id)throw new AvatarStudioError(409,'STALE_PREFLIGHT','L2 dependencies changed');
     const budget=Number(maximumAllowedCost);if(!Number.isFinite(budget)||budget<0)throw new AvatarStudioError(400,'MAXIMUM_ALLOWED_COST_REQUIRED','Set a non-negative budget ceiling');
     const knownTotal=spec.costPlan?.knownTotalCost==null?null:Number(spec.costPlan.knownTotalCost);
+    const knownSubtotal=Number(spec.costPlan?.knownSubtotalCost||0);
+    const estimatedOutputCost=Number(spec.costPlan?.estimatedOutputCost||0);
     if(knownTotal!=null&&Number.isFinite(knownTotal)&&knownTotal>budget)throw new AvatarStudioError(409,'BUDGET_EXCEEDED',
       'Known L2 generation cost exceeds the maximum allowed cost',{knownTotalCost:knownTotal,maximumAllowedCost:budget});
+    if(knownSubtotal>budget)throw new AvatarStudioError(409,'BUDGET_EXCEEDED','Known L2 output-cost subtotal exceeds the maximum allowed cost',
+      {knownSubtotalCost:knownSubtotal,maximumAllowedCost:budget});
+    if(estimatedOutputCost>budget)throw new AvatarStudioError(409,'BUDGET_EXCEEDED','Estimated L2 output cost exceeds the maximum allowed cost',
+      {estimatedOutputCost,maximumAllowedCost:budget});
     const selection=this.providerCatalog.resolveSelection({provider:spec.preferredProvider,model:spec.preferredModel,profile:'PREMIUM',capability:spec.providerCapability});
     const snapshot={schemaVersion:'avatar-l2-execution-preflight-v1',workspaceId:scope.workspaceId,brandId:scope.brandId,vertical:scope.vertical,
       avatarId:scope.avatarId,identityVersionId:scope.identityVersionId,passportCertificationEventId:passport.id,generationSpecId:spec.id,
@@ -148,8 +158,8 @@ class AvatarL2Service {
     const spec=await this.repository.l2GenerationSpec({id:execution.generationSpecId,kind:execution.generationKind,...scope});
     if(!spec||spec.planFingerprint!==execution.preflightSnapshot?.generationPlanFingerprint)
       throw new AvatarStudioError(409,'STALE_PREFLIGHT','Generation Spec or dependencies changed; create a fresh preflight');
-    if(execution.costPlan?.status==='UNKNOWN'&&!unknownCostAcknowledged)
-      throw new AvatarStudioError(409,'UNKNOWN_COST_ACKNOWLEDGEMENT_REQUIRED','UNKNOWN cost must be acknowledged');
+    if(['UNKNOWN','PARTIAL'].includes(execution.costPlan?.status)&&!unknownCostAcknowledged)
+      throw new AvatarStudioError(409,'UNKNOWN_COST_ACKNOWLEDGEMENT_REQUIRED','UNKNOWN or PARTIAL cost must be acknowledged');
     const approval=await this.repository.approveL2Execution({execution,unknownCostAcknowledged,actor:this.actor});return Object.freeze({approval,status:'APPROVED',providerCalls:0,externalGenerationCalls:0});
   }
   async generate({executionId,...scope}={}) {
@@ -166,11 +176,15 @@ class AvatarL2Service {
     const sourceImage={bytes:await this.storage.get({key:intake.artifactStorageKey}),filename:intake.originalFilename,contentType:intake.mimeType};
     const successes=[],failures=[];
     for(let ordinal=1;ordinal<=execution.candidateCount;ordinal+=1){
+      const specification=spec.specification||spec;
+      const outputSize=execution.generationKind==='BODY'?'1024x1536':'1024x1024';
       const request={capability:String(spec.providerCapability).toLowerCase().replaceAll('_','-'),candidateOrdinal:ordinal,
         prompt:JSON.stringify({description:'Canonical Avatar Studio L2 character reference',generation_requirements:{reference_type:spec.referenceType,
-          body_build:spec.specification?.bodyBuild,framing:spec.specification?.framing,pose:spec.specification?.pose,
-          expression:spec.specification?.expression,clothing_policy:spec.specification?.clothingPolicy,
-          negative_prompt:(spec.specification?.negativeConstraints||[]).join(', '),size:'1024x1536',quality:'high'}}),referenceImages:[sourceImage]};
+          body_build:specification.bodyBuild,framing:specification.framing,pose:specification.pose,
+          expression:specification.expression,identity_lock_version_id:spec.identityLockVersionId,
+          identity_constraints:specification.identityConstraints,temporary_elements_to_exclude:specification.temporaryExclusions,
+          clothing_policy:specification.clothingPolicy,negative_prompt:(specification.negativeConstraints||[]).join(', '),
+          size:outputSize,quality:'high'}}),referenceImages:[sourceImage]};
       const attempt=await this.repository.createL2Attempt({execution,ordinal,requestFingerprint:fingerprint({...request,referenceImages:[{contentHash:intake.contentHash}]}),actor:this.actor});
       try{const result=await this.providerGateway.generate({provider:execution.adapterFamily,model:execution.model,...request,idempotencyKey:attempt.idempotencyKey});
         if(!Buffer.isBuffer(result.output))throw Object.assign(new Error('Provider did not return image bytes'),{code:'PROVIDER_OUTPUT_INVALID'});

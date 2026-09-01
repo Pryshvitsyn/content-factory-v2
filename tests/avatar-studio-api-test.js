@@ -27,6 +27,7 @@ async function main() {
     async avatar(value) { calls.push(['avatar', value]); return { id: value.id }; },
     async passportLab(value) { calls.push(['passportLab', value]); return { id: value.avatarId, currentLevel: 0 }; },
     async bodyExpressionsLab(value) { calls.push(['l2Lab',value]); return {id:value.avatarId,currentLevel:1}; },
+    async smokeReadiness(value) { calls.push(['smokeReadiness',value]); return {ready:false,checks:{OPENAI_API_KEY:'NO'},externalGenerationCalls:0}; },
     async createBodyBuild(value) { calls.push(['bodyBuild',value]); return {bodyBuild:{id:'build-1'}}; },
     async planL2Reference(value) { calls.push(['l2Plan',value]); return {id:'l2-plan-1',externalGenerationCalls:0}; },
     async uploadL2Candidate(value) { calls.push(['l2Upload',value]); return {candidate:{id:'l2-candidate-1'}}; },
@@ -73,6 +74,7 @@ async function main() {
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity',
       { brandId: 'brand-1', identity: { personality: 'calm' } })).status, 201);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/passport-lab?brandId=brand-1')).status, 200);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/smoke-readiness',{brandId:'brand-1',kind:'PASSPORT'})).status,200);
     assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/body-expressions-lab?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1')).status,200);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity-locks',
       { brandId: 'brand-1', humanApproval: true })).status, 201);

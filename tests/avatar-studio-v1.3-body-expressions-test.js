@@ -98,7 +98,7 @@ async function main(){
       return {output:Buffer.from('mock-image'),contentType:'image/png',requestId:'mock-request'}}},env:{LIVE_PAID_GENERATION:'true'}});
   const generated=await liveMockService.generate({...s,executionId:'exec-1'});assert.equal(generated.status,'GENERATED');assert.equal(generated.automaticRetries,0);
   assert.equal(mockExternalCalls,1);assert.equal(autoQa,1,'mock generation auto-registers immutable QA evidence');
-  const openai=MODELS.find((item)=>item.provider==='openai'&&item.modelId==='gpt-image-1');for(const capability of [CAPABILITIES.CHARACTER_BODY_REFERENCE,CAPABILITIES.CHARACTER_EXPRESSION_REFERENCE,CAPABILITIES.MOUTH_SHAPE_REFERENCE])assert(openai.capabilities.includes(capability));
+  const openai=MODELS.find((item)=>item.provider==='openai'&&item.modelId==='gpt-image-2');for(const capability of [CAPABILITIES.CHARACTER_BODY_REFERENCE,CAPABILITIES.CHARACTER_EXPRESSION_REFERENCE,CAPABILITIES.MOUTH_SHAPE_REFERENCE])assert(openai.capabilities.includes(capability));
   console.log('Avatar Studio V1.3 tests: 49 requirement areas covered; real paid/image/video/voice/external=0; explicit mock image calls=1');
 }
 main().catch((error)=>{console.error(error);process.exitCode=1});

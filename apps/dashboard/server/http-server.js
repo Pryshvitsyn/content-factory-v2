@@ -56,6 +56,10 @@ function createControlServer({ service, creativeService = null, avatarService = 
         && segments[2] === 'avatars' && segments.length === 4) {
         return json(response, 200, await avatarService.avatar({ id: segments[3], brandId: url.searchParams.get('brandId') }));
       }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'smoke-readiness' && segments.length === 5) {
+        return json(response,200,await avatarService.smokeReadiness({avatarId:segments[3],...await readJson(request)}));
+      }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'passport-lab' && segments.length === 5) {
         return json(response, 200, await avatarService.passportLab({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));

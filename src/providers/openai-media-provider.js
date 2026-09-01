@@ -3,9 +3,11 @@
 const OpenAI = require('openai');
 const { toFile } = require('openai');
 const { ProviderError, assertProviderResult } = require('./provider-contract');
+const { actualOpenAIImageCost } = require('../v2.9.2/pricing-registry');
 
-const DEFAULT_IMAGE_MODEL = 'gpt-image-1';
+const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
 const DEFAULT_SPEECH_MODEL = 'gpt-4o-mini-tts';
+const SUPPORTED_IMAGE_MODELS = new Set(['gpt-image-2','gpt-image-1']);
 const REFERENCE_IMAGE_CAPABILITIES = new Set(['multi-view-identity-reference','character-body-reference',
   'character-expression-reference','mouth-shape-reference']);
 
@@ -33,7 +35,9 @@ function createOpenAIMediaProvider({
     },
 
     supports({ capability, model } = {}) {
-      if (capability === 'image-generation' || REFERENCE_IMAGE_CAPABILITIES.has(capability)) return !model || model === imageModel;
+      if (capability === 'image-generation' || REFERENCE_IMAGE_CAPABILITIES.has(capability)) {
+        return !model || model === imageModel || SUPPORTED_IMAGE_MODELS.has(model);
+      }
       if (capability === 'speech-generation') return !model || model === speechModel;
       return false;
     },
@@ -59,6 +63,7 @@ function createOpenAIMediaProvider({
             provider: 'openai-media', model: selectedModel, capability,
             output, mediaUrl: item.url || null, contentType: 'image/png',
             requestId: response.id || null, usage: response.usage || null,
+            actualKnownCost: actualOpenAIImageCost({ model: selectedModel, usage: response.usage }),
             provenance: { provider: 'openai-media', model: selectedModel },
           });
         }
@@ -89,9 +94,11 @@ function createOpenAIMediaProvider({
           return assertProviderResult({
             provider: 'openai-media', model: selectedModel, capability, output, mediaUrl: item.url || null,
             contentType: 'image/png', requestId: response.id || null, usage: response.usage || null,
+            actualKnownCost: actualOpenAIImageCost({ model: selectedModel, usage: response.usage }),
             provenance: { provider: 'openai-media', model: selectedModel, strategy: capability === 'multi-view-identity-reference'
               ? 'ONE_EDIT_CALL_PER_THREE_VIEW_COMPOSITE' : 'ONE_EDIT_CALL_PER_REFERENCE_CANDIDATE',
-              referenceImageCount: referenceImages.length },
+              referenceImageCount: referenceImages.length, inputFidelity: selectedModel === 'gpt-image-2'
+                ? 'AUTOMATIC_HIGH_FIDELITY' : 'PROVIDER_DEFAULT' },
           });
         }
 
@@ -128,4 +135,4 @@ function createOpenAIMediaProvider({
   });
 }
 
-module.exports = { createOpenAIMediaProvider, DEFAULT_IMAGE_MODEL, DEFAULT_SPEECH_MODEL, parseAssetPrompt };
+module.exports = { createOpenAIMediaProvider, DEFAULT_IMAGE_MODEL, DEFAULT_SPEECH_MODEL, SUPPORTED_IMAGE_MODELS, parseAssetPrompt };

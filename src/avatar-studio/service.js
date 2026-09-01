@@ -9,6 +9,7 @@ const { validateLocationReferenceGeometry } = require('../v2.10.2/reference-geom
 const { validateAvatarContinuityReadiness } = require('../v2.10/continuity-contract');
 const { compilePassportGenerationSpec } = require('./passport-plan-compiler');
 const { analyzePassportCandidate } = require('./passport-qa');
+const { buildSmokeReadiness } = require('./smoke-readiness');
 
 const PASSPORT_REJECTION_REASONS = Object.freeze(['PROFILE_DRIFT','NOSE_CHANGED','JAW_CHANGED','CHIN_CHANGED','AGE_CHANGED',
   'HAIR_CHANGED','HAIRLINE_CHANGED','FACE_CHANGED','ACCESSORY_CONTAMINATION','WARDROBE_CONTAMINATION','BACKGROUND_ERROR',
@@ -22,10 +23,10 @@ function approval(value) {
 
 class AvatarStudioService {
   constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null,
-    actor = 'local-operator' } = {}) {
+    actor = 'local-operator', env = process.env } = {}) {
     if (!repository) throw new Error('AvatarStudioService requires repository');
     this.repository = repository; this.assetIntakeService = assetIntakeService; this.providerCatalog = providerCatalog;
-    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.actor = actor;
+    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.actor = actor; this.env = env;
   }
 
   async verticals() { return this.repository.verticals(); }
@@ -177,6 +178,31 @@ class AvatarStudioService {
   async generatePassportCandidates(input = {}) { return this.requirePassportExecution().generate(input); }
   async passportExecution(input = {}) { return this.requirePassportExecution().inspect(input); }
   async cancelPassportExecution(input = {}) { return this.requirePassportExecution().cancel(input); }
+
+  async smokeReadiness({ avatarId,brandId,kind='PASSPORT',sourceAssetId=null,generationSpecId=null,executionId=null,
+    workspaceId=null,vertical=null,identityVersionId=null }={}) {
+    const avatar=await this.avatar({id:avatarId,brandId}); const normalized=String(kind).toUpperCase();
+    let generationSpec=null,execution=null,source=null,intake=null;
+    if(normalized==='PASSPORT'){
+      generationSpec=generationSpecId?await this.repository.generationSpec({id:generationSpecId,avatarId,brandId})
+        :(avatar.passportGenerationSpecs||[])[0]||null;
+      const selectedSourceId=sourceAssetId||(generationSpec?.sourceAssetIds||[])[0];
+      source=selectedSourceId?await this.repository.source({id:selectedSourceId,avatarId}):null;
+      if(source?.intakeAssetId)intake=await this.repository.intake({id:source.intakeAssetId,brandId,avatarId});
+      if(executionId)execution=await this.repository.passportExecution({id:executionId,avatarId,brandId,
+        workspaceId:workspaceId||avatar.workspaceId,vertical:vertical||avatar.vertical,identityVersionId:identityVersionId||avatar.identityVersionId});
+    }else if(normalized==='BODY'){
+      generationSpec=generationSpecId?await this.repository.l2GenerationSpec({id:generationSpecId,kind:'BODY',avatarId,brandId})
+        :(avatar.bodyGenerationSpecs||[])[0]||null;
+      const certification=(avatar.passportCertificationEvents||[]).find((item)=>item.identityVersionId===avatar.identityVersionId);
+      const passport=(avatar.passportCandidates||[]).find((item)=>item.certificationEventId===certification?.id);
+      if(passport?.intakeAssetId)intake=await this.repository.intake({id:passport.intakeAssetId,brandId,avatarId});
+      source=intake?{id:passport?.id,gate0Status:intake.effectiveGate0Status}:null;
+      if(executionId)execution=await this.repository.l2Execution({id:executionId,avatarId,brandId,
+        workspaceId:workspaceId||avatar.workspaceId,vertical:vertical||avatar.vertical,identityVersionId:identityVersionId||avatar.identityVersionId});
+    }
+    return buildSmokeReadiness({kind:normalized,env:this.env,providerCatalog:this.providerCatalog,avatar,source,intake,generationSpec,execution});
+  }
 
   requireL2() { if (!this.l2Service) throw new AvatarStudioError(503,'L2_SERVICE_UNAVAILABLE','Body + Expressions Lab is not configured'); return this.l2Service; }
   async bodyExpressionsLab(input={}) { return this.requireL2().lab(input); }

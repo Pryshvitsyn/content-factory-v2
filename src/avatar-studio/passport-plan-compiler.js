@@ -6,6 +6,7 @@ const negative = require('./prompts/AVATAR_PASSPORT_NEGATIVE.v1.json');
 const repair = require('./prompts/AVATAR_PASSPORT_REPAIR.v1.json');
 const { AvatarStudioError, fingerprint } = require('./domain');
 const { CAPABILITIES } = require('../v2.8/capabilities');
+const { estimateOpenAIImagePlan } = require('../v2.9.2/pricing-registry');
 
 const PASSPORT_SPEC_VERSION = 'avatar-passport-generation-spec-v1';
 const PASSPORT_PROMPT_VERSION = [base,identityLockPrompt,negative,repair].map((item) => `${item.id}@${item.version}`).join('+');
@@ -16,8 +17,13 @@ const REQUIRED_VIEWS = Object.freeze([
 ]);
 
 function resolveProviderPlan(providerCatalog, preferred = {}) {
-  const provider = String(preferred.provider || '').toLowerCase() || null;
-  const model = preferred.model || null;
+  let provider = String(preferred.provider || '').toLowerCase() || null;
+  let model = preferred.model || null;
+  if (!provider && !model && providerCatalog?.preferredModel) {
+    const current = providerCatalog.preferredModel({ provider: 'openai', capability: CAPABILITIES.MULTI_VIEW_IDENTITY_REFERENCE,
+      profile: 'PREMIUM' });
+    if (current) { provider = current.provider; model = current.modelId; }
+  }
   if (!provider && !model) return Object.freeze({ provider: null, model: null, capabilityStatus: 'UNSELECTED',
     availability: 'NOT_RESOLVED', costStatus: 'UNKNOWN', knownPricePerCandidate: null });
   if (!provider || !model) throw new AvatarStudioError(400, 'PASSPORT_PROVIDER_SELECTION_INCOMPLETE',
@@ -27,7 +33,10 @@ function resolveProviderPlan(providerCatalog, preferred = {}) {
   if (!(selected.capabilities || []).includes(CAPABILITIES.MULTI_VIEW_IDENTITY_REFERENCE)) throw new AvatarStudioError(409,
     'PASSPORT_CAPABILITY_UNSUPPORTED', 'Selected model lacks MULTI_VIEW_IDENTITY_REFERENCE capability');
   return Object.freeze({ provider, model, capabilityStatus: 'SUPPORTED', availability: providerCatalog.getAvailability(provider),
-    adapterFamily: selected.adapterFamily, costStatus: selected.costStatus || 'UNKNOWN', knownPricePerCandidate: null });
+    adapterFamily: selected.adapterFamily, costStatus: selected.costStatus || 'UNKNOWN', knownPricePerCandidate: null,
+    modelStatus: selected.lifecycleStatus || 'CURRENT', deprecated: selected.deprecated === true,
+    replacementModelId: selected.replacementModelId || null,
+    reliability: 'ONE_EDIT_CALL_REQUESTS_THE_CANONICAL_THREE_PANEL_COMPOSITE_BUT_PROVIDER_OUTPUT_REQUIRES_GEOMETRY_IDENTITY_QA_AND_HUMAN_CERTIFICATION' });
 }
 
 function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, sourceAssets, requestedCandidateCount = 4,
@@ -46,9 +55,12 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
     output: 'PHOTOREALISTIC_TACK_SHARP_NATURAL_CONTRAST_NO_TEXT' });
   const cameraSpecification = Object.freeze({ height: 'EYE_LEVEL', lensEquivalentMm: 85, distance: 'SAME_ALL_PANELS',
     headScale: 'SAME_ALL_PANELS', eyeLine: 'SAME_ALL_PANELS' });
-  const costPlan = Object.freeze({ status: providerPlan.costStatus === 'VERIFIED' ? 'UNKNOWN' : providerPlan.costStatus,
-    knownPricePerCandidate: providerPlan.knownPricePerCandidate, knownTotalCost: null,
-    unknownElements: Object.freeze(['PROVIDER_PRICE_PER_CANDIDATE','TOTAL_COST']), currency: 'USD', inventedCosts: false });
+  const costPlan = providerPlan.model === 'gpt-image-2'
+    ? estimateOpenAIImagePlan({ model: providerPlan.model, size: '1536x1024', quality: 'high', count,
+      referenceImageCount: sourceAssets.length })
+    : Object.freeze({ status: 'UNKNOWN', knownPricePerCandidate: providerPlan.knownPricePerCandidate, knownTotalCost: null,
+      knownSubtotalCost: 0, unknownElements: Object.freeze(['PROVIDER_PRICE_PER_CANDIDATE','TOTAL_COST']), currency: 'USD',
+      inventedCosts: false, unknownIsZero: false });
   const canonical = { schemaVersion: PASSPORT_SPEC_VERSION, workspaceId: avatar.workspaceId, brandId: sourceAssets[0].brandId,
     audienceVertical: avatar.vertical, avatarId: avatar.id, identityVersionId: identityVersion.id,
     identityLockVersionId: identityLock.id, sourceAssetIds: sourceAssets.map((item) => item.id), requiredViews: REQUIRED_VIEWS,

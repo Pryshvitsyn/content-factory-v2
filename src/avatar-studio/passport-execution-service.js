@@ -7,6 +7,7 @@ const { analyzePassportCandidate } = require('./passport-qa');
 const { PASSPORT_PROMPT_VERSION, PASSPORT_SPEC_VERSION } = require('./passport-plan-compiler');
 const { PASSPORT_CALLS_PER_CANDIDATE, PASSPORT_PROVIDER_STRATEGY,
   compilePassportProviderRequest } = require('./passport-provider-compiler');
+const { estimateOpenAIImagePlan } = require('../v2.9.2/pricing-registry');
 
 const FAILURE_CLASSIFICATIONS = Object.freeze(['PROVIDER_CONFIGURATION','PROVIDER_AUTH','PROVIDER_CAPABILITY',
   'PROVIDER_TIMEOUT','PROVIDER_RATE_LIMIT','PROVIDER_REJECTED_INPUT','PROVIDER_OUTPUT_INVALID','ARTIFACT_INGEST_FAILED',
@@ -100,15 +101,25 @@ class PassportExecutionService {
         intakeAssetId: intake.id, artifactId: intake.artifactId, artifactVersion: intake.artifactVersion,
         contentHash: intake.contentHash, gate0Status: intake.effectiveGate0Status }));
     }
+    const plannedCost = spec.preferredModel === 'gpt-image-2'
+      ? estimateOpenAIImagePlan({ model: spec.preferredModel, size: '1536x1024', quality: 'high', count: candidateCount,
+        referenceImageCount: sourceAssets.length }) : null;
     const perCandidate = numberOrNull(spec.costPlan?.knownPricePerCandidate);
-    const knownTotalCost = perCandidate == null ? null : Number((perCandidate * candidateCount).toFixed(6));
+    const knownTotalCost = plannedCost?.knownTotalCost ?? (perCandidate == null ? null : Number((perCandidate * candidateCount).toFixed(6)));
+    const knownSubtotalCost = plannedCost?.knownSubtotalCost ?? (knownTotalCost == null ? 0 : knownTotalCost);
+    const estimatedOutputCost = Number(plannedCost?.estimatedOutputCost || 0);
     if (knownTotalCost != null && knownTotalCost > budget) throw new AvatarStudioError(409, 'BUDGET_EXCEEDED',
       'Known Passport generation cost exceeds MAXIMUM_ALLOWED_COST', { knownTotalCost, maximumAllowedCost: budget });
+    if (knownSubtotalCost > budget) throw new AvatarStudioError(409, 'BUDGET_EXCEEDED',
+      'Known Passport output-cost subtotal exceeds MAXIMUM_ALLOWED_COST', { knownSubtotalCost, maximumAllowedCost: budget });
+    if (estimatedOutputCost > budget) throw new AvatarStudioError(409, 'BUDGET_EXCEEDED',
+      'Estimated Passport output cost exceeds MAXIMUM_ALLOWED_COST', { estimatedOutputCost, maximumAllowedCost: budget });
     const totalPlannedCalls = candidateCount * PASSPORT_CALLS_PER_CANDIDATE;
-    const costPlan = Object.freeze({ status: knownTotalCost == null ? 'UNKNOWN' : 'KNOWN', currency: 'USD',
-      knownPricePerCall: perCandidate, knownPricePerCandidate: perCandidate, knownTotalCost,
-      maximumKnownSubtotal: knownTotalCost == null ? 0 : knownTotalCost,
-      unknownElements: knownTotalCost == null ? Object.freeze(['PROVIDER_PRICE_PER_CALL','PROVIDER_PRICE_PER_CANDIDATE','TOTAL_COST']) : Object.freeze([]),
+    const costPlan = Object.freeze({ ...(plannedCost || {}), status: plannedCost?.status || (knownTotalCost == null ? 'UNKNOWN' : 'KNOWN'),
+      currency: 'USD', knownPricePerCall: perCandidate, knownPricePerCandidate: perCandidate, knownTotalCost,
+      maximumKnownSubtotal: knownSubtotalCost, knownSubtotalCost,
+      unknownElements: plannedCost?.unknownElements || (knownTotalCost == null
+        ? Object.freeze(['PROVIDER_PRICE_PER_CALL','PROVIDER_PRICE_PER_CANDIDATE','TOTAL_COST']) : Object.freeze([])),
       maximumAllowedCost: budget, unknownIsZero: false });
     const snapshot = { schemaVersion: 'avatar-passport-execution-preflight-v1', workspaceId: scope.workspaceId,
       brandId: scope.brandId, vertical: scope.vertical, avatarId: scope.avatarId, identityVersionId: scope.identityVersionId,
@@ -142,8 +153,8 @@ class PassportExecutionService {
       maximumAllowedCost: execution.maximumAllowedCost, executionCandidateCount: execution.candidateCount });
     if (fresh.preflightFingerprint !== execution.preflightFingerprint) throw new AvatarStudioError(409, 'STALE_PREFLIGHT',
       'Execution proposal changed; run a new preflight and approve again');
-    if (fresh.snapshot.costPlan.status === 'UNKNOWN' && !unknownCostAcknowledged) throw new AvatarStudioError(409,
-      'UNKNOWN_COST_ACKNOWLEDGEMENT_REQUIRED', 'UNKNOWN provider cost must be explicitly acknowledged');
+    if (['UNKNOWN','PARTIAL'].includes(fresh.snapshot.costPlan.status) && !unknownCostAcknowledged) throw new AvatarStudioError(409,
+      'UNKNOWN_COST_ACKNOWLEDGEMENT_REQUIRED', 'UNKNOWN or PARTIAL provider cost must be explicitly acknowledged');
     const approval = await this.repository.createPassportExecutionApproval({ execution, preflight: fresh,
       unknownCostAcknowledged, actor: this.actor });
     await this.repository.addPassportExecutionEvent({ execution, status: 'APPROVED', details: { approvalId: approval.id }, actor: this.actor });
