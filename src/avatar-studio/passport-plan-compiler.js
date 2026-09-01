@@ -8,6 +8,7 @@ const { AvatarStudioError, fingerprint } = require('./domain');
 const { CAPABILITIES } = require('../v2.8/capabilities');
 
 const PASSPORT_SPEC_VERSION = 'avatar-passport-generation-spec-v1';
+const PASSPORT_PROMPT_VERSION = [base,identityLockPrompt,negative,repair].map((item) => `${item.id}@${item.version}`).join('+');
 const REQUIRED_VIEWS = Object.freeze([
   Object.freeze({ panel: 'LEFT', view: 'FRONTAL', angleDegrees: 0 }),
   Object.freeze({ panel: 'CENTER', view: 'THREE_QUARTER_45', angleDegrees: 45 }),
@@ -39,7 +40,7 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
   if (!Array.isArray(sourceAssets) || !sourceAssets.length) throw new AvatarStudioError(409, 'PASSPORT_SOURCE_REQUIRED',
     'Select at least one eligible IDENTITY or PASSPORT_SOURCE asset');
   const providerPlan = resolveProviderPlan(providerCatalog, preferred);
-  const promptVersion = [base,identityLockPrompt,negative,repair].map((item) => `${item.id}@${item.version}`).join('+');
+  const promptVersion = PASSPORT_PROMPT_VERSION;
   const studioSpecification = Object.freeze({ composition: 'ONE_HORIZONTAL_THREE_PANEL_COMPOSITE', background: 'NEUTRAL_MID_GREY_SEAMLESS',
     pose: 'HEAD_AND_SHOULDERS_NEUTRAL_RELAXED_CLOSED_MOUTH', lighting: 'SOFT_EVEN_FRONTAL_NO_COLOUR_CAST',
     output: 'PHOTOREALISTIC_TACK_SHARP_NATURAL_CONTRAST_NO_TEXT' });
@@ -64,4 +65,4 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
     createdAt: new Date().toISOString(), providerCallsExecuted: 0 }) });
 }
 
-module.exports = { PASSPORT_SPEC_VERSION, REQUIRED_VIEWS, compilePassportGenerationSpec, resolveProviderPlan };
+module.exports = { PASSPORT_PROMPT_VERSION, PASSPORT_SPEC_VERSION, REQUIRED_VIEWS, compilePassportGenerationSpec, resolveProviderPlan };

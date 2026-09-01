@@ -82,6 +82,37 @@ class AvatarAssetIntakeService {
       paidProviderCalls: 0, externalGenerationCalls: 0 }, eligibility: this.eligibility(stored, avatar, []) });
   }
 
+  async ingestProviderOutput({ avatar, brandId, bytes, filename, mimeType, provider, model, attemptId,
+    providerRequestId = null, provenance = {}, consentVerified = false } = {}) {
+    assertBrandPermission(avatar, brandId, avatar.vertical);
+    if (!Buffer.isBuffer(bytes) || !bytes.length) throw new AvatarStudioError(502, 'PROVIDER_OUTPUT_INVALID',
+      'Provider returned no decodable image bytes');
+    const media = await inspectMedia({ bytes, filename, mimeType, mediaInspector: this.mediaInspector });
+    const completeMedia = { ...media, filename };
+    if (media.kind !== 'image' || media.findings.some((item) => item.severity === 'BLOCK') || !media.width || !media.height) {
+      throw new AvatarStudioError(502, 'PROVIDER_OUTPUT_INVALID', 'Provider output failed MIME, decode or dimension validation',
+        { findings: media.findings, width: media.width, height: media.height });
+    }
+    const gate0 = inspectAssetGateZero({ media: completeMedia, sourceType: 'PROVIDER_OUTPUT',
+      sourceLocator: `provider://${provider}/response`, provenance: { source: 'APPROVED_PROVIDER_EXECUTION', provider, model },
+      subjectType: avatar.subjectType, consentVerified });
+    if (gate0.status !== 'PASS') throw new AvatarStudioError(409, 'SECURITY_REJECTED_OUTPUT',
+      `Provider output was rejected by Gate 0 with ${gate0.status}`, { status: gate0.status, findings: gate0.findings });
+    const intakeId = crypto.randomUUID();
+    const artifact = await this.artifactService.createVersion({
+      artifactId: `avatar-passport-${avatar.workspaceId}-${brandId}-${intakeId}`, type: 'binary', content: bytes,
+      stageId: 'AVATAR_PASSPORT_PROVIDER_OUTPUT', attemptId,
+      idempotencyKey: `avatar-passport:${attemptId}`, provider, model, validationStatus: gate0.status,
+    });
+    const stored = await this.repository.createIntake({ id: intakeId, avatar, brandId, artifact,
+      media: completeMedia, sourceType: 'PROVIDER_OUTPUT', sourceLocator: `provider://${provider}/${providerRequestId || attemptId}`,
+      existingAssetId: null, gate0, rightsStatus: avatar.subjectType === 'SYNTHETIC' ? 'NOT_REQUIRED' : 'VERIFIED',
+      provenance: { ...provenance, source: 'APPROVED_PROVIDER_EXECUTION', provider, model, providerRequestId,
+        attemptId, artifactService: 'CONTENT_FACTORY_IMMUTABLE_ARTIFACT_V1', importedAt: new Date().toISOString() },
+      actor: this.actor });
+    return Object.freeze({ asset: publicIntake(stored), artifact, gate0 });
+  }
+
   eligibility(intake, avatar, roles) {
     const failures = [];
     if (intake.effectiveGate0Status !== 'PASS') failures.push(intake.effectiveGate0Status === 'BLOCK' ? 'GATE0_BLOCKED' : 'GATE0_REVIEW_REQUIRED');

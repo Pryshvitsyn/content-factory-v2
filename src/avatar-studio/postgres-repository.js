@@ -126,7 +126,9 @@ class AvatarStudioPostgresRepository {
           ? 'QA_REJECTED' : candidate.qaSnapshotId ? 'READY_FOR_HUMAN_REVIEW' : 'NEW';
       candidate.certificationState = candidate.certificationEventId ? 'CERTIFIED' : 'UNCERTIFIED';
     }
-    avatar.passportCandidates = candidates; return avatar;
+    avatar.passportCandidates = candidates;
+    avatar.passportExecutions = await this.listPassportExecutions({ avatarId: id, brandId });
+    return avatar;
   }
 
   async saveLevelState({ avatarId, workspaceId, state }) {
@@ -350,6 +352,122 @@ class AvatarStudioPostgresRepository {
       'MANUAL_UPLOAD','none',null,generationSpec.promptVersion,generationSpec.specVersion,null,'UNKNOWN',
       { source: 'AVATAR_STUDIO_MANUAL_PASSPORT_UPLOAD', intakeAssetId: intake.id, contentHash: intake.contentHash },
       repairParentCandidateId,actor])).rows[0]);
+  }
+
+  async createGeneratedPassportCandidate({ avatar, generationSpec, intake, source, execution, attempt, providerResult, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_candidates
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,generation_spec_id,
+       intake_asset_id,source_asset_id,artifact_id,artifact_version,source_asset_ids,provider,model,provider_request_id,
+       prompt_version,spec_version,known_cost,cost_status,provenance,repair_parent_candidate_id,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+    [avatar.workspaceId,execution.brandId,avatar.vertical,generationSpec.characterId,generationSpec.identityVersionId,
+      generationSpec.identityLockVersionId,generationSpec.id,intake.id,source.id,intake.artifactId,intake.artifactVersion,
+      json(generationSpec.sourceAssetIds),execution.provider,execution.model,providerResult.requestId,generationSpec.promptVersion,
+      generationSpec.specVersion,providerResult.actualKnownCost,providerResult.actualKnownCost == null?'UNKNOWN':'KNOWN',
+      { source:'AVATAR_STUDIO_APPROVED_PROVIDER_EXECUTION',executionId:execution.id,
+        attemptId:attempt.id,providerRequestId:providerResult.requestId,contentHash:intake.contentHash,
+        sourceAssetIds:generationSpec.sourceAssetIds,identityVersionId:generationSpec.identityVersionId,
+        identityLockVersionId:generationSpec.identityLockVersionId,promptVersion:generationSpec.promptVersion,
+        specVersion:generationSpec.specVersion,repairDelta:generationSpec.repairDelta || null },
+      generationSpec.repairDelta?.repairParentCandidateId || null,actor])).rows[0]);
+  }
+
+  async createPassportExecution({ preflight, actor }) {
+    const s = preflight.snapshot;
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_generation_executions
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,generation_spec_id,
+       provider,model,adapter_family,capability,profile,candidate_count,calls_per_candidate,total_planned_calls,cost_plan,
+       maximum_allowed_cost,input_snapshot,preflight_fingerprint,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+    [s.workspaceId,s.brandId,s.vertical,s.avatarId,s.identityVersionId,s.identityLockVersionId,s.generationSpecId,
+      s.provider,s.model,s.adapterFamily,s.capability,s.profile,s.candidateCount,s.callsPerCandidate,s.totalPlannedCalls,
+      s.costPlan,s.maximumAllowedCost,s,preflight.preflightFingerprint,actor])).rows[0]);
+  }
+
+  async addPassportExecutionEvent({ execution, status, details = {}, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_execution_events
+      (workspace_id,brand_id,character_id,execution_id,status,details,recorded_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[execution.workspaceId,execution.brandId,execution.characterId,
+      execution.id,status,details,actor])).rows[0]);
+  }
+
+  async createPassportExecutionApproval({ execution, preflight, unknownCostAcknowledged, actor }) {
+    const s=preflight.snapshot;
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_execution_approvals
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,generation_spec_id,
+       execution_id,provider,model,candidate_count,call_count,known_total_cost,unknown_cost_acknowledged,
+       maximum_allowed_cost,input_asset_versions,prompt_version,spec_version,preflight_fingerprint,exact_proposal,
+       explicit_confirmation,approved_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,true,$21) RETURNING *`,
+    [s.workspaceId,s.brandId,s.vertical,s.avatarId,s.identityVersionId,s.identityLockVersionId,s.generationSpecId,
+      execution.id,s.provider,s.model,s.candidateCount,s.totalPlannedCalls,s.costPlan.knownTotalCost,
+      unknownCostAcknowledged,s.maximumAllowedCost,json(s.inputAssetVersions),s.promptVersion,s.specVersion,
+      preflight.preflightFingerprint,s,actor])).rows[0]);
+  }
+
+  async createPassportProviderAttempt({ execution, ordinal, request, actor }) {
+    const idempotencyKey=`passport:${execution.id}:candidate:${ordinal}`;
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_provider_attempts
+      (workspace_id,brand_id,character_id,execution_id,candidate_ordinal,provider,model,adapter_family,
+       idempotency_key,request_fingerprint,planned_cost,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [execution.workspaceId,execution.brandId,execution.characterId,execution.id,ordinal,execution.provider,execution.model,
+      execution.adapterFamily,idempotencyKey,request.requestFingerprint,execution.costPlan?.knownPricePerCandidate || null,actor])).rows[0]);
+  }
+
+  async addPassportProviderAttemptEvent({ attempt, status, providerRequestId = null, failureClassification = null,
+    safeErrorMessage = null, mayHaveSpent = false, responseMetadata = {}, actualKnownCost = null, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_provider_attempt_events
+      (workspace_id,brand_id,character_id,attempt_id,status,provider_request_id,failure_classification,safe_error_message,
+       may_have_spent,response_metadata,actual_known_cost,recorded_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [attempt.workspaceId,attempt.brandId,attempt.characterId,attempt.id,status,providerRequestId,failureClassification,
+      safeErrorMessage,mayHaveSpent,responseMetadata,actualKnownCost,actor])).rows[0]);
+  }
+
+  async createPassportExecutionResult({ execution, attempt, candidate, intake, artifact, providerResult, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_execution_results
+      (workspace_id,brand_id,vertical_code,character_id,execution_id,attempt_id,candidate_id,artifact_id,artifact_version,
+       content_hash,storage_key,provider_request_id,actual_known_cost,provenance,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+    [execution.workspaceId,execution.brandId,execution.verticalCode,execution.characterId,execution.id,attempt.id,candidate.id,
+      artifact.artifactId,artifact.version,artifact.contentHash,artifact.storageKey,providerResult.requestId,providerResult.actualKnownCost,
+      { source:'AVATAR_STUDIO_PASSPORT_EXECUTION_RESULT',provider:execution.provider,model:execution.model,
+        generationSpecId:execution.generationSpecId,identityVersionId:execution.identityVersionId,
+        identityLockVersionId:execution.identityLockVersionId,intakeAssetId:intake.id },actor])).rows[0]);
+  }
+
+  async passportExecution({ id, workspaceId, brandId, vertical, avatarId, identityVersionId }) {
+    const row=(await this.db.query(`SELECT * FROM avatar_studio.passport_generation_executions
+      WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND vertical_code=$4 AND character_id=$5 AND identity_version_id=$6`,
+    [id,workspaceId,brandId,vertical,avatarId,identityVersionId])).rows[0];
+    if(!row)return null; const execution=camel(row);
+    const [events,approval,attempts,results]=await Promise.all([
+      this.db.query('SELECT * FROM avatar_studio.passport_execution_events WHERE execution_id=$1 ORDER BY recorded_at,id',[id]),
+      this.db.query('SELECT * FROM avatar_studio.passport_execution_approvals WHERE execution_id=$1',[id]),
+      this.db.query(`SELECT a.*,e.status AS latest_status,e.failure_classification,e.safe_error_message,e.may_have_spent,
+        e.provider_request_id FROM avatar_studio.passport_provider_attempts a LEFT JOIN LATERAL
+        (SELECT * FROM avatar_studio.passport_provider_attempt_events x WHERE x.attempt_id=a.id ORDER BY x.recorded_at DESC,x.id DESC LIMIT 1) e ON true
+        WHERE a.execution_id=$1 ORDER BY a.candidate_ordinal`,[id]),
+      this.db.query('SELECT * FROM avatar_studio.passport_execution_results WHERE execution_id=$1 ORDER BY created_at,id',[id]),
+    ]);
+    execution.events=events.rows.map(camel); execution.approval=approval.rows[0]?camel(approval.rows[0]):null;
+    execution.attempts=attempts.rows.map(camel); execution.results=results.rows.map(camel);
+    execution.status=execution.events.at(-1)?.status || 'PLANNED';
+    return execution;
+  }
+
+  async listPassportExecutions({ avatarId, brandId = null }) {
+    const rows=(await this.db.query(`SELECT e.id,e.workspace_id,e.brand_id,e.vertical_code,e.character_id,e.identity_version_id,
+      e.identity_lock_version_id,e.generation_spec_id,e.provider,e.model,e.adapter_family,e.capability,e.profile,
+      e.candidate_count,e.calls_per_candidate,e.total_planned_calls,e.cost_plan,e.maximum_allowed_cost,e.preflight_fingerprint,
+      e.created_at,latest.status,coalesce(attempts.count,0)::int AS calls_executed,coalesce(results.count,0)::int AS success_count
+      FROM avatar_studio.passport_generation_executions e
+      LEFT JOIN LATERAL (SELECT status FROM avatar_studio.passport_execution_events x WHERE x.execution_id=e.id ORDER BY x.recorded_at DESC,x.id DESC LIMIT 1) latest ON true
+      LEFT JOIN LATERAL (SELECT count(*) FROM avatar_studio.passport_provider_attempts a WHERE a.execution_id=e.id) attempts ON true
+      LEFT JOIN LATERAL (SELECT count(*) FROM avatar_studio.passport_execution_results r WHERE r.execution_id=e.id) results ON true
+      WHERE e.character_id=$1 AND ($2::uuid IS NULL OR e.brand_id=$2) ORDER BY e.created_at DESC`,[avatarId,brandId])).rows;
+    return rows.map(camel);
   }
 
   async passportCandidate({ id, avatarId, brandId }) {

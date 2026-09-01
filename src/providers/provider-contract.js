@@ -13,6 +13,7 @@ class ProviderError extends Error {
 const MEDIA_CAPABILITIES = new Set([
   'image-generation',
   'image-editing',
+  'multi-view-identity-reference',
   'video-generation',
   'speech-generation',
   'audio-generation',
@@ -64,6 +65,7 @@ function assertProviderResult(result) {
     provenance: result.provenance ? Object.freeze({ ...result.provenance }) : null,
     requestId: result.requestId || null,
     usage: result.usage || null,
+    actualKnownCost: Number.isFinite(result.actualKnownCost) ? Number(result.actualKnownCost) : null,
     raw: result.raw || null,
   });
 }

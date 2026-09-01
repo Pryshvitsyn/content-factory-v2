@@ -21,9 +21,11 @@ function approval(value) {
 }
 
 class AvatarStudioService {
-  constructor({ repository, assetIntakeService = null, providerCatalog = null, actor = 'local-operator' } = {}) {
+  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null,
+    actor = 'local-operator' } = {}) {
     if (!repository) throw new Error('AvatarStudioService requires repository');
-    this.repository = repository; this.assetIntakeService = assetIntakeService; this.providerCatalog = providerCatalog; this.actor = actor;
+    this.repository = repository; this.assetIntakeService = assetIntakeService; this.providerCatalog = providerCatalog;
+    this.passportExecutionService = passportExecutionService; this.actor = actor;
   }
 
   async verticals() { return this.repository.verticals(); }
@@ -163,6 +165,18 @@ class AvatarStudioService {
   }
 
   async passportLab({ avatarId, brandId } = {}) { return this.avatar({ id: avatarId, brandId }); }
+
+  requirePassportExecution() {
+    if (!this.passportExecutionService) throw new AvatarStudioError(503, 'PASSPORT_EXECUTION_UNAVAILABLE',
+      'Controlled Passport provider execution is not configured');
+    return this.passportExecutionService;
+  }
+
+  async preflightPassportGeneration(input = {}) { return this.requirePassportExecution().preflight(input); }
+  async approvePassportGeneration(input = {}) { return this.requirePassportExecution().approve(input); }
+  async generatePassportCandidates(input = {}) { return this.requirePassportExecution().generate(input); }
+  async passportExecution(input = {}) { return this.requirePassportExecution().inspect(input); }
+  async cancelPassportExecution(input = {}) { return this.requirePassportExecution().cancel(input); }
 
   async planPassportGeneration({ avatarId, brandId, sourceAssetIds, requestedCandidateCount = 4,
     preferredProvider = null, preferredModel = null, originalGenerationSpecId = null, repairDelta = null } = {}) {

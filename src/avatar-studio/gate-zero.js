@@ -25,14 +25,15 @@ function inspectGateZero(input = {}) {
     externalCalls: 0, inspectedAt: new Date().toISOString(), policyVersion: 'GATE_0_AVATAR_STUDIO_V1' });
 }
 
-function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, provenance = {}, subjectType = 'SYNTHETIC' } = {}) {
+function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, provenance = {}, subjectType = 'SYNTHETIC',
+  consentVerified = false } = {}) {
   const base = inspectGateZero({ sourceLocator, text: media.embeddedText || 'immutable media asset',
     metadata: { filename: media.filename, mimeType: media.mimeType, extension: media.extension,
       detectedMime: media.detectedMime, byteSize: media.byteSize }, provenance });
   const findings = [...(media.findings || []), ...base.findings];
   if (sourceType === 'SAFE_URL_IMPORT') findings.push({ severity: 'REVIEW', code: 'EXTERNAL_URL_SOURCE' });
   if (!provenance.owner && subjectType !== 'SYNTHETIC') findings.push({ severity: 'REVIEW', code: 'PROVENANCE_UNCERTAIN' });
-  if (subjectType !== 'SYNTHETIC' && media.kind === 'image') findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' });
+  if (subjectType !== 'SYNTHETIC' && media.kind === 'image' && !consentVerified) findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' });
   if (subjectType !== 'SYNTHETIC' && media.kind === 'audio') findings.push({ severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
   if (subjectType !== 'SYNTHETIC' && media.kind === 'video') {
     findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' }, { severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });

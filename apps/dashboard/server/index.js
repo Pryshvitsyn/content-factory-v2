@@ -23,6 +23,8 @@ const { AvatarStudioPostgresRepository } = require('../../../src/avatar-studio/p
 const { AvatarStudioService } = require('../../../src/avatar-studio/service');
 const { AvatarAssetIntakeService } = require('../../../src/avatar-studio/asset-intake-service');
 const { SafeUrlImporter } = require('../../../src/avatar-studio/safe-url-import');
+const { PassportExecutionService } = require('../../../src/avatar-studio/passport-execution-service');
+const { createDefaultProviderGateway } = require('../../../src/providers/default-provider-gateway');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -79,8 +81,12 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const avatarAssetIntakeService = new AvatarAssetIntakeService({ repository: avatarRepository,
     artifactService: new ArtifactService({ storage }), storage, mediaInspector: audioInspector,
     safeUrlImporter: new SafeUrlImporter(), actor });
+  const passportExecutionService = new PassportExecutionService({ repository: avatarRepository, providerCatalog,
+    providerGateway: createDefaultProviderGateway({ openai: { apiKey: env.OPENAI_API_KEY },
+      replicate: { enabled: false }, routing: { fallbackOnError: false } }),
+    assetIntakeService: avatarAssetIntakeService, storage, actor });
   const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
-    providerCatalog, actor });
+    providerCatalog, passportExecutionService, actor });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, avatarService, avatarRepository, v210Repository,
     avatarAssetIntakeService, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
     server: createControlServer({ service, creativeService, avatarService }) };
