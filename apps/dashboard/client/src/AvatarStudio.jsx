@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { PassportLab } from './PassportLab';
+import { BodyExpressionsLab } from './BodyExpressionsLab';
 import './AvatarStudio.css';
 
 const LEVEL_NAMES = ['IDENTITY','PASSPORT','BODY EXPRESSIONS','WARDROBE','VOICE','LOCATIONS','PERFORMANCE','MULTISHOT CONTINUITY'];
@@ -56,6 +57,7 @@ function LevelUpWorkflow({ avatar, brandId, onUpdated }) {
     } catch (cause) { setError(cause); } finally { setBusy(false); }
   }
   if (next.level === 1) return <section className="level-up-workflow"><h3>Next level · L1 PASSPORT</h3><p>Use Create Avatar to register Gate 0 source evidence, compare multiple three-angle candidates, and make the immutable human certification.</p></section>;
+  if (next.level === 2) return <section className="level-up-workflow"><h3>Next level · L2 BODY_EXPRESSIONS</h3><p>Open BODY + EXPRESSIONS LAB. Six individual reference certifications and one final explicit pack certification are required; legacy artifact IDs cannot advance L2.</p></section>;
   return <form className="level-up-workflow avatar-form" onSubmit={submit}><span className="eyebrow">EXACTLY ONE NEXT-LEVEL WORKFLOW</span><h3>Next level · L{next.level} {next.name}</h3><ErrorPanel error={error} /><div className="form-grid">
     {next.level === 2 ? <>{[['Chest-up artifact ID','chest'],['Full-body standing artifact ID','standing'],['Seated artifact ID','seated'],['Neutral expression artifact ID','neutral'],['Warm expression artifact ID','warm'],['Serious expression artifact ID','serious']].map(([label,key]) => <Input key={key} label={label} value={form[key]} onChange={(v) => change(key,v)} />)}</> : null}
     {next.level === 3 ? <><Input label="Wardrobe pack name" value={form.wardrobeName} onChange={(v) => change('wardrobeName',v)} /><Input label="Clothing description" value={form.clothing} onChange={(v) => change('clothing',v)} /></> : null}
@@ -218,8 +220,8 @@ function TestContent({ brands }) {
 export function AvatarStudio() {
   const [tab, setTab] = useState('LIBRARY'); const [brands, setBrands] = useState([]); const [selectedBrand, setSelectedBrand] = useState(''); const [revision, setRevision] = useState(0); const [error, setError] = useState(null);
   useEffect(() => { api('/api/brands').then(setBrands).catch(setError); }, []);
-  const tabs = useMemo(() => ['LIBRARY','CREATE AVATAR','PASSPORT LAB','GATE 0 REVIEW','TEST CONTENT'], []);
-  return <main><header className="page-header"><span className="eyebrow">PERSISTENT PERSONAS · LEVELS 0–7</span><h1>Avatar Studio</h1></header><p className="page-note">Identity, consent, references and level approvals remain brand-scoped, versioned and plan-only until a separate production preflight.</p><ErrorPanel error={error} /><div className="avatar-tabs">{tabs.map((item) => <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item}</button>)}</div>{tab === 'LIBRARY' ? <AvatarLibrary brands={brands} selectedBrand={selectedBrand} setSelectedBrand={setSelectedBrand} revision={revision} /> : null}{tab === 'CREATE AVATAR' ? <CreateAvatar brands={brands} onCreated={() => setRevision((value) => value + 1)} /> : null}{tab === 'PASSPORT LAB' ? <PassportLab brands={brands} /> : null}{tab === 'GATE 0 REVIEW' ? <Gate0ReviewQueue brands={brands} /> : null}{tab === 'TEST CONTENT' ? <TestContent brands={brands} /> : null}</main>;
+  const tabs = useMemo(() => ['LIBRARY','CREATE AVATAR','PASSPORT LAB','BODY + EXPRESSIONS LAB','GATE 0 REVIEW','TEST CONTENT'], []);
+  return <main><header className="page-header"><span className="eyebrow">PERSISTENT PERSONAS · LEVELS 0–7</span><h1>Avatar Studio</h1></header><p className="page-note">Identity, consent, references and level approvals remain brand-scoped, versioned and plan-only until a separate production preflight.</p><ErrorPanel error={error} /><div className="avatar-tabs">{tabs.map((item) => <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item}</button>)}</div>{tab === 'LIBRARY' ? <AvatarLibrary brands={brands} selectedBrand={selectedBrand} setSelectedBrand={setSelectedBrand} revision={revision} /> : null}{tab === 'CREATE AVATAR' ? <CreateAvatar brands={brands} onCreated={() => setRevision((value) => value + 1)} /> : null}{tab === 'PASSPORT LAB' ? <PassportLab brands={brands} /> : null}{tab === 'BODY + EXPRESSIONS LAB' ? <BodyExpressionsLab brands={brands} /> : null}{tab === 'GATE 0 REVIEW' ? <Gate0ReviewQueue brands={brands} /> : null}{tab === 'TEST CONTENT' ? <TestContent brands={brands} /> : null}</main>;
 }
 
 export { AvatarDetail, AvatarLibrary, CreateAvatar, Gate0ReviewQueue, LevelLadder, LevelUpWorkflow, TestContent };

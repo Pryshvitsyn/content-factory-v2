@@ -61,6 +61,11 @@ function createControlServer({ service, creativeService = null, avatarService = 
         return json(response, 200, await avatarService.passportLab({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'body-expressions-lab' && segments.length === 5) {
+        return json(response,200,await avatarService.bodyExpressionsLab({avatarId:segments[3],workspaceId:url.searchParams.get('workspaceId'),
+          brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'intakes' && segments.length === 5) {
         return json(response, 200, await avatarService.listIntakes({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
       }
@@ -100,7 +105,33 @@ function createControlServer({ service, creativeService = null, avatarService = 
         if (segments[4] === 'identity-locks') return json(response, 201, await avatarService.createIdentityLock(args));
         if (segments[4] === 'passport-generation-plans') return json(response, 201, await avatarService.planPassportGeneration(args));
         if (segments[4] === 'passport-candidates') return json(response, 201, await avatarService.uploadPassportCandidate(args));
+        if (segments[4] === 'body-builds') return json(response,201,await avatarService.createBodyBuild(args));
+        if (segments[4] === 'l2-generation-plans') return json(response,201,await avatarService.planL2Reference(args));
+        if (segments[4] === 'l2-candidates') return json(response,201,await avatarService.uploadL2Candidate(args));
+        if (segments[4] === 'l2-certification') return json(response,201,await avatarService.certifyL2Pack(args));
         if (segments[4] === 'level-assets') return json(response, 201, await avatarService.addLevelAsset(args));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-readiness' && segments.length === 5) {
+        return json(response,200,await avatarService.l2Readiness({avatarId:segments[3],workspaceId:url.searchParams.get('workspaceId'),
+          brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-candidates' && segments.length === 7) {
+        const args={avatarId:segments[3],candidateId:segments[5],...await readJson(request)};
+        if(segments[6]==='qa')return json(response,201,await avatarService.runL2Qa(args));
+        if(segments[6]==='review')return json(response,201,await avatarService.reviewL2Candidate(args));
+        if(segments[6]==='certify')return json(response,201,await avatarService.certifyL2Reference(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-generation-plans' && segments[6] === 'preflight' && segments.length === 7) {
+        return json(response,201,await avatarService.preflightL2Generation({avatarId:segments[3],generationSpecId:segments[5],...await readJson(request)}));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-executions' && segments.length === 7) {
+        const args={avatarId:segments[3],executionId:segments[5],...await readJson(request)};
+        if(segments[6]==='approve')return json(response,201,await avatarService.approveL2Generation(args));
+        if(segments[6]==='generate')return json(response,202,await avatarService.generateL2Candidates(args));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'passport-candidates' && segments.length === 7) {
