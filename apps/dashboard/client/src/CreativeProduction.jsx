@@ -89,6 +89,12 @@ export function CreativeProduction() {
   const [message, setMessage] = useState(null);
   const [advanced, setAdvanced] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
+  const [keyframeFile, setKeyframeFile] = useState(null);
+  const [keyframeSource, setKeyframeSource] = useState('OPERATOR_UPLOAD');
+  const [keyframeRoute, setKeyframeRoute] = useState({ provider: '', model: '', profile: 'STANDARD' });
+  const [keyframePreflight, setKeyframePreflight] = useState(null);
+  const [keyframeResult, setKeyframeResult] = useState(null);
+  const [firstVideoPreflight, setFirstVideoPreflight] = useState(null);
   const [attested, setAttested] = useState(false);
   const [video, setVideo] = useState(emptyVideo);
   const [busy, setBusy] = useState(null);
@@ -114,6 +120,7 @@ export function CreativeProduction() {
   const voiceModels = (selectedVoiceProvider?.models || []).filter((model) => model.capabilities?.includes(SPEECH_CAPABILITY) && model.selectable !== false);
   const voiceNeedsApproval = Boolean(brief.voice.sourceType);
   const voiceReady = !voiceNeedsApproval || brief.voice.approved === true;
+  const imageProviders = providers.filter((provider) => provider.models?.some((model) => model.capabilities?.includes('TEXT_TO_IMAGE')));
 
   const invalidate = () => setPreflight(null);
   const edit = (fn, voiceChange = false) => {
@@ -129,7 +136,8 @@ export function CreativeProduction() {
 
   function resetEditor() {
     setDraft(null); setBrief(initialBrief()); setVideo(emptyVideo()); setPreflight(null); setPreview(null);
-    setUploadedFile(null); setAttested(false); setMessage('New draft. External calls: 0.');
+    setUploadedFile(null); setKeyframeFile(null); setKeyframePreflight(null); setKeyframeResult(null);
+    setFirstVideoPreflight(null); setAttested(false); setMessage('New draft. External calls: 0.');
   }
 
   function loadDraft(row, providerRows = providers) {
@@ -342,6 +350,84 @@ export function CreativeProduction() {
     finally { setBusy(null); }
   }
 
+  function chooseKeyframeProvider(providerId) {
+    const provider = imageProviders.find((item) => item.id === providerId);
+    const model = provider?.models?.find((item) => item.capabilities?.includes('TEXT_TO_IMAGE') && item.selectable !== false);
+    setKeyframeRoute({ provider: providerId, model: model?.modelId || '', profile: defaultProfile(model) });
+    setKeyframePreflight(null);
+  }
+
+  async function preflightKeyframeStage() {
+    setBusy('keyframe-preflight');
+    try {
+      const saved = await persistDraft({ announce: false });
+      const value = await api(`/api/v2.10/creative-drafts/${saved.id}/locked-keyframe/preflight`, { method: 'POST',
+        body: JSON.stringify({ brandId, shotId: brief.storyboard[0].shotId, keyframe: { sourceType: keyframeSource,
+          ...(keyframeSource === 'AI_GENERATED' ? keyframeRoute : {}) } }) });
+      setKeyframePreflight(value); setKeyframeResult(null);
+      setMessage(`Keyframe preflight prepared. Maximum external calls: ${value.externalCalls.maximum}. Calls made: 0.`);
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function executeKeyframeStage() {
+    if (!keyframePreflight || (keyframeSource === 'OPERATOR_UPLOAD' && !keyframeFile)) return;
+    if (!window.confirm(`EXECUTE KEYFRAME STAGE?\nProvider: ${keyframePreflight.provider}\nModel: ${keyframePreflight.model}\nImage calls: ${keyframePreflight.externalCalls.imageGeneration}\nSemantic calls: ${keyframePreflight.externalCalls.semanticImageEvaluation}\nMaximum calls: ${keyframePreflight.externalCalls.maximum}\nHuman approval remains required.`)) return;
+    setBusy('keyframe-execute');
+    try {
+      let contentBase64 = null;
+      if (keyframeFile) contentBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]);
+        reader.onerror = reject; reader.readAsDataURL(keyframeFile);
+      });
+      const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/execute`, { method: 'POST',
+        body: JSON.stringify({ brandId, shotId: brief.storyboard[0].shotId, preflightId: keyframePreflight.preflightId,
+          fingerprint: keyframePreflight.fingerprint, confirmation: true, contentBase64,
+          contentType: keyframeFile?.type || null }) });
+      setKeyframeResult(value); setMessage(`Keyframe ${value.validation.status}. Video remains blocked until human approval.`);
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function approveLockedKeyframe() {
+    if (!keyframeResult?.keyframe?.id || keyframeResult.validation?.status !== 'PASS') return;
+    if (!window.confirm('APPROVE THIS EXACT IMMUTABLE KEYFRAME VERSION?\nThis binds its artifact ID, version and hash to shot 1 and invalidates production preflight.')) return;
+    setBusy('keyframe-approve');
+    try {
+      const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/approve`, { method: 'POST',
+        body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id, confirmation: true }) });
+      const reference = value.canonicalReference;
+      edit((current) => ({ ...current, storyboard: current.storyboard.map((shot, index) => index === 0
+        ? { ...shot, referencePolicy: 'UPLOADED_REFERENCE', referenceMedia: reference } : shot) }));
+      setKeyframeResult((current) => ({ ...current, keyframe: { ...current.keyframe, approvalDecision: 'APPROVED' } }));
+      setPreflight(null); setMessage('Exact keyframe approved and bound. Run FINAL PRODUCTION PREFLIGHT next.');
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function preflightLockedVideo() {
+    setBusy('locked-video-preflight');
+    try {
+      const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/video-preflight`, { method: 'POST',
+        body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id }) });
+      setFirstVideoPreflight(value); setMessage(`First-video preflight ready. Maximum external calls: ${value.externalCalls.maximum}. Calls made: 0.`);
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
+  async function startLockedVideo() {
+    if (!firstVideoPreflight) return;
+    if (!window.confirm(`START ONLY FIRST VIDEO?\nKeyframe: ${firstVideoPreflight.keyframe.artifactId} v${firstVideoPreflight.keyframe.version}\nVideo calls: 1\nSemantic calls: 1\nContinuity/voice/renderer: 0\nMaximum calls: 2\nAuto publish: NO`)) return;
+    setBusy('locked-video-start');
+    try {
+      const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/video-start`, { method: 'POST',
+        body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id,
+          preflightId: firstVideoPreflight.preflightId, fingerprint: firstVideoPreflight.fingerprint, confirmation: true }) });
+      setMessage(value.accepted ? 'First conditioned video accepted. Remaining production is still stopped.' : 'First video failed validation. Remaining production is blocked.');
+    } catch (error) { setMessage(error.message); }
+    finally { setBusy(null); }
+  }
+
   return <main>
     <header className="page-header"><span className="eyebrow">V2.10 · OPERATOR CREATIVE</span><h1>Creative Production</h1></header>
     <p className="page-note">Write the ad, choose only valid catalog options, review voice and exact preflight, then explicitly start.</p>
@@ -415,6 +501,33 @@ export function CreativeProduction() {
           </details>
         </article>;
       })}</section>
+
+      <section className="panel"><h2 className="panel-title">LOCKED OPENING KEYFRAME</h2>
+        <p className="boundary">This bounded workflow creates or stores only the opening still, validates it, and then waits for explicit approval. It cannot generate video, voice, continuity, a master, or publication implicitly.</p>
+        <div className="form-grid">
+          <SelectField label="KEYFRAME SOURCE" value={keyframeSource} onChange={(value) => { setKeyframeSource(value); setKeyframePreflight(null); }}>
+            <option value="OPERATOR_UPLOAD">Operator upload · 0 image calls</option><option value="AI_GENERATED">AI generated · 1 image call</option>
+          </SelectField>
+          {keyframeSource === 'AI_GENERATED' ? <>
+            <SelectField label="IMAGE PROVIDER" value={keyframeRoute.provider} onChange={chooseKeyframeProvider}>
+              <option value="">Choose configured provider</option>{imageProviders.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.configured}>{provider.displayName} · {humanProviderState(provider)}</option>)}
+            </SelectField>
+            <Field label="IMAGE MODEL" value={keyframeRoute.model} area={false} onChange={(model) => { setKeyframeRoute((current) => ({ ...current, model })); setKeyframePreflight(null); }} />
+          </> : <label>UPLOAD 9:16 KEYFRAME<input aria-label="Upload keyframe" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { setKeyframeFile(event.target.files?.[0] || null); setKeyframePreflight(null); }} /></label>}
+        </div>
+        <div className="actions">
+          <button type="button" className="secondary" disabled={!draft || busy || (keyframeSource === 'AI_GENERATED' && !keyframeRoute.model)} onClick={preflightKeyframeStage}>KEYFRAME PREFLIGHT · 0 CALLS</button>
+          <button type="button" className="primary" disabled={!keyframePreflight || busy || (keyframeSource === 'OPERATOR_UPLOAD' && !keyframeFile)} onClick={executeKeyframeStage}>EXECUTE KEYFRAME STAGE</button>
+          <button type="button" className="secondary" disabled={keyframeResult?.validation?.status !== 'PASS' || busy || keyframeResult?.keyframe?.approvalDecision === 'APPROVED'} onClick={approveLockedKeyframe}>APPROVE EXACT KEYFRAME</button>
+        </div>
+        {keyframePreflight ? <div className="plan-grid"><div className="key-value"><span>KEYFRAME CALLS</span><p>Image {keyframePreflight.externalCalls.imageGeneration} · Semantic {keyframePreflight.externalCalls.semanticImageEvaluation} · Retries 0 · Maximum {keyframePreflight.externalCalls.maximum}</p></div><div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {keyframePreflight.cost.status}</p></div></div> : null}
+        {keyframeResult ? <div className="voice-status-line"><span>KEYFRAME VALIDATION / APPROVAL</span><strong className={keyframeResult.validation.status === 'PASS' ? 'pass' : 'fail'}>{keyframeResult.validation.status} · {keyframeResult.keyframe.approvalDecision || 'APPROVAL REQUIRED'}</strong></div> : null}
+        <div className="actions">
+          <button type="button" className="secondary" disabled={!preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
+          <button type="button" className="primary" disabled={!firstVideoPreflight || busy} onClick={startLockedVideo}>START FIRST VIDEO ONLY</button>
+        </div>
+        {firstVideoPreflight ? <div className="plan-grid"><div className="key-value"><span>EXACT REFERENCE</span><p>{firstVideoPreflight.keyframe.artifactId} · v{firstVideoPreflight.keyframe.version} · {firstVideoPreflight.keyframe.contentHash}</p></div><div className="key-value"><span>BOUNDED EXECUTION</span><p>Video 1 · Semantic 1 · Voice 0 · Continuity 0 · Renderer 0 · Maximum 2</p></div></div> : null}
+      </section>
 
       <section className="panel"><h2 className="panel-title">CONTINUITY</h2><div className="form-grid">
         {CONTINUITY_FIELDS.map((field) => <Field key={field} label={field.replaceAll(/([A-Z])/g, ' $1').toUpperCase()} value={brief.continuity[field]}

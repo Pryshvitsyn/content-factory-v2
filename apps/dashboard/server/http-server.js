@@ -32,7 +32,7 @@ async function readJson(request, limit = BODY_LIMIT) {
   catch { throw new ControlError(400, 'INVALID_JSON', 'Request body must be valid JSON'); }
 }
 
-function createControlServer({ service, creativeService = null, logger = console } = {}) {
+function createControlServer({ service, creativeService = null, lockedKeyframeService = null, logger = console } = {}) {
   if (!service) throw new Error('service is required');
   return http.createServer(async (request, response) => {
     try {
@@ -61,6 +61,17 @@ function createControlServer({ service, creativeService = null, logger = console
         if (segments[4] === 'voice-approve') return json(response, 200, await creativeService.approveVoice(args));
         if (segments[4] === 'voice-upload') return json(response, 201, await creativeService.uploadVoice(args));
         if (segments[4] === 'start') return json(response, 202, await creativeService.start(args));
+      }
+      if (lockedKeyframeService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'v2.10'
+        && segments[2] === 'creative-drafts' && segments[4] === 'locked-keyframe' && segments.length === 6) {
+        const action = segments[5];
+        const large = action === 'execute';
+        const args = { id: segments[3], ...await readJson(request, large ? 36 * 1024 * 1024 : BODY_LIMIT) };
+        if (action === 'preflight') return json(response, 200, await lockedKeyframeService.preflightKeyframe(args));
+        if (action === 'execute') return json(response, 202, await lockedKeyframeService.executeKeyframe(args));
+        if (action === 'approve') return json(response, 200, await lockedKeyframeService.approveKeyframe(args));
+        if (action === 'video-preflight') return json(response, 200, await lockedKeyframeService.preflightFirstVideo(args));
+        if (action === 'video-start') return json(response, 202, await lockedKeyframeService.startFirstVideo(args));
       }
       if (request.method === 'GET' && url.pathname === '/api/health') return json(response, 200, await service.health());
       if (request.method === 'GET' && url.pathname === '/api/overview') return json(response, 200, await service.overview());

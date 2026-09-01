@@ -159,6 +159,230 @@ class V210PostgresRepository {
       WHERE draft_id=$1 AND workspace_id=$2 AND brand_id=$3 ORDER BY attempt DESC`, [id, workspaceId, brandId]);
     return result.rows;
   }
+
+  async ensureLockedWorkflow({ draftId, workspaceId, brandId, shotId, assetId, canonicalIntentFingerprint, actor }) {
+    const productionId = crypto.randomUUID();
+    await this.db.query(`INSERT INTO v2_10.locked_keyframe_workflows
+      (draft_id,workspace_id,brand_id,production_id,opening_shot_id,opening_asset_id,canonical_intent_fingerprint,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(draft_id,opening_shot_id) DO NOTHING`,
+    [draftId, workspaceId, brandId, productionId, shotId, assetId, canonicalIntentFingerprint, actor]);
+    const result = await this.db.query(`SELECT * FROM v2_10.locked_keyframe_workflows
+      WHERE draft_id=$1 AND workspace_id=$2 AND brand_id=$3 AND opening_shot_id=$4`,
+    [draftId, workspaceId, brandId, shotId]);
+    const row = result.rows[0];
+    if (!row || row.opening_asset_id !== assetId || row.canonical_intent_fingerprint !== canonicalIntentFingerprint) {
+      throw conflict('LOCKED_WORKFLOW_CONFLICT', 'Existing locked-keyframe workflow belongs to different canonical intent');
+    }
+    return row;
+  }
+
+  async getLockedWorkflow({ draftId, workspaceId, brandId, shotId = null }) {
+    try {
+      const result = await this.db.query(`SELECT * FROM v2_10.locked_keyframe_workflows
+        WHERE draft_id=$1 AND workspace_id=$2 AND brand_id=$3 AND ($4::text IS NULL OR opening_shot_id=$4)
+        ORDER BY created_at DESC LIMIT 1`, [draftId, workspaceId, brandId, shotId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      if (['42P01','3F000'].includes(error.code)) return null;
+      throw error;
+    }
+  }
+
+  async saveLockedStagePreflight({ workflowId, workspaceId, brandId, stage, draftRevision,
+    keyframe = null, plan, actor }) {
+    const result = await this.db.query(`INSERT INTO v2_10.locked_stage_preflights
+      (workflow_id,workspace_id,brand_id,stage,draft_revision,keyframe_id,keyframe_version,
+       keyframe_content_hash,fingerprint,execution_plan,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT(workflow_id,stage,fingerprint) DO NOTHING RETURNING *`,
+    [workflowId, workspaceId, brandId, stage, draftRevision, keyframe?.id || null,
+      keyframe?.version || null, keyframe?.content_hash || null, plan.fingerprint, plan, actor]);
+    if (result.rows[0]) return result.rows[0];
+    return (await this.db.query(`SELECT * FROM v2_10.locked_stage_preflights
+      WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4 AND fingerprint=$5`,
+    [workflowId, workspaceId, brandId, stage, plan.fingerprint])).rows[0];
+  }
+
+  async getLockedStagePreflight({ id, workflowId, workspaceId, brandId, stage }) {
+    const result = await this.db.query(`SELECT * FROM v2_10.locked_stage_preflights
+      WHERE id=$1 AND workflow_id=$2 AND workspace_id=$3 AND brand_id=$4 AND stage=$5`,
+    [id, workflowId, workspaceId, brandId, stage]);
+    return result.rows[0] || null;
+  }
+
+  async claimLockedStage({ workflowId, workspaceId, brandId, stage, preflightId }) {
+    const result = await this.db.query(`INSERT INTO v2_10.locked_stage_attempts
+      (workflow_id,workspace_id,brand_id,stage,preflight_id,status,boundary_state)
+      VALUES($1,$2,$3,$4,$5,'RUNNING','NOT_CROSSED')
+      ON CONFLICT(workflow_id,stage,preflight_id) DO NOTHING RETURNING *`,
+    [workflowId, workspaceId, brandId, stage, preflightId]);
+    if (result.rows[0]) return result.rows[0];
+    const existing = (await this.db.query(`SELECT * FROM v2_10.locked_stage_attempts
+      WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4 AND preflight_id=$5`,
+    [workflowId, workspaceId, brandId, stage, preflightId])).rows[0];
+    if (existing?.status === 'SUCCEEDED') return { ...existing, reused: true };
+    throw conflict('LOCKED_STAGE_ALREADY_ATTEMPTED', 'This immutable stage preflight already has an active, failed, or ambiguous attempt');
+  }
+
+  async markLockedStageBoundary({ attemptId, providerRequestId = null }) {
+    const result = await this.db.query(`UPDATE v2_10.locked_stage_attempts
+      SET boundary_state='MAY_HAVE_STARTED',provider_request_id=coalesce($2,provider_request_id)
+      WHERE id=$1 AND status='RUNNING' AND boundary_state='NOT_CROSSED' RETURNING *`, [attemptId, providerRequestId]);
+    if (!result.rows[0]) throw conflict('LOCKED_STAGE_FENCED', 'Locked stage lost ownership before provider boundary');
+    return result.rows[0];
+  }
+
+  async recordLockedStageProviderRequest({ attemptId, providerRequestId }) {
+    const result = await this.db.query(`UPDATE v2_10.locked_stage_attempts SET provider_request_id=$2
+      WHERE id=$1 AND status='RUNNING' AND boundary_state='MAY_HAVE_STARTED' RETURNING *`,
+    [attemptId, providerRequestId]);
+    if (!result.rows[0]) throw conflict('LOCKED_STAGE_FENCED', 'Locked stage lost ownership while recording provider request identity');
+    return result.rows[0];
+  }
+
+  async finishLockedStage({ attemptId, status, boundaryState, providerRequestId = null, keyframeId = null,
+    result = {}, error = {} }) {
+    const finished = await this.db.query(`UPDATE v2_10.locked_stage_attempts SET status=$2,boundary_state=$3,
+      provider_request_id=coalesce($4,provider_request_id),keyframe_id=coalesce($5,keyframe_id),
+      result=$6,error=$7,completed_at=now() WHERE id=$1 AND status='RUNNING' RETURNING *`,
+    [attemptId, status, boundaryState, providerRequestId, keyframeId, result, error]);
+    if (!finished.rows[0]) throw conflict('LOCKED_STAGE_FENCED', 'Locked stage attempt is no longer active');
+    return finished.rows[0];
+  }
+
+  async storeKeyframeArtifact(value) {
+    if (!this.storage || !Buffer.isBuffer(value.bytes) || !value.bytes.length) {
+      throw conflict('KEYFRAME_STORAGE_REQUIRED', 'Immutable keyframe bytes and storage are required');
+    }
+    const actualContentHash = crypto.createHash('sha256').update(value.bytes).digest('hex');
+    if (value.contentHash !== actualContentHash) throw conflict('KEYFRAME_CONTENT_HASH_MISMATCH',
+      'Keyframe bytes do not match the proposed immutable content hash');
+    const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`${value.workflowId}:${value.assetId}`]);
+      const prior = await client.query(`SELECT id,version FROM v2_10.keyframe_artifacts
+        WHERE workflow_id=$1 AND asset_id=$2 ORDER BY version DESC LIMIT 1`, [value.workflowId, value.assetId]);
+      const version = Number(prior.rows[0]?.version || 0) + 1;
+      const storageKey = `workspaces/${value.workspaceId}/brands/${value.brandId}/productions/${value.productionId}`
+        + `/keyframes/${value.assetId}/v${version}-${value.contentHash}`;
+      if (!(await this.storage.exists({ key: storageKey }))) {
+        await this.storage.put({ key: storageKey, bytes: value.bytes,
+          metadata: { contentType: value.contentType, immutable: true, version, productionId: value.productionId } });
+      }
+      const result = await client.query(`INSERT INTO v2_10.keyframe_artifacts
+        (workflow_id,workspace_id,brand_id,production_id,shot_id,asset_id,version,predecessor_id,
+         source_type,provider,model,generation_settings,prompt_fingerprint,storage_key,content_hash,
+         content_type,size_bytes,width,height,provider_request_id,provenance,created_by)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+      [value.workflowId, value.workspaceId, value.brandId, value.productionId, value.shotId, value.assetId,
+        version, prior.rows[0]?.id || null, value.sourceType, value.provider, value.model,
+        value.generationSettings || {}, value.promptFingerprint, storageKey, value.contentHash,
+        value.contentType, value.bytes.length, value.width, value.height, value.providerRequestId || null,
+        value.provenance || {}, value.actor]);
+      await client.query(`UPDATE v2_10.locked_keyframe_workflows SET state='KEYFRAME_READY'
+        WHERE id=$1 AND workspace_id=$2 AND brand_id=$3`, [value.workflowId, value.workspaceId, value.brandId]);
+      await client.query('COMMIT'); return result.rows[0];
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { if (client !== this.db) client.release(); }
+  }
+
+  async recordKeyframeValidation({ keyframeId, workspaceId, brandId, shotPlanFingerprint,
+    result, semanticExternalCalls, evaluatorProvider, evaluatorModel }) {
+    const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
+    try {
+      await client.query('BEGIN');
+      const inserted = await client.query(`INSERT INTO v2_10.keyframe_validation_events
+        (keyframe_id,workspace_id,brand_id,shot_plan_fingerprint,status,result,semantic_external_calls,evaluator_provider,evaluator_model)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(keyframe_id,shot_plan_fingerprint) DO NOTHING RETURNING *`,
+      [keyframeId, workspaceId, brandId, shotPlanFingerprint, result.status, result,
+        semanticExternalCalls, evaluatorProvider, evaluatorModel]);
+      const row = inserted.rows[0] || (await client.query(`SELECT * FROM v2_10.keyframe_validation_events
+        WHERE keyframe_id=$1 AND workspace_id=$2 AND brand_id=$3 AND shot_plan_fingerprint=$4`,
+      [keyframeId, workspaceId, brandId, shotPlanFingerprint])).rows[0];
+      if (row?.status === 'PASS') {
+        const advanced = await client.query(`UPDATE v2_10.locked_keyframe_workflows w
+          SET state='AWAITING_HUMAN_APPROVAL' FROM v2_10.keyframe_artifacts k
+          WHERE k.id=$1 AND w.id=k.workflow_id AND w.workspace_id=$2 AND w.brand_id=$3
+            AND w.state='KEYFRAME_READY' RETURNING w.id`, [keyframeId, workspaceId, brandId]);
+        if (!advanced.rows[0]) throw conflict('KEYFRAME_VALIDATION_STATE_CONFLICT',
+          'Keyframe validation could not advance the exact workflow state');
+      }
+      await client.query('COMMIT'); return row;
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { if (client !== this.db) client.release(); }
+  }
+
+  async getKeyframe({ id, workspaceId, brandId }) {
+    const result = await this.db.query(`SELECT k.*,v.id AS validation_event_id,v.status AS validation_status,v.result AS validation_result,
+      a.id AS approval_event_id,a.decision AS approval_decision,a.actor AS approval_actor,a.decided_at AS approved_at
+      FROM v2_10.keyframe_artifacts k
+      LEFT JOIN LATERAL (SELECT * FROM v2_10.keyframe_validation_events WHERE keyframe_id=k.id ORDER BY created_at DESC LIMIT 1) v ON true
+      LEFT JOIN v2_10.keyframe_approval_events a ON a.keyframe_id=k.id
+      WHERE k.id=$1 AND k.workspace_id=$2 AND k.brand_id=$3`, [id, workspaceId, brandId]);
+    return result.rows[0] || null;
+  }
+
+  async approveKeyframe({ keyframeId, workspaceId, brandId, actor, reason = null }) {
+    const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
+    try {
+      await client.query('BEGIN');
+      const keyframe = (await client.query(`SELECT k.*,v.id AS validation_event_id,v.status AS validation_status
+        FROM v2_10.keyframe_artifacts k LEFT JOIN LATERAL (
+          SELECT * FROM v2_10.keyframe_validation_events WHERE keyframe_id=k.id ORDER BY created_at DESC LIMIT 1
+        ) v ON true WHERE k.id=$1 AND k.workspace_id=$2 AND k.brand_id=$3 FOR UPDATE OF k`,
+      [keyframeId, workspaceId, brandId])).rows[0];
+      if (!keyframe || keyframe.validation_status !== 'PASS') throw conflict('KEYFRAME_VALIDATION_REQUIRED',
+        'A current PASS validation is required before keyframe approval');
+      const inserted = await client.query(`INSERT INTO v2_10.keyframe_approval_events
+        (keyframe_id,validation_event_id,workspace_id,brand_id,decision,actor,reason)
+        VALUES($1,$2,$3,$4,'APPROVED',$5,$6) ON CONFLICT(keyframe_id) DO NOTHING RETURNING *`,
+      [keyframeId, keyframe.validation_event_id, workspaceId, brandId, actor, reason]);
+      const approval = inserted.rows[0] || (await client.query(`SELECT * FROM v2_10.keyframe_approval_events
+        WHERE keyframe_id=$1 AND workspace_id=$2 AND brand_id=$3`, [keyframeId, workspaceId, brandId])).rows[0];
+      if (approval?.decision !== 'APPROVED') throw conflict('KEYFRAME_APPROVAL_CONFLICT',
+        'Keyframe already has a different immutable decision');
+      const advanced = await client.query(`UPDATE v2_10.locked_keyframe_workflows w SET state='KEYFRAME_APPROVED'
+        FROM v2_10.keyframe_artifacts k WHERE k.id=$1 AND w.id=k.workflow_id
+        AND w.workspace_id=$2 AND w.brand_id=$3 AND w.state IN ('AWAITING_HUMAN_APPROVAL','KEYFRAME_APPROVED') RETURNING w.id`,
+      [keyframeId, workspaceId, brandId]);
+      if (!advanced.rows[0]) throw conflict('KEYFRAME_APPROVAL_STATE_CONFLICT',
+        'Keyframe approval could not advance the exact workflow state');
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { if (client !== this.db) client.release(); }
+    return this.getKeyframe({ id: keyframeId, workspaceId, brandId });
+  }
+
+  async recordFirstVideoResult({ workflowId, workspaceId, brandId, accepted, result }) {
+    const state = accepted ? 'FIRST_VIDEO_ACCEPTED' : 'FIRST_VIDEO_FAILED';
+    const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(`UPDATE v2_10.locked_keyframe_workflows SET state=$4
+        WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND state IN ('KEYFRAME_APPROVED','FIRST_VIDEO_RUNNING') RETURNING *`,
+      [workflowId, workspaceId, brandId, state]);
+      if (!updated.rows[0]) throw conflict('LOCKED_WORKFLOW_STATE_CONFLICT',
+        'First-video result cannot be recorded in the current workflow state');
+      if (accepted) await client.query(`UPDATE v2_10.creative_drafts SET status='DRAFT',final_preflight=NULL,
+        preflight_fingerprint=NULL,preflight_request=NULL WHERE id=$1 AND workspace_id=$2 AND brand_id=$3
+          AND status='PREFLIGHT_READY'`, [updated.rows[0].draft_id, workspaceId, brandId]);
+      await client.query('COMMIT'); return { ...updated.rows[0], firstVideoResult: result };
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { if (client !== this.db) client.release(); }
+  }
+
+  async markLockedContinuationStarted({ draftId, workspaceId, brandId, productionId }) {
+    try {
+      const result = await this.db.query(`UPDATE v2_10.locked_keyframe_workflows SET state='CONTINUATION_STARTED'
+        WHERE draft_id=$1 AND workspace_id=$2 AND brand_id=$3 AND production_id=$4
+          AND state='FIRST_VIDEO_ACCEPTED' RETURNING *`, [draftId, workspaceId, brandId, productionId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      if (['42P01','3F000'].includes(error.code)) return null;
+      throw error;
+    }
+  }
 }
 
 module.exports = { V210PostgresRepository };
