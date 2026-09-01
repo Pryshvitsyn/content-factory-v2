@@ -4,6 +4,7 @@ const path = require('node:path');
 const { AvatarStudioError } = require('./domain');
 
 const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+const MAX_EMBEDDED_TEXT_CHARS = 20000;
 const MIME_EXTENSIONS = Object.freeze({
   'image/jpeg': ['.jpg','.jpeg'], 'image/png': ['.png'], 'image/webp': ['.webp'], 'image/gif': ['.gif'],
   'video/mp4': ['.mp4','.m4v'], 'video/webm': ['.webm'], 'video/quicktime': ['.mov'],
@@ -56,9 +57,82 @@ function imageDimensions(bytes, mimeType) {
   return { width: null, height: null };
 }
 
-function printableMetadata(bytes, limit = 1024 * 1024) {
-  return bytes.subarray(0, Math.min(bytes.length, limit)).toString('latin1')
-    .replace(/[^\x20-\x7e\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 20000);
+function printableMetadata(value, limit = MAX_EMBEDDED_TEXT_CHARS) {
+  const text = Buffer.isBuffer(value) ? value.toString('utf8') : String(value || '');
+  return text.replace(/[^\x20-\x7e\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
+}
+
+function extractPngText(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 20) return '';
+  const parts = []; let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset); const dataStart = offset + 8; const dataEnd = dataStart + length;
+    const next = dataEnd + 4;
+    if (length > MAX_ASSET_BYTES || next > bytes.length) break;
+    const type = bytes.subarray(offset + 4, offset + 8).toString('ascii'); const data = bytes.subarray(dataStart, dataEnd);
+    if (type === 'tEXt') {
+      const separator = data.indexOf(0); if (separator >= 0 && separator + 1 < data.length) parts.push(data.subarray(separator + 1).toString('latin1'));
+    } else if (type === 'iTXt') {
+      const keywordEnd = data.indexOf(0); let cursor = keywordEnd + 1;
+      if (keywordEnd >= 0 && cursor + 2 <= data.length) {
+        const compressionFlag = data[cursor]; cursor += 2;
+        const languageEnd = data.indexOf(0, cursor); if (languageEnd >= 0) cursor = languageEnd + 1; else cursor = data.length;
+        const translatedEnd = data.indexOf(0, cursor); if (translatedEnd >= 0) cursor = translatedEnd + 1; else cursor = data.length;
+        if (compressionFlag === 0 && cursor < data.length) parts.push(data.subarray(cursor).toString('utf8'));
+      }
+    }
+    offset = next;
+    if (type === 'IEND') break;
+    if (parts.join('\n').length >= MAX_EMBEDDED_TEXT_CHARS) break;
+  }
+  return printableMetadata(parts.join('\n'));
+}
+
+function extractJpegText(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return '';
+  const parts = []; let offset = 2;
+  const xmpHeader = Buffer.from('http://ns.adobe.com/xap/1.0/\0','ascii');
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) break;
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+    if (offset >= bytes.length) break;
+    const marker = bytes[offset]; offset += 1;
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > bytes.length) break;
+    const length = bytes.readUInt16BE(offset); if (length < 2) break;
+    const dataStart = offset + 2; const dataEnd = offset + length; if (dataEnd > bytes.length) break;
+    const data = bytes.subarray(dataStart, dataEnd);
+    if (marker === 0xfe) parts.push(data.toString('latin1'));
+    else if (marker === 0xe1 && data.length > xmpHeader.length && data.subarray(0,xmpHeader.length).equals(xmpHeader)) {
+      parts.push(data.subarray(xmpHeader.length).toString('utf8'));
+    }
+    offset = dataEnd;
+    if (parts.join('\n').length >= MAX_EMBEDDED_TEXT_CHARS) break;
+  }
+  return printableMetadata(parts.join('\n'));
+}
+
+function extractWebpText(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 20 || bytes.subarray(0,4).toString('ascii') !== 'RIFF'
+    || bytes.subarray(8,12).toString('ascii') !== 'WEBP') return '';
+  const parts = []; let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const type = bytes.subarray(offset,offset + 4).toString('ascii'); const length = bytes.readUInt32LE(offset + 4);
+    const dataStart = offset + 8; const dataEnd = dataStart + length; if (dataEnd > bytes.length) break;
+    if (type === 'XMP ') parts.push(bytes.subarray(dataStart,dataEnd).toString('utf8'));
+    offset = dataEnd + (length % 2);
+    if (parts.join('\n').length >= MAX_EMBEDDED_TEXT_CHARS) break;
+  }
+  return printableMetadata(parts.join('\n'));
+}
+
+function extractEmbeddedText(bytes, mimeType) {
+  const mime = normalizedMime(mimeType);
+  if (mime === 'image/png') return extractPngText(bytes);
+  if (mime === 'image/jpeg') return extractJpegText(bytes);
+  if (mime === 'image/webp') return extractWebpText(bytes);
+  return '';
 }
 
 function decodeBase64(value) {
@@ -84,20 +158,21 @@ async function inspectMedia({ bytes, filename, mimeType, mediaInspector = null }
     findings.push({ severity: 'BLOCK', code: 'MIME_SIGNATURE_MISMATCH' });
   }
   let dimensions = { width: null, height: null }; let durationMs = null;
+  let embeddedText = extractEmbeddedText(bytes, mime);
   if (kind === 'image' && detectedMime) dimensions = imageDimensions(bytes, mime);
   if (mediaInspector && kind && findings.every((item) => item.severity !== 'BLOCK')) {
     try {
       const probe = await mediaInspector.inspect({ bytes, contentType: mime, kind });
       dimensions = { width: probe.width || dimensions.width, height: probe.height || dimensions.height };
       durationMs = Number.isFinite(probe.durationMs) ? probe.durationMs : null;
+      if (probe.embeddedText) embeddedText = printableMetadata([embeddedText,probe.embeddedText].filter(Boolean).join('\n'));
     } catch (error) {
       findings.push({ severity: 'BLOCK', code: error.code || 'MEDIA_UNREADABLE' });
     }
   }
   return Object.freeze({ mimeType: mime, extension, kind, detectedMime, byteSize: bytes.length,
-    width: dimensions.width || null, height: dimensions.height || null, durationMs, findings: Object.freeze(findings),
-    embeddedText: printableMetadata(bytes) });
+    width: dimensions.width || null, height: dimensions.height || null, durationMs, findings: Object.freeze(findings), embeddedText });
 }
 
-module.exports = { MAX_ASSET_BYTES, MIME_EXTENSIONS, decodeBase64, extensionOf, imageDimensions, inspectMedia,
+module.exports = { MAX_ASSET_BYTES, MIME_EXTENSIONS, decodeBase64, extensionOf, extractEmbeddedText, imageDimensions, inspectMedia,
   mediaKind, normalizedMime, printableMetadata, sniffMime };
