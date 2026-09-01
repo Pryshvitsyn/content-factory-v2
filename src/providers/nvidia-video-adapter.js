@@ -63,7 +63,7 @@ class NvidiaVideoAdapter {
     ...extra
   } = {}) {
     if (!prompt || typeof prompt !== 'string') {
-      throw new ProviderError('NVIDIA video generation requires a prompt', { provider: 'nvidia', model });
+      throw new ProviderError('NVIDIA video generation requires a non-empty prompt', { provider: 'nvidia', model });
     }
     if (!this.apiKey) {
       throw new ProviderError('NVIDIA_API_KEY is required for video generation', { provider: 'nvidia', model });
@@ -162,4 +162,8 @@ class NvidiaVideoAdapter {
   }
 }
 
-module.exports = { NvidiaVideoAdapter };
+function createNvidiaVideoAdapter(options = {}) {
+  return new NvidiaVideoAdapter(options);
+}
+
+module.exports = { NvidiaVideoAdapter, createNvidiaVideoAdapter };
