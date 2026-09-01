@@ -37,13 +37,17 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
     const before=Number((await db.query('SELECT count(*) AS count FROM avatar_studio.characters WHERE id=$1',[CHARACTER])).rows[0].count);
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab_controlled_execution.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab_controlled_execution.sql'),'utf8'));
     const after=Number((await db.query('SELECT count(*) AS count FROM avatar_studio.characters WHERE id=$1',[CHARACTER])).rows[0].count);
     assert.equal(before,1);assert.equal(after,1,'populated V1.1 avatar must survive upgrade and reapplication');
     for(const table of ['identity_lock_versions','passport_generation_specs','passport_candidates','passport_qa_snapshots',
-      'passport_candidate_review_events','passport_certification_events'])assert.equal((await db.query('SELECT to_regclass($1) AS name',[`avatar_studio.${table}`])).rows[0].name,`avatar_studio.${table}`);
+      'passport_candidate_review_events','passport_certification_events','passport_generation_executions','passport_execution_events',
+      'passport_execution_approvals','passport_provider_attempts','passport_provider_attempt_events','passport_execution_results'])
+      assert.equal((await db.query('SELECT to_regclass($1) AS name',[`avatar_studio.${table}`])).rows[0].name,`avatar_studio.${table}`);
     await assert.rejects(()=>db.query(`UPDATE avatar_studio.level_states SET current_level=1,level_name='PASSPORT' WHERE character_id=$1`,[CHARACTER]),
       (error)=>error.code==='P0001'&&error.message.includes('CERTIFIED_PASSPORT_REQUIRED'));
     assert.equal((await db.query('SELECT current_level FROM avatar_studio.level_states WHERE character_id=$1',[CHARACTER])).rows[0].current_level,0);
-    console.log('Avatar Studio V1.2 populated upgrade + migration reapplication + database L0 guard passed');
+    console.log('Avatar Studio V1.2.1 populated upgrade + migration reapplication + immutable execution tables + database L0 guard passed');
   }finally{await db.end();}}
 main().catch((error)=>{console.error(error);process.exitCode=1;});

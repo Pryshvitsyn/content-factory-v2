@@ -111,6 +111,10 @@ describe('Avatar Studio dashboard', () => {
     fireEvent.change(screen.getByLabelText('Passport brand scope'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Mara · L0'});
     fireEvent.change(screen.getByLabelText('Passport avatar'),{target:{value:'avatar-1'}});await screen.findByAltText('Passport candidate A');
     expect(screen.getByText('CERTIFIED PASSPORT REQUIRED')).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'COMPARE'}));
+    expect(screen.getByLabelText('Maximum allowed cost')).toBeTruthy();
+    expect(screen.getByRole('button',{name:'RUN FRESH COST PREFLIGHT'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'APPROVE EXECUTION'}).disabled).toBe(true);
+    expect(screen.getByRole('button',{name:'GENERATE PASSPORT CANDIDATES'}).disabled).toBe(true);
     for(const label of ['Clearly the source identity','Clearly the same person','Profile cannot be mistaken for another human',
       'All three are one identity','I explicitly certify this exact immutable candidate and acknowledge its recorded QA warnings.']) {
       fireEvent.click(screen.getByLabelText(label));

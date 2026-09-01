@@ -28,6 +28,11 @@ async function main() {
     async passportLab(value) { calls.push(['passportLab', value]); return { id: value.avatarId, currentLevel: 0 }; },
     async createIdentityLock(value) { calls.push(['identityLock', value]); return { identityLock: { id: 'lock-1' } }; },
     async planPassportGeneration(value) { calls.push(['passportPlan', value]); return { id: 'plan-1', paidProviderCalls: 0, externalGenerationCalls: 0 }; },
+    async preflightPassportGeneration(value) { calls.push(['passportPreflight',value]); return {executionId:'execution-1',providerCalls:0}; },
+    async approvePassportGeneration(value) { calls.push(['passportApprove',value]); return {status:'APPROVED',providerCalls:0}; },
+    async generatePassportCandidates(value) { calls.push(['passportGenerate',value]); providerCalls+=1; return {status:'GENERATED'}; },
+    async passportExecution(value) { calls.push(['passportExecution',value]); return {id:value.id,status:'APPROVED'}; },
+    async cancelPassportExecution(value) { calls.push(['passportCancel',value]); return {status:'CANCELLED',providerCalls:0}; },
     async uploadPassportCandidate(value) { calls.push(['passportCandidate', value]); return { candidate: { id: 'candidate-1' }, externalGenerationCalls: 0 }; },
     async runPassportQa(value) { calls.push(['passportQa', value]); return { qaSnapshot: { id: 'qa-1' }, automatedCertification: false }; },
     async reviewPassportCandidate(value) { calls.push(['passportReview', value]); return { reviewEvent: { action: value.action } }; },
@@ -60,6 +65,14 @@ async function main() {
       { brandId: 'brand-1', humanApproval: true })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-generation-plans',
       { brandId: 'brand-1', sourceAssetIds: ['source-1'] })).status, 201);
+    const executionScope={workspaceId:'workspace-1',brandId:'brand-1',vertical:'TRAVEL',identityVersionId:'identity-1'};
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/passport-generation-plans/plan-1/preflight',
+      {...executionScope,maximumAllowedCost:5,executionCandidateCount:1})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/passport-executions/execution-1/approve',
+      {...executionScope,explicitConfirmation:true,unknownCostAcknowledged:true})).status,201);
+    assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/passport-executions/execution-1?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1')).status,200);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/passport-executions/execution-1/generate',executionScope)).status,202);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/passport-executions/execution-2/cancel',executionScope)).status,201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-candidates',
       { brandId: 'brand-1', generationSpecId: 'plan-1', intakeId: 'intake-1' })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-candidates/candidate-1/qa',
@@ -95,9 +108,11 @@ async function main() {
     assert.equal(calls.find(([name]) => name === 'passportQa')[1].candidateId, 'candidate-1');
     assert.equal(calls.find(([name]) => name === 'passportCandidateCertify')[1].candidateId, 'candidate-1');
     assert.deepEqual(calls.find(([name]) => name === 'useIntake')[1].roles, ['IDENTITY']);
-    assert.equal(providerCalls, 0);
+    assert.equal(calls.find(([name])=>name==='passportPreflight')[1].generationSpecId,'plan-1');
+    assert.equal(calls.find(([name])=>name==='passportGenerate')[1].executionId,'execution-1');
+    assert.equal(providerCalls, 1,'only explicit Generate reaches the mocked execution boundary');
   } finally { await new Promise((resolve) => server.close(resolve)); }
-  console.log('Avatar Studio dashboard API routing passed; provider calls = 0');
+  console.log('Avatar Studio dashboard API routing passed; plan/preflight/approval provider calls = 0; explicit mocked Generate calls = 1; real provider calls = 0');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

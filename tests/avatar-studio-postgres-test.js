@@ -9,6 +9,8 @@ const { AvatarStudioService } = require('../src/avatar-studio/service');
 const { AvatarAssetIntakeService } = require('../src/avatar-studio/asset-intake-service');
 const { ArtifactService } = require('../src/artifacts/artifact-service');
 const { FilesystemStorageAdapter } = require('../src/storage/storage-adapter');
+const { PassportExecutionService } = require('../src/avatar-studio/passport-execution-service');
+const { ProviderCatalog } = require('../src/v2.8/provider-catalog');
 
 const WORKSPACE_ID = 'a0000000-0000-4000-8000-000000000001';
 const BRAND_ID = 'a0000000-0000-4000-8000-000000000002';
@@ -32,12 +34,14 @@ async function main() {
     password: process.env.PGPASSWORD, database: process.env.PGDATABASE,
   });
   let paidProviderCalls = 0;
+  let mockProviderCalls = 0;
   const storageRoot = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'avatar-studio-pg-artifacts-'));
   try {
     await db.query('DROP SCHEMA IF EXISTS avatar_studio CASCADE');
     await db.query(await fs.readFile(path.resolve('migrations/20260831_avatar_studio_v1.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260831_avatar_studio_v1_1_asset_intake.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab_controlled_execution.sql'), 'utf8'));
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Avatar Studio disposable') ON CONFLICT(id) DO NOTHING`, [WORKSPACE_ID]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Attune Avatar Test','attune-avatar-test','ACTIVE')
       ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [BRAND_ID, WORKSPACE_ID]);
@@ -46,7 +50,13 @@ async function main() {
     const storage = new FilesystemStorageAdapter({ root: storageRoot });
     const intakeService = new AvatarAssetIntakeService({ repository, artifactService: new ArtifactService({ storage }),
       storage, actor: 'avatar-test-operator' });
-    const service = new AvatarStudioService({ repository, assetIntakeService: intakeService, actor: 'avatar-test-operator' });
+    const providerCatalog = new ProviderCatalog({ env: { OPENAI_API_KEY: 'mock-provider-only-never-sent' } });
+    const passportExecutionService = new PassportExecutionService({ repository, providerCatalog,
+      providerGateway: { async generate() { mockProviderCalls += 1; return { provider:'openai-media',model:'gpt-image-1',
+        output:composite,contentType:'image/png',requestId:`mock-postgres-${mockProviderCalls}`,usage:null }; } },
+      assetIntakeService:intakeService,storage,actor:'avatar-test-operator' });
+    const service = new AvatarStudioService({ repository, assetIntakeService: intakeService, providerCatalog,
+      passportExecutionService, actor: 'avatar-test-operator' });
     const l0 = await service.create({ vertical: 'PSYCHOLOGY_WELLBEING', brandIds: [BRAND_ID], internalName: 'Mara Fixture',
       subjectType: 'SYNTHETIC', identity: { agePresentation: 'TO_BE_DEFINED', personality: 'TO_BE_DEFINED',
         role: 'behavioral coach', languages: ['und'], visualDirection: 'TO_BE_DEFINED', permanentAttributes: {},
@@ -104,12 +114,29 @@ async function main() {
       WHERE character_id=$1 AND modality='FACE'`,[real.id])).rows[0].count),2,'grant and revocation must both remain append-only');
 
     const passportPlan = await service.planPassportGeneration({ avatarId:l0.id,brandId:BRAND_ID,
-      sourceAssetIds:[intakeSource.source.id],requestedCandidateCount:4 });
+      sourceAssetIds:[intakeSource.source.id],requestedCandidateCount:4,preferredProvider:'openai',preferredModel:'gpt-image-1' });
     assert.equal(passportPlan.plannedExternalCallCount,4); assert.equal(passportPlan.externalGenerationCalls,0);
     assert.equal(passportPlan.paidProviderCalls,0); assert.equal(passportPlan.costPlan.status,'UNKNOWN');
     assert.equal(passportPlan.executionAuthorized,false);
     const composite = Buffer.alloc(40); Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(composite);
     composite.writeUInt32BE(13,8); composite.write('IHDR',12,'ascii'); composite.writeUInt32BE(3000,16); composite.writeUInt32BE(1000,20);
+    const executionScope={workspaceId:l0.workspaceId,brandId:BRAND_ID,vertical:'PSYCHOLOGY_WELLBEING',avatarId:l0.id,
+      identityVersionId:identityLock.avatar.identityVersionId};
+    const preflight=await service.preflightPassportGeneration({...executionScope,generationSpecId:passportPlan.id,
+      executionCandidateCount:1,maximumAllowedCost:5});
+    assert.equal(mockProviderCalls,0); assert.equal(preflight.totalPlannedCalls,1); assert.equal(preflight.costPlan.status,'UNKNOWN');
+    await service.approvePassportGeneration({...executionScope,executionId:preflight.executionId,
+      explicitConfirmation:true,unknownCostAcknowledged:true}); assert.equal(mockProviderCalls,0);
+    const generatedMock=await service.generatePassportCandidates({...executionScope,executionId:preflight.executionId});
+    assert.equal(generatedMock.status,'GENERATED'); assert.equal(mockProviderCalls,1); assert.equal(generatedMock.successCount,1);
+    assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,'provider-generated + automatic QA remains L0');
+    for(const table of ['passport_generation_executions','passport_execution_approvals','passport_provider_attempts',
+      'passport_execution_results']) assert.equal(Number((await db.query(`SELECT count(*) AS count FROM avatar_studio.${table}`)).rows[0].count),1);
+    await assert.rejects(()=>db.query('UPDATE avatar_studio.passport_execution_approvals SET maximum_allowed_cost=10 WHERE execution_id=$1',
+      [preflight.executionId]),(error)=>error.code==='P0001');
+    await assert.rejects(()=>db.query(`UPDATE avatar_studio.passport_provider_attempt_events SET safe_error_message='mutated'
+      WHERE attempt_id=(SELECT id FROM avatar_studio.passport_provider_attempts WHERE execution_id=$1)`,[preflight.executionId]),
+    (error)=>error.code==='P0001','provider attempt evidence must be immutable');
     const candidates=[];
     for (const label of ['A','B','C','D']) {
       const candidateIntake=await service.intakeAsset({avatarId:l0.id,brandId:BRAND_ID,sourceType:'UPLOAD',
@@ -210,7 +237,7 @@ async function main() {
       internalName: 'Cross Workspace Forbidden', subjectType: 'SYNTHETIC', identity: { agePresentation: 'adult', personality: 'calm',
         role: 'host', languages: ['en'], visualDirection: 'portrait', prohibitedUses: ['deception'] },
       consent: { status: 'APPROVED', rightsBasis: 'SYNTHETIC_IDENTITY' } }), (error) => error.code === 'WORKSPACE_ISOLATION_VIOLATION');
-    console.log(`Avatar Studio PostgreSQL L0 -> L1 -> L7 passed (${l0.id}); durable multi-shot plan ${plan.id}; paid/external calls = 0`);
+    console.log(`Avatar Studio PostgreSQL L0 -> L1 -> L7 passed (${l0.id}); controlled mock Passport execution + immutable approval/result passed; durable multi-shot plan ${plan.id}; real paid/external calls = 0; mock provider calls = ${mockProviderCalls}`);
   } finally { await db.end(); await fs.rm(storageRoot,{ recursive:true,force:true }); }
 }
 
