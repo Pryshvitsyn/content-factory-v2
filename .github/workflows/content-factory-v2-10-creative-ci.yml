@@ -36,8 +36,8 @@ jobs:
         run: npm run test:v2.10.2
       - name: V2.10.3 incremental cross-shot continuity and safe reference orientation
         run: npm run test:v2.10.3
-      - name: V2.10.4 bounded source creative recovery
-        run: npm run test:v2.10.4
+      - name: V2.10.4.1 isolated bounded source recovery execution
+        run: npm run test:v2.10.4.1
       - name: V2.10.1 exact-identity recovered continuation
         run: node tests/v2.10.1-v210-resume-identity-test.js
       - name: Real LiveProductionService collision guard

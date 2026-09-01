@@ -5,7 +5,8 @@ const { buildProductionInput, stableFingerprint } = require('../v2.5/production-
 const { createProductionRuntime } = require('./production-runtime');
 const { buildOperatorProductionInput } = require('./operator-production-input');
 const { resolveQualityVideoProfile, qualityProfileFromSelection } = require('./quality-video-profile');
-const { buildShotRevision } = require('./shot-regeneration');
+const { buildShotRevision, buildSourceRecoveryExecutionInput,
+  SOURCE_RECOVERY_EXECUTION_PROJECTION_VERSION } = require('./shot-regeneration');
 const { brandMediaPreferences, resolveMediaStack } = require('../v2.9.2/media-stack');
 const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
 const { partialMediaPlan, reusableSemanticPass, retryPlan,
@@ -53,6 +54,34 @@ class ProductionCommandError extends Error {
     this.code = code;
     this.details = details;
   }
+}
+
+function boundedSourceRecoveryPlan(prepared, replacementAssetId) {
+  const assets = prepared.input?.assetPlan?.assets || [];
+  const plan = prepared.plan || {};
+  const counts = Object.freeze({
+    assets: assets.length,
+    replacementVideos: assets.filter((asset) => asset.kind === 'video'
+      && asset.asset_id === replacementAssetId).length,
+    videoGenerations: plan.expectedVideoGenerations || 0,
+    audioGenerations: plan.expectedAudioGenerations || 0,
+    paidProviderCalls: plan.expectedPaidProviderCalls || 0,
+    semanticEvaluations: plan.expectedSemanticEvaluations || 0,
+    continuityEvaluations: plan.expectedContinuityEvaluations || 0,
+    evaluatorCalls: plan.expectedQualityEvaluatorCalls || 0,
+    rendererJobs: plan.expectedRendererJobs || 0,
+    externalCalls: plan.expectedExternalServiceCalls
+      ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedQualityEvaluatorCalls || 0)),
+    maximumExternalCalls: plan.expectedExternalServiceCallCeiling
+      ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedMaxEvaluatorHttpAttempts || 0)),
+  });
+  const valid = counts.assets === 1 && counts.replacementVideos === 1 && counts.videoGenerations === 1
+    && counts.audioGenerations === 0 && counts.paidProviderCalls === 1 && counts.semanticEvaluations === 1
+    && counts.continuityEvaluations === 0 && counts.evaluatorCalls === 1 && counts.rendererJobs === 0
+    && counts.externalCalls === 2 && counts.maximumExternalCalls === 2;
+  if (!valid) throw new ProductionCommandError(409, 'SOURCE_RECOVERY_PLAN_INVALID',
+    'Bounded source recovery execution must contain one replacement video, one semantic evaluation, and no other work', counts);
+  return counts;
 }
 
 function operatorInputFromRaw(raw) {
@@ -524,48 +553,58 @@ class ProductionCommandService {
       if (error.code === 'SHOT_NOT_FOUND') throw new ProductionCommandError(404, error.code, error.message);
       throw error;
     }
-    this.assertCapability(revision.input);
-    const runtime = this.runtime(revision.input, { forceDryRun: true });
+    const executionInput = sourceRecovery ? buildSourceRecoveryExecutionInput(revision.input, {
+      sourceAssetId: revision.sourceAssetId, replacementAssetId: revision.replacementAssetId,
+      recoveryKind: recoveryReason, retryReason, revisionNo: revision.revisionNo,
+    }) : revision.input;
+    this.assertCapability(executionInput);
+    const runtime = this.runtime(executionInput, { forceDryRun: true });
     if (typeof runtime.service.prepareRevision !== 'function') throw new ProductionCommandError(500, 'SHOT_REVISION_RUNTIME_UNAVAILABLE', 'Runtime does not support immutable shot revisions');
-    const prepared = await runtime.service.prepareRevision({ input: revision.input, config: runtime.config, productionId });
+    const prepared = await runtime.service.prepareRevision({ input: executionInput, config: runtime.config, productionId });
     const expectedVideos = prepared.plan.expectedVideoGenerations || 0;
     const expectedAudio = prepared.plan.expectedAudioGenerations || 0;
     if (!sourceRecovery && (expectedVideos !== 1 || expectedAudio !== 0 || prepared.plan.expectedPaidProviderCalls !== 1)) {
       throw new ProductionCommandError(409, 'SHOT_REGENERATION_PLAN_INVALID', 'Per-shot preflight must reuse existing media and generate exactly one video asset');
     }
-    if (sourceRecovery && !revision.input.assetPlan.assets.some((asset) => asset.asset_id === revision.replacementAssetId
-      && asset.kind === 'video')) throw new ProductionCommandError(409, 'SOURCE_RECOVERY_PLAN_INVALID', 'Replacement video asset is missing');
-    if (sourceRecovery && (expectedVideos !== 1 || expectedAudio !== 0 || prepared.plan.expectedPaidProviderCalls !== 1)) {
-      throw new ProductionCommandError(409, 'SOURCE_RECOVERY_PLAN_INVALID',
-        'Bounded source recovery must generate exactly one video, no audio, and no other paid media');
-    }
-    return { source, revision, prepared, geometryRecovery, creativeRecovery, sourceRecovery,
+    const recoveryPlan = sourceRecovery ? boundedSourceRecoveryPlan(prepared, revision.replacementAssetId) : null;
+    return { source, revision, executionInput, prepared, recoveryPlan, geometryRecovery, creativeRecovery, sourceRecovery,
       recoveryKind: sourceRecovery ? recoveryReason : null, retryReason, correctiveInstruction,
       creativeRecoveryContext: creativeFailure?.context || null };
   }
 
   async preflightShotRegeneration(args) {
     const command = await this.prepareShotRegeneration(args);
-    return Object.freeze({ preflightId: command.revision.input.fingerprint, productionId: args.productionId,
+    const plan = command.prepared.plan;
+    return Object.freeze({ preflightId: command.executionInput.fingerprint, productionId: args.productionId,
       shotId: args.shotId, sourceAssetId: command.revision.sourceAssetId,
       replacementAssetId: command.revision.replacementAssetId, revisionNo: command.revision.revisionNo,
-      expectedVideoGenerations: 1, expectedAudioGenerations: 0, expectedProviderCalls: 1,
-      expectedSemanticEvaluations: command.sourceRecovery ? 1 : command.prepared.plan.expectedSemanticEvaluations || 0,
-      expectedContinuityEvaluations: 0,
-      expectedEvaluatorCalls: command.sourceRecovery ? 1 : command.prepared.plan.expectedQualityEvaluatorCalls || 0,
-      expectedExternalCalls: command.sourceRecovery ? 2 : 1 + (command.prepared.plan.expectedQualityEvaluatorCalls || 0),
-      maximumExternalCalls: command.sourceRecovery ? 2 : 1 + (command.prepared.plan.expectedQualityEvaluatorCalls || 0),
-      semanticEvaluatorProvider: command.prepared.plan.semanticEvaluatorProvider || null,
-      semanticEvaluatorModel: command.prepared.plan.semanticEvaluatorModel || null,
-      provider: command.prepared.plan.provider, model: command.prepared.plan.model,
-      resolution: command.prepared.plan.resolution, estimatedCost: command.prepared.plan.estimatedCost ?? null,
-      costStatus: command.prepared.plan.costStatus || 'UNKNOWN',
+      expectedVideoGenerations: plan.expectedVideoGenerations || 0,
+      expectedAudioGenerations: plan.expectedAudioGenerations || 0,
+      expectedProviderCalls: plan.expectedPaidProviderCalls || 0,
+      expectedSemanticEvaluations: plan.expectedSemanticEvaluations || 0,
+      expectedContinuityEvaluations: plan.expectedContinuityEvaluations || 0,
+      expectedEvaluatorCalls: plan.expectedQualityEvaluatorCalls || 0,
+      expectedExternalCalls: plan.expectedExternalServiceCalls
+        ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedQualityEvaluatorCalls || 0)),
+      maximumExternalCalls: plan.expectedExternalServiceCallCeiling
+        ?? ((plan.expectedPaidProviderCalls || 0) + (plan.expectedMaxEvaluatorHttpAttempts || 0)),
+      expectedRendererJobs: plan.expectedRendererJobs || 0,
+      masterAssemblyScheduled: command.sourceRecovery ? false : true,
+      semanticEvaluatorProvider: plan.semanticEvaluatorProvider || null,
+      semanticEvaluatorModel: plan.semanticEvaluatorModel || null,
+      semanticEvaluatorMaxRetries: plan.semanticEvaluatorMaxRetries || 0,
+      provider: plan.provider, model: plan.model,
+      resolution: plan.resolution, estimatedCost: plan.estimatedCost ?? null,
+      costStatus: plan.costStatus || 'UNKNOWN',
       humanApprovalRequired: true, autoPublish: false, providerCalls: 0,
       recoveryAction: command.sourceRecovery ? 'REGENERATE_FAILED_SHOT' : 'REGENERATE_SHOT',
       recoveryKind: command.recoveryKind, existingFailedArtifact: command.sourceRecovery ? 'PRESERVED_IMMUTABLY' : null,
       existingGoodAssetsReused: command.sourceRecovery, sameProduction: command.sourceRecovery,
       creativeRecoveryContext: command.creativeRecoveryContext,
       operatorCorrectiveInstruction: command.creativeRecovery ? args.instruction?.trim() || null : null,
+      executionProjectionVersion: command.sourceRecovery ? SOURCE_RECOVERY_EXECUTION_PROJECTION_VERSION : null,
+      canonicalRevisionFingerprint: command.sourceRecovery ? command.revision.input.fingerprint : null,
+      executionProjectionFingerprint: command.sourceRecovery ? command.executionInput.fingerprint : null,
       automaticGeometryAttemptsMaximum: command.geometryRecovery ? 1 : null,
       automaticCreativeAttemptsMaximum: command.creativeRecovery ? 1 : null });
   }
@@ -591,15 +630,24 @@ class ProductionCommandService {
       if (!raw) throw new ProductionCommandError(500, 'SHOT_REGENERATION_STATE_INVALID', 'Persisted shot regeneration is missing canonical input');
       return this.scheduleShotExecution({ record: prior, input: operatorInputFromRaw(raw), args, reused: true });
     }
-    const command = await this.prepareShotRegeneration(args);
-    if (!args.preflightId || args.preflightId !== command.revision.input.fingerprint) {
+    let command;
+    try { command = await this.prepareShotRegeneration(args); }
+    catch (error) {
+      if (args.preflightId && ['CREATIVE_RECOVERY_NOT_APPLICABLE','GEOMETRY_RECOVERY_NOT_APPLICABLE',
+        'SHOT_NOT_FOUND'].includes(error.code)) {
+        throw new ProductionCommandError(409, 'PREFLIGHT_STALE',
+          'The source recovery identity changed after preflight; run preflight again');
+      }
+      throw error;
+    }
+    if (!args.preflightId || args.preflightId !== command.executionInput.fingerprint) {
       throw new ProductionCommandError(409, 'PREFLIGHT_STALE', 'Run per-shot preflight for the exact current instruction before regeneration');
     }
     let record;
     try { record = await this.repository.ensureShotRegeneration({ workspaceId: command.prepared.brand.workspaceId,
       brandId: args.brandId, productionId: args.productionId, requestId: args.requestId, shotId: args.shotId,
       sourceAssetId: command.revision.sourceAssetId, replacementAssetId: command.revision.replacementAssetId,
-      revisionNo: command.revision.revisionNo, inputFingerprint: command.revision.input.fingerprint,
+      revisionNo: command.revision.revisionNo, inputFingerprint: command.executionInput.fingerprint,
       canonicalRawInput: command.revision.raw, instruction: command.correctiveInstruction,
       provider: command.prepared.plan.provider, model: command.prepared.plan.model,
       resolution: command.prepared.plan.resolution,
@@ -612,7 +660,7 @@ class ProductionCommandService {
     }
     if (record.status === 'SUCCEEDED' || record.status === 'RUNNING') return Object.freeze({
       regenerationId: record.id, status: record.status, reused: true, publicationTriggered: false });
-    return this.scheduleShotExecution({ record, input: command.revision.input,
+    return this.scheduleShotExecution({ record, input: command.executionInput,
       args: { ...args, sourceJobId: command.source.jobId }, reused: false,
       revision: command.revision });
   }
@@ -668,6 +716,11 @@ class ProductionCommandService {
         const prepared = await runtime.service.prepareRevision({ input,
           config: runtime.config, productionId: args.productionId });
         const assetId = revision?.replacementAssetId || record.replacementAssetId || record.replacement_asset_id;
+        if (prepared.input?.fingerprint !== input.fingerprint) {
+          throw new ProductionCommandError(409, 'PREFLIGHT_STALE',
+            'Prepared source recovery input no longer matches the approved execution projection');
+        }
+        boundedSourceRecoveryPlan(prepared, assetId);
         const asset = prepared.input.assetPlan.assets.find((item) => item.asset_id === assetId && item.kind === 'video');
         if (!asset) throw Object.assign(new Error('Source replacement asset is missing'), {
           code: recoveryKind === 'SOURCE_GEOMETRY' ? 'GEOMETRY_RECOVERY_PLAN_INVALID' : 'SOURCE_RECOVERY_PLAN_INVALID' });

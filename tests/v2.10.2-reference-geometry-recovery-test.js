@@ -83,10 +83,15 @@ async function main(){
   assert.equal(continuation.action,'CONTINUE_SAME_EXECUTION');assert.equal(continuation.recoveryKind,'SOURCE_GEOMETRY');
 
   const replacementAsset=asset('a2-rev-111111111111');replacementAsset.generation_requirements.supersedes_asset_id='a2';
-  const input={workspaceId:W,brandId:B,aspectRatio:'9:16',creativePlan:{},visualStyle:{avoid:[]},assetPlan:{assets:[{...asset('a1'),kind:'video'},replacementAsset,{...asset('a3'),kind:'video'},{asset_id:'voice',kind:'voice'}]}};
+  const input={workspaceId:W,brandId:B,aspectRatio:'9:16',creativePlan:{},visualStyle:{avoid:[]},
+    assetPlan:{assets:[replacementAsset]},fingerprint:'geometry-recovery-execution-projection'};
   let scheduled,executed=[],completed;
   const command=new ProductionCommandService({repository:{db:{},async claimShotRegeneration(){return{id:'r'};},async completeGeometryRecovery(id,value){completed=value;},async failShotRegeneration(){throw new Error('unexpected');}},storage:{},scheduler:(task)=>{scheduled=task;}});
-  const runtime={config:{workerId:'worker'},service:{async prepareRevision(){return{input};}},mediaExecutor:{async execute({asset:target}){executed.push(target.asset_id);return{artifact:{artifactId:'a2',version:2,storageKey:'v2',contentHash:'h2'},provider:'replicate',model:'alibaba/wan-3',requestId:'prediction-v2',mediaProbe:{width:720,height:1280},provenance:{}};}},visualQualityEvaluator:{async evaluate(){return{status:'PASS',disposition:'ACCEPT'};}}};
+  const runtime={config:{workerId:'worker'},service:{async prepareRevision(){return{input,plan:{
+    expectedVideoGenerations:1,expectedAudioGenerations:0,expectedPaidProviderCalls:1,
+    expectedSemanticEvaluations:1,expectedContinuityEvaluations:0,expectedQualityEvaluatorCalls:1,
+    expectedExternalServiceCalls:2,expectedRendererJobs:0,expectedMaxEvaluatorHttpAttempts:1,
+    expectedExternalServiceCallCeiling:2}};}},mediaExecutor:{async execute({asset:target}){executed.push(target.asset_id);return{artifact:{artifactId:'a2',version:2,storageKey:'v2',contentHash:'h2'},provider:'replicate',model:'alibaba/wan-3',requestId:'prediction-v2',mediaProbe:{width:720,height:1280},provenance:{}};}},visualQualityEvaluator:{async evaluate(){return{status:'PASS',disposition:'ACCEPT'};}}};
   command.scheduleGeometryRecoveryExecution({record:{id:'r',status:'PREPARED',replacement_asset_id:replacementAsset.asset_id,retry_reason:'WRONG_ORIENTATION'},input,args:{productionId:P,brandId:B,shotId:'s2',sourceJobId:'job-1'},reused:false,revision:{sourceAssetId:'a2',replacementAssetId:replacementAsset.asset_id,revisionNo:1},runtime});
   await scheduled();assert.deepEqual(executed,[replacementAsset.asset_id],'only failed shot is regenerated');assert.equal(completed.result.automaticAttempt,1);
   assert.equal(completed.jobId,'job-1','the exact failed job is resumed');
