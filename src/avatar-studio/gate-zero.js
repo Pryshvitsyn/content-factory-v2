@@ -41,7 +41,7 @@ function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, pr
   const unique = [...new Map(findings.map((item) => [`${item.severity}:${item.code}`, Object.freeze({ severity: item.severity, code: item.code })])).values()];
   const status = unique.some((item) => item.severity === 'BLOCK') ? 'BLOCK'
     : unique.some((item) => item.severity === 'REVIEW') ? 'REVIEW' : 'PASS';
-  return Object.freeze({ ...base, status, findings: Object.freeze(unique), policyVersion: 'GATE_0_AVATAR_STUDIO_V1_1',
+  return Object.freeze({ ...base, status, findings: Object.freeze(unique), policyVersion: 'GATE_0_AVATAR_STUDIO_V1_2_STRUCTURED_MEDIA_TEXT',
     externalCalls: sourceType === 'SAFE_URL_IMPORT' ? 1 : 0, paidProviderCalls: 0 });
 }
 
