@@ -16,6 +16,10 @@ function parseAssetPrompt(prompt) {
   try { return JSON.parse(prompt); } catch { return { description: prompt, generation_requirements: {} }; }
 }
 
+function responseRequestId(response) {
+  return response?._request_id || response?.request_id || response?.requestId || response?.id || null;
+}
+
 function createOpenAIMediaProvider({
   client,
   apiKey = process.env.OPENAI_API_KEY,
@@ -23,7 +27,9 @@ function createOpenAIMediaProvider({
   speechModel = process.env.OPENAI_SPEECH_MODEL || DEFAULT_SPEECH_MODEL,
   defaultVoice = process.env.OPENAI_SPEECH_VOICE || 'alloy',
 } = {}) {
-  const openai = client || new OpenAI({ apiKey });
+  // Paid media execution has its own durable retry/approval boundary. The SDK must not
+  // silently turn one approved call into multiple provider attempts.
+  const openai = client || new OpenAI({ apiKey, maxRetries: 0 });
 
   return Object.freeze({
     provider: 'openai-media',
@@ -56,15 +62,15 @@ function createOpenAIMediaProvider({
             quality: requirements.quality || 'high',
             n: 1,
           }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined);
-          const item = response?.data?.[0] || {};
-          if (onProviderRequest && response.id) await onProviderRequest({ requestId: response.id, status: 'succeeded', provider: 'openai-media', model: selectedModel });
+          const item = response?.data?.[0] || {}; const requestId = responseRequestId(response);
+          if (onProviderRequest && requestId) await onProviderRequest({ requestId, status: 'succeeded', provider: 'openai-media', model: selectedModel });
           const output = item.b64_json ? Buffer.from(item.b64_json, 'base64') : null;
           return assertProviderResult({
             provider: 'openai-media', model: selectedModel, capability,
             output, mediaUrl: item.url || null, contentType: 'image/png',
-            requestId: response.id || null, usage: response.usage || null,
+            requestId, usage: response.usage || null,
             actualKnownCost: actualOpenAIImageCost({ model: selectedModel, usage: response.usage }),
-            provenance: { provider: 'openai-media', model: selectedModel },
+            provenance: { provider: 'openai-media', model: selectedModel, sdkAutomaticRetries: 0 },
           });
         }
 
@@ -87,18 +93,18 @@ function createOpenAIMediaProvider({
             quality: requirements.quality || 'high',
             n: 1,
           }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined);
-          const item = response?.data?.[0] || {};
-          if (onProviderRequest && response.id) await onProviderRequest({ requestId: response.id, status: 'succeeded',
+          const item = response?.data?.[0] || {}; const requestId = responseRequestId(response);
+          if (onProviderRequest && requestId) await onProviderRequest({ requestId, status: 'succeeded',
             provider: 'openai-media', model: selectedModel });
           const output = item.b64_json ? Buffer.from(item.b64_json, 'base64') : null;
           return assertProviderResult({
             provider: 'openai-media', model: selectedModel, capability, output, mediaUrl: item.url || null,
-            contentType: 'image/png', requestId: response.id || null, usage: response.usage || null,
+            contentType: 'image/png', requestId, usage: response.usage || null,
             actualKnownCost: actualOpenAIImageCost({ model: selectedModel, usage: response.usage }),
             provenance: { provider: 'openai-media', model: selectedModel, strategy: capability === 'multi-view-identity-reference'
               ? 'ONE_EDIT_CALL_PER_THREE_VIEW_COMPOSITE' : 'ONE_EDIT_CALL_PER_REFERENCE_CANDIDATE',
               referenceImageCount: referenceImages.length, inputFidelity: selectedModel === 'gpt-image-2'
-                ? 'AUTOMATIC_HIGH_FIDELITY' : 'PROVIDER_DEFAULT' },
+                ? 'AUTOMATIC_HIGH_FIDELITY' : 'PROVIDER_DEFAULT', sdkAutomaticRetries: 0 },
           });
         }
 
@@ -120,7 +126,8 @@ function createOpenAIMediaProvider({
             provider: 'openai-media', model: selectedModel, capability,
             output, contentType: 'audio/mpeg',
             requestId,
-            provenance: { provider: 'openai-media', model: selectedModel, voice: requirements.voice || defaultVoice },
+            provenance: { provider: 'openai-media', model: selectedModel, voice: requirements.voice || defaultVoice,
+              sdkAutomaticRetries: 0 },
           });
         }
 
@@ -135,4 +142,5 @@ function createOpenAIMediaProvider({
   });
 }
 
-module.exports = { createOpenAIMediaProvider, DEFAULT_IMAGE_MODEL, DEFAULT_SPEECH_MODEL, SUPPORTED_IMAGE_MODELS, parseAssetPrompt };
+module.exports = { createOpenAIMediaProvider, DEFAULT_IMAGE_MODEL, DEFAULT_SPEECH_MODEL, SUPPORTED_IMAGE_MODELS, parseAssetPrompt,
+  responseRequestId };
