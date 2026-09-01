@@ -13,22 +13,54 @@ const FAILURE_CLASSIFICATIONS = Object.freeze(['PROVIDER_CONFIGURATION','PROVIDE
   'PROVIDER_TIMEOUT','PROVIDER_RATE_LIMIT','PROVIDER_REJECTED_INPUT','PROVIDER_OUTPUT_INVALID','ARTIFACT_INGEST_FAILED',
   'SECURITY_REJECTED_OUTPUT','COST_CHANGED','BUDGET_EXCEEDED','CONSENT_INVALIDATED','GATE0_INVALIDATED','UNKNOWN']);
 
+function safeFailureDiagnostic(error) {
+  const names = []; const codes = []; const statuses = []; const types = []; const requestIds = [];
+  const seen = new Set(); let current = error; let depth = 0;
+  while (current && typeof current === 'object' && depth < 6 && !seen.has(current)) {
+    seen.add(current); depth += 1;
+    const name = typeof current.name === 'string' ? current.name.trim().slice(0, 80) : '';
+    const code = typeof current.code === 'string' ? current.code.trim().slice(0, 120) : '';
+    const type = typeof current.type === 'string' ? current.type.trim().slice(0, 120) : '';
+    const status = Number(current.status);
+    const requestId = [current.requestId,current.requestID,current.request_id,current._request_id]
+      .find((value) => typeof value === 'string' && value.trim());
+    if (name && !names.includes(name)) names.push(name);
+    if (code && !codes.includes(code)) codes.push(code);
+    if (type && !types.includes(type)) types.push(type);
+    if (Number.isInteger(status) && status >= 100 && status <= 599 && !statuses.includes(status)) statuses.push(status);
+    if (requestId && !requestIds.includes(requestId.trim().slice(0, 160))) requestIds.push(requestId.trim().slice(0, 160));
+    current = current.cause;
+  }
+  return Object.freeze({ names: Object.freeze(names), codes: Object.freeze(codes), statuses: Object.freeze(statuses),
+    types: Object.freeze(types), requestIds: Object.freeze(requestIds), depth });
+}
+
 function safeFailure(error) {
-  const code = String(error?.code || '').toUpperCase(); const status = Number(error?.status || error?.cause?.status || 0);
+  const diagnostic = safeFailureDiagnostic(error);
+  const codeText = diagnostic.codes.join(' ').toUpperCase();
+  const nameText = diagnostic.names.join(' ').toUpperCase();
+  const typeText = diagnostic.types.join(' ').toUpperCase();
+  const statuses = diagnostic.statuses;
   let classification = 'UNKNOWN';
-  if (code.includes('CREDENTIAL') || code.includes('CONFIGURATION') || code.includes('NOT_CONFIGURED')) classification = 'PROVIDER_CONFIGURATION';
-  else if (status === 401 || status === 403 || code.includes('AUTH')) classification = 'PROVIDER_AUTH';
-  else if (code.includes('CAPABILITY') || code.includes('MODEL_NOT_REGISTERED')) classification = 'PROVIDER_CAPABILITY';
-  else if (status === 429 || code.includes('RATE_LIMIT')) classification = 'PROVIDER_RATE_LIMIT';
-  else if (code.includes('TIMEOUT') || error?.name === 'AbortError') classification = 'PROVIDER_TIMEOUT';
-  else if (code === 'PROVIDER_OUTPUT_INVALID') classification = 'PROVIDER_OUTPUT_INVALID';
-  else if (code === 'SECURITY_REJECTED_OUTPUT') classification = 'SECURITY_REJECTED_OUTPUT';
-  else if (code.includes('ARTIFACT')) classification = 'ARTIFACT_INGEST_FAILED';
-  else if (status === 400 || status === 422 || code.includes('REJECTED_INPUT')) classification = 'PROVIDER_REJECTED_INPUT';
+  if (codeText.includes('CREDENTIAL') || codeText.includes('CONFIGURATION') || codeText.includes('NOT_CONFIGURED')
+    || nameText.includes('OPENAIERROR') && codeText.includes('MISSING')) classification = 'PROVIDER_CONFIGURATION';
+  else if (statuses.includes(401) || statuses.includes(403) || codeText.includes('AUTH')
+    || nameText.includes('AUTHENTICATIONERROR') || nameText.includes('PERMISSIONDENIEDERROR')) classification = 'PROVIDER_AUTH';
+  else if (codeText.includes('CAPABILITY') || codeText.includes('MODEL_NOT_REGISTERED')) classification = 'PROVIDER_CAPABILITY';
+  else if (statuses.includes(429) || codeText.includes('RATE_LIMIT') || nameText.includes('RATELIMITERROR')) classification = 'PROVIDER_RATE_LIMIT';
+  else if (codeText.includes('TIMEOUT') || nameText.includes('APICONNECTIONTIMEOUTERROR') || nameText.includes('ABORTERROR')) {
+    classification = 'PROVIDER_TIMEOUT';
+  }
+  else if (codeText.includes('PROVIDER_OUTPUT_INVALID')) classification = 'PROVIDER_OUTPUT_INVALID';
+  else if (codeText.includes('SECURITY_REJECTED_OUTPUT')) classification = 'SECURITY_REJECTED_OUTPUT';
+  else if (codeText.includes('ARTIFACT')) classification = 'ARTIFACT_INGEST_FAILED';
+  else if (statuses.includes(400) || statuses.includes(422) || codeText.includes('REJECTED_INPUT')
+    || nameText.includes('BADREQUESTERROR') || nameText.includes('UNPROCESSABLEENTITYERROR')
+    || typeText.includes('INVALID_REQUEST')) classification = 'PROVIDER_REJECTED_INPUT';
   return Object.freeze({ classification, safeMessage: classification === 'UNKNOWN'
-    ? 'Provider execution failed; inspect the durable attempt without exposing credentials.'
+    ? 'Provider execution failed; inspect the durable structured failure diagnostic without exposing credentials.'
     : `Passport generation failed: ${classification}.`, mayHaveSpent: !['PROVIDER_CONFIGURATION','PROVIDER_AUTH',
-      'PROVIDER_CAPABILITY','PROVIDER_REJECTED_INPUT'].includes(classification) });
+      'PROVIDER_CAPABILITY','PROVIDER_REJECTED_INPUT'].includes(classification), diagnostic });
 }
 
 function numberOrNull(value) { return value == null || value === '' ? null : Number(value); }
@@ -226,7 +258,7 @@ class PassportExecutionService {
         const failure = safeFailure(error);
         await this.repository.addPassportProviderAttemptEvent({ attempt, status: 'FAILED',
           failureClassification: failure.classification, safeErrorMessage: failure.safeMessage,
-          mayHaveSpent: failure.mayHaveSpent, actor: this.actor });
+          mayHaveSpent: failure.mayHaveSpent, responseMetadata: { failureDiagnostic: failure.diagnostic }, actor: this.actor });
         failures.push(Object.freeze({ attemptId: attempt.id, ordinal, ...failure }));
       }
     }
@@ -251,4 +283,4 @@ class PassportExecutionService {
   }
 }
 
-module.exports = { FAILURE_CLASSIFICATIONS, PassportExecutionService, safeFailure };
+module.exports = { FAILURE_CLASSIFICATIONS, PassportExecutionService, safeFailure, safeFailureDiagnostic };
