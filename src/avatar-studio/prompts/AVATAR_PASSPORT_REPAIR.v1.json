@@ -1,0 +1,6 @@
+{
+  "id": "AVATAR_PASSPORT_REPAIR",
+  "version": "1.0.0",
+  "kind": "REPAIR_DELTA_TEMPLATE",
+  "text": "Preserve the original generation specification unchanged and apply only this repair delta: {{REPAIR_DELTA}}. Keep all other approved identity, studio, camera and negative constraints identical. A repair is a new candidate with immutable lineage; never overwrite the original candidate."
+}

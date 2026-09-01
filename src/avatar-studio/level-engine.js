@@ -25,8 +25,21 @@ function evaluateAvatarLevels(avatar = {}) {
   const consent = avatar.consent || (latestFaceEvent?.status === 'APPROVED' ? latestFaceEvent : null)
     || (avatar.consentRecords || []).find((item) => (item.status || '').toUpperCase() === 'APPROVED');
   const sourceBlocks = (avatar.sources || []).filter((item) => (item.gate0Status || item.gate0_status) === 'BLOCK');
-  const passportCertified = (avatar.passports || []).some((item) => (item.certification?.decision || item.decision) === 'CERTIFIED'
-    && new Set((item.panels || []).map((panel) => panel.angle)).size === 3);
+  const currentIdentityVersionId = avatar.identityVersionId || avatar.identity_version_id
+    || (avatar.version && (avatar.characterVersionId || avatar.character_version_id));
+  const legacyPassportEvidence = (avatar.passports || []).some((item) =>
+    (item.certification?.decision || item.decision) === 'CERTIFIED'
+      && new Set((item.panels || []).map((panel) => panel.angle)).size === 3);
+  const currentIdentityLock = Array.isArray(avatar.identityLocks)
+    ? avatar.identityLocks.find((item) => (item.identityVersionId || item.identity_version_id) === currentIdentityVersionId)
+      || (!avatar.identityLocks.length && legacyPassportEvidence ? { id: 'LEGACY_CERTIFIED_IDENTITY_BOUNDARY' } : null)
+    : { id: 'LEGACY_FIXTURE_COMPATIBILITY' };
+  const v12Certification = Array.isArray(avatar.passportCertificationEvents)
+    ? avatar.passportCertificationEvents.some((item) => (item.identityVersionId || item.identity_version_id) === currentIdentityVersionId
+      && (!currentIdentityLock || (item.identityLockVersionId || item.identity_lock_version_id) === currentIdentityLock.id))
+    : false;
+  const legacyCertified = (!Array.isArray(avatar.identityLocks) || !avatar.identityLocks.length) && legacyPassportEvidence;
+  const passportCertified = v12Certification || legacyCertified;
   const bodyKinds = values(avatar.bodyReferences, 'kind'); const expressionKinds = values(avatar.expressionReferences, 'expression');
   const continuity = approved(avatar.continuityReadiness || []).find((item) => ['identityStatus','wardrobeStatus','propStatus',
     'locationStatus','geometryStatus','voiceStatus','lipSyncStatus'].every((key) => (item[key] || item[key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)]) === 'PASS'));
@@ -41,8 +54,9 @@ function evaluateAvatarLevels(avatar = {}) {
       requirement('IDENTITY_VISUAL_DIRECTION', resolved(identity.visualDirection)),
       requirement('IDENTITY_PROHIBITED_USES', Boolean(identity.prohibitedUses?.length)),
       requirement('IDENTITY_BRAND_PERMISSION', brandPermissions.length > 0),
-      requirement('IDENTITY_CONSENT_RIGHTS', consent?.status === 'APPROVED')],
-    [requirement('PASSPORT_CERTIFIED', passportCertified)],
+      requirement('IDENTITY_CONSENT_RIGHTS', consent?.status === 'APPROVED'),
+      requirement('IDENTITY_LOCK_CURRENT_VERSION', Boolean(currentIdentityLock))],
+    [requirement('CERTIFIED_PASSPORT_REQUIRED', passportCertified)],
     [requirement('BODY_CHEST_UP', bodyKinds.has('CHEST_UP')), requirement('BODY_FULL_STANDING', bodyKinds.has('FULL_BODY_STANDING')),
       requirement('BODY_SEATED', bodyKinds.has('SEATED')), requirement('EXPRESSION_NEUTRAL', expressionKinds.has('NEUTRAL')),
       requirement('EXPRESSION_WARM', expressionKinds.has('WARM_SMILE')), requirement('EXPRESSION_SERIOUS', expressionKinds.has('CONCERNED_SERIOUS'))],

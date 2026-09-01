@@ -15,6 +15,11 @@ const TEMPORARY_IDENTITY_KEYS = Object.freeze([
 const IDENTITY_FIELDS = Object.freeze([
   'agePresentation','personality','role','languages','visualDirection','permanentAttributes','prohibitedUses',
 ]);
+const IDENTITY_CLASSIFICATIONS = Object.freeze(['PERMANENT','TEMPORARY','UNCERTAIN']);
+const ALWAYS_TEMPORARY_FEATURES = Object.freeze([
+  'shirt','jacket','trousers','shoes','hat','jewellery','watch','props','logos','furniture','background','room','vehicle',
+  'location','temporaryMakeup','temporaryHairstyleTreatment','lighting','camera','colourGrade','wardrobe','clothing','outfit','environment',
+]);
 
 class AvatarStudioError extends Error {
   constructor(status, code, message, details = null) {
@@ -58,6 +63,30 @@ function canonicalIdentity(input = {}) {
     prohibitedUses: stringList('prohibitedUses', input.prohibitedUses, { required: true }),
   });
   return identity;
+}
+
+function featureMap(name, value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AvatarStudioError(400,
+    'IDENTITY_LOCK_INVALID', `${name} must be an object of explicitly classified features`);
+  return Object.freeze(Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined && item !== null
+    && (typeof item !== 'string' || item.trim()))));
+}
+
+function canonicalIdentityLock(input = {}) {
+  const permanent = featureMap('permanent', input.permanent || input.permanentAttributes || {});
+  const temporary = featureMap('temporary', input.temporary || input.temporaryAttributes || {});
+  const uncertain = featureMap('uncertain', input.uncertain || input.uncertainAttributes || {});
+  const forbidden = Object.keys(permanent).filter((key) => ALWAYS_TEMPORARY_FEATURES.includes(key));
+  if (forbidden.length) throw new AvatarStudioError(400, 'IDENTITY_LOCK_TEMPORARY_AS_PERMANENT',
+    'Wardrobe, accessories, props, background, environment, lighting and camera cannot silently become permanent identity', { forbidden });
+  const collisions = Object.keys(permanent).filter((key) => Object.hasOwn(temporary,key) || Object.hasOwn(uncertain,key))
+    .concat(Object.keys(temporary).filter((key) => Object.hasOwn(uncertain,key)));
+  if (collisions.length) throw new AvatarStudioError(400, 'IDENTITY_LOCK_CLASSIFICATION_CONFLICT',
+    'Each Identity Lock feature must have exactly one classification', { features: [...new Set(collisions)] });
+  if (!Object.keys(permanent).length) throw new AvatarStudioError(400, 'IDENTITY_LOCK_PERMANENT_REQUIRED',
+    'Identity Lock requires at least one explicitly approved permanent physical feature');
+  return Object.freeze({ schemaVersion: 'avatar-identity-lock-v1', permanent, temporary, uncertain,
+    notes: String(input.notes || '').trim() || null });
 }
 
 function canonicalCharacter(input = {}) {
@@ -104,6 +133,7 @@ function assertBrandPermission(avatar, brandId, vertical = null) {
   return true;
 }
 
-module.exports = { AUDIENCE_VERTICALS, AvatarStudioError, IDENTITY_FIELDS, PERFORMANCE_PACKS, SUBJECT_TYPES,
-  TEMPORARY_IDENTITY_KEYS, assertBrandPermission, assertIdentityContinuity, canonicalCharacter, canonicalIdentity,
+module.exports = { ALWAYS_TEMPORARY_FEATURES, AUDIENCE_VERTICALS, AvatarStudioError, IDENTITY_CLASSIFICATIONS,
+  IDENTITY_FIELDS, PERFORMANCE_PACKS, SUBJECT_TYPES, TEMPORARY_IDENTITY_KEYS, assertBrandPermission,
+  assertIdentityContinuity, canonicalCharacter, canonicalIdentity, canonicalIdentityLock,
   fingerprint, requiredText, stable, stringList };

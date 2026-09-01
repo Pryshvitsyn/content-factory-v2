@@ -71,7 +71,7 @@ function levelEngineTests() {
   const provisional = evaluateAvatarLevels(avatarFixture({ identity: { ...identity, agePresentation: 'TO_BE_DEFINED', languages: ['und'] } }));
   assert.equal(provisional.nextLevel.name, 'IDENTITY'); assert(provisional.missingRequirements.includes('IDENTITY_AGE_PRESENTATION'));
   const l0 = evaluateAvatarLevels(avatarFixture());
-  assert.equal(l0.currentLevel, 0); assert.equal(l0.nextLevel.name, 'PASSPORT'); assert(l0.missingRequirements.includes('PASSPORT_CERTIFIED'));
+  assert.equal(l0.currentLevel, 0); assert.equal(l0.nextLevel.name, 'PASSPORT'); assert(l0.missingRequirements.includes('CERTIFIED_PASSPORT_REQUIRED'));
   const incompletePassport = evaluateAvatarLevels(avatarFixture({ passports: [{ decision: 'CERTIFIED', panels: [{ angle: 'FRONTAL' },{ angle: 'PROFILE_90' }] }] }));
   assert.equal(incompletePassport.currentLevel, 0, 'three distinct passport angles are mandatory');
   const chosenPassport = evaluateAvatarLevels(avatarFixture({ passports: [{ decision: 'REJECTED', panels: [] },
