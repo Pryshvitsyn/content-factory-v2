@@ -37,6 +37,7 @@ async function main() {
     await db.query('DROP SCHEMA IF EXISTS avatar_studio CASCADE');
     await db.query(await fs.readFile(path.resolve('migrations/20260831_avatar_studio_v1.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260831_avatar_studio_v1_1_asset_intake.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab.sql'), 'utf8'));
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Avatar Studio disposable') ON CONFLICT(id) DO NOTHING`, [WORKSPACE_ID]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Attune Avatar Test','attune-avatar-test','ACTIVE')
       ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [BRAND_ID, WORKSPACE_ID]);
@@ -66,7 +67,13 @@ async function main() {
       agePresentation: 'late 30s', personality: 'calm and precise', role: 'behavioral coach', languages: ['en'],
       visualDirection: 'natural face and stable proportions', permanentAttributes: {}, prohibitedUses: ['deception'] },
       provenance: { source: 'POSTGRES_IDENTITY_AFTER_INTAKE' } });
-    assert.equal(resolvedIdentity.identityVersion.version,2); assert.equal(resolvedIdentity.avatar.nextLevel.name,'PASSPORT');
+    assert.equal(resolvedIdentity.identityVersion.version,2); assert.equal(resolvedIdentity.avatar.nextLevel.name,'IDENTITY');
+    const identityLock = await service.createIdentityLock({ avatarId:l0.id,brandId:BRAND_ID,humanApproval:true,
+      permanent:{facialStructure:'preserve',apparentAge:'late 30s',nose:'preserve',jaw:'preserve',hairline:'preserve'},
+      temporary:{hat:'exclude',jacket:'exclude',wardrobe:'exclude',background:'exclude'},uncertain:{glasses:'human decision'},
+      provenance:{source:'POSTGRES_IDENTITY_LOCK_FIXTURE'} });
+    assert.equal(identityLock.avatar.currentLevel,0); assert.equal(identityLock.avatar.nextLevel.name,'PASSPORT');
+    assert(identityLock.avatar.missingRequirements.includes('CERTIFIED_PASSPORT_REQUIRED'));
     const intakeRow = (await db.query('SELECT * FROM avatar_studio.asset_intakes WHERE id=$1',[intake.asset.id])).rows[0];
     assert.equal(intakeRow.brand_id,BRAND_ID); assert.equal(intakeRow.workspace_id,WORKSPACE_ID);
     await assert.rejects(() => db.query('UPDATE avatar_studio.asset_intakes SET original_filename=$2 WHERE id=$1',
@@ -96,27 +103,52 @@ async function main() {
     assert.equal(Number((await db.query(`SELECT count(*) AS count FROM avatar_studio.consent_events
       WHERE character_id=$1 AND modality='FACE'`,[real.id])).rows[0].count),2,'grant and revocation must both remain append-only');
 
-    const imported = await service.importSource({ avatarId: l0.id, brandId: BRAND_ID, source: {
-      sourceType: 'SYNTHETIC_TRAITS', sourceLocator: `fixture://avatar/${l0.id}/identity`,
-      gate0Text: 'Owned synthetic identity fixture with neutral studio geometry', provenance: { source: 'POSTGRES_TEST_FIXTURE' },
-    } });
-    assert.equal(imported.gate0.status, 'PASS'); assert.equal(imported.gate0.externalCalls, 0);
-    const candidate = await service.registerPassport({ avatarId: l0.id, brandId: BRAND_ID, sourceId: imported.source.id,
-      panels: [{ angle: 'FRONTAL', artifactId: 'fixture-passport-front', artifactVersion: 1 },
-        { angle: 'THREE_QUARTER_45', artifactId: 'fixture-passport-45', artifactVersion: 1 },
-        { angle: 'PROFILE_90', artifactId: 'fixture-passport-90', artifactVersion: 1 }],
-      qa: { samePerson: true, temporaryElementsExcluded: true } });
-    assert.equal(candidate.avatar.currentLevel, 0, 'registration alone must not level up without human certification');
-    const alternate = await service.registerPassport({ avatarId: l0.id, brandId: BRAND_ID, sourceId: imported.source.id,
-      panels: [{ angle: 'FRONTAL', artifactId: 'fixture-alt-front', artifactVersion: 1 },
-        { angle: 'THREE_QUARTER_45', artifactId: 'fixture-alt-45', artifactVersion: 1 },
-        { angle: 'PROFILE_90', artifactId: 'fixture-alt-90', artifactVersion: 1 }], qa: { candidate: 'alternate' } });
-    const rejected = await service.certifyPassport({ avatarId: l0.id, brandId: BRAND_ID,
-      passportId: alternate.passport.id, decision: 'REJECTED', humanApproval: true, notes: 'Alternate not selected' });
-    assert.equal(rejected.avatar.currentLevel, 0, 'rejecting an alternate candidate must not level up');
-    const certified = await service.certifyPassport({ avatarId: l0.id, brandId: BRAND_ID,
-      passportId: candidate.passport.id, decision: 'CERTIFIED', humanApproval: true, notes: 'Exact fixture passport approved' });
-    assert.equal(certified.avatar.currentLevel, 1); assert.equal(certified.avatar.nextLevel.name, 'BODY_EXPRESSIONS');
+    const passportPlan = await service.planPassportGeneration({ avatarId:l0.id,brandId:BRAND_ID,
+      sourceAssetIds:[intakeSource.source.id],requestedCandidateCount:4 });
+    assert.equal(passportPlan.plannedExternalCallCount,4); assert.equal(passportPlan.externalGenerationCalls,0);
+    assert.equal(passportPlan.paidProviderCalls,0); assert.equal(passportPlan.costPlan.status,'UNKNOWN');
+    assert.equal(passportPlan.executionAuthorized,false);
+    const composite = Buffer.alloc(40); Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(composite);
+    composite.writeUInt32BE(13,8); composite.write('IHDR',12,'ascii'); composite.writeUInt32BE(3000,16); composite.writeUInt32BE(1000,20);
+    const candidates=[];
+    for (const label of ['A','B','C','D']) {
+      const candidateIntake=await service.intakeAsset({avatarId:l0.id,brandId:BRAND_ID,sourceType:'UPLOAD',
+        file:{name:`passport-${label}.png`,mimeType:'image/png',contentBase64:composite.toString('base64')},
+        provenance:{owner:'SYNTHETIC',source:'POSTGRES_MANUAL_PASSPORT_FIXTURE'}});
+      await service.useIntake({avatarId:l0.id,brandId:BRAND_ID,intakeId:candidateIntake.asset.id,roles:['PASSPORT_CANDIDATE']});
+      candidates.push((await service.uploadPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,
+        generationSpecId:passportPlan.id,intakeId:candidateIntake.asset.id})).candidate);
+    }
+    assert.equal(candidates.length,4); assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,
+      'candidate uploads must not create L1');
+    const qaA=await service.runPassportQa({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[0].id,
+      profileDrift:true,observations:{PROFILE_IDENTITY:'FAIL'}});
+    assert.equal(qaA.analysis.status,'REJECT'); assert(qaA.analysis.blockingFailures.includes('PROFILE_DRIFT'));
+    await service.reviewPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[0].id,
+      action:'REJECT',rejectionReason:'PROFILE_DRIFT',humanNote:'Profile is another identity',humanApproval:true});
+    const qaB=await service.runPassportQa({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id});
+    assert.equal(qaB.analysis.status,'WARN'); assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,
+      'automated QA PASS/WARN must not create L1');
+    await service.reviewPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id,
+      action:'KEEP',humanNote:'Keep for guided comparison',humanApproval:true});
+    assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,'KEEP must not create L1');
+    const certified=await service.certifyPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[1].id,
+      guidedReview:{frontal:true,threeQuarter:true,profile:true,allThree:true},warningsAcknowledged:qaB.analysis.warnings,
+      explicitConfirmation:true,humanApproval:true});
+    assert.equal(certified.avatar.currentLevel,1); assert.equal(certified.avatar.nextLevel.name,'BODY_EXPRESSIONS');
+    await service.runPassportQa({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[2].id});
+    await assert.rejects(()=>service.certifyPassportCandidate({avatarId:l0.id,brandId:BRAND_ID,candidateId:candidates[2].id,
+      guidedReview:{frontal:true,threeQuarter:true,profile:true,allThree:true},explicitConfirmation:true,humanApproval:true}),
+    (error)=>error.code==='PASSPORT_ALREADY_CERTIFIED','exactly one certification per Identity Version must fail closed');
+    await assert.rejects(()=>db.query('UPDATE avatar_studio.passport_candidates SET model=$2 WHERE id=$1',[candidates[1].id,'mutated']),
+      (error)=>error.code==='P0001');
+    await assert.rejects(()=>db.query('UPDATE avatar_studio.passport_candidate_review_events SET human_note=$2 WHERE candidate_id=$1',
+      [candidates[0].id,'mutated']), (error)=>error.code==='P0001');
+
+    const repairPlan=await service.planPassportGeneration({avatarId:l0.id,brandId:BRAND_ID,
+      sourceAssetIds:[intakeSource.source.id],requestedCandidateCount:3,originalGenerationSpecId:passportPlan.id,
+      repairDelta:{profile:'preserve original nose silhouette'}});
+    assert.equal(repairPlan.originalGenerationSpecId,passportPlan.id); assert.equal(repairPlan.externalGenerationCalls,0);
 
     let progressed = certified.avatar;
     for (const kind of ['CHEST_UP','FULL_BODY_STANDING','SEATED']) progressed = (await service.addLevelAsset({ avatarId: l0.id,
@@ -159,7 +191,7 @@ async function main() {
     assert.equal(progressed.currentLevel, 7);
 
     const plan = await service.compileTestPlan({ vertical: 'PSYCHOLOGY_WELLBEING', brandId: BRAND_ID, avatarId: l0.id,
-      format: 'MULTI_SHOT', referenceSourceId: imported.source.id, script: { text: 'Pause before reacting.' },
+      format: 'MULTI_SHOT', referenceSourceId: intakeSource.source.id, script: { text: 'Pause before reacting.' },
       shotPlan: [{ shotId: 'shot-1', purpose: 'opening' },{ shotId: 'shot-2', purpose: 'reframe' }] });
     assert.equal(plan.externalCallCount, 0); assert.equal(plan.compiledProviderPlan.expectedPaidCalls, 0);
     assert.equal(plan.compiledProviderPlan.executionAuthorized, false); assert.equal(paidProviderCalls, 0);

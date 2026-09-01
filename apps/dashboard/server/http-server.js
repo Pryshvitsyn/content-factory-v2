@@ -57,6 +57,10 @@ function createControlServer({ service, creativeService = null, avatarService = 
         return json(response, 200, await avatarService.avatar({ id: segments[3], brandId: url.searchParams.get('brandId') }));
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-lab' && segments.length === 5) {
+        return json(response, 200, await avatarService.passportLab({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'intakes' && segments.length === 5) {
         return json(response, 200, await avatarService.listIntakes({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
       }
@@ -93,7 +97,17 @@ function createControlServer({ service, creativeService = null, avatarService = 
         if (segments[4] === 'identity') return json(response, 201, await avatarService.updateIdentity(args));
         if (segments[4] === 'sources') return json(response, 201, await avatarService.importSource(args));
         if (segments[4] === 'passports') return json(response, 201, await avatarService.registerPassport(args));
+        if (segments[4] === 'identity-locks') return json(response, 201, await avatarService.createIdentityLock(args));
+        if (segments[4] === 'passport-generation-plans') return json(response, 201, await avatarService.planPassportGeneration(args));
+        if (segments[4] === 'passport-candidates') return json(response, 201, await avatarService.uploadPassportCandidate(args));
         if (segments[4] === 'level-assets') return json(response, 201, await avatarService.addLevelAsset(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-candidates' && segments.length === 7) {
+        const args = { avatarId: segments[3], candidateId: segments[5], ...await readJson(request) };
+        if (segments[6] === 'qa') return json(response, 201, await avatarService.runPassportQa(args));
+        if (segments[6] === 'review') return json(response, 201, await avatarService.reviewPassportCandidate(args));
+        if (segments[6] === 'certify') return json(response, 201, await avatarService.certifyPassportCandidate(args));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'passports' && segments[6] === 'certify' && segments.length === 7) {

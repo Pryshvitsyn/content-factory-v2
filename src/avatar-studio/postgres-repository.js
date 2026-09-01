@@ -69,7 +69,7 @@ class AvatarStudioPostgresRepository {
   }
 
   async getCharacter({ id, brandId = null } = {}) {
-    const base = (await this.db.query(`SELECT c.*,cv.version,cv.identity_spec,cv.identity_hash,ls.current_level,ls.level_name,
+    const base = (await this.db.query(`SELECT c.*,cv.id AS identity_version_id,cv.version,cv.identity_spec,cv.identity_hash,ls.current_level,ls.level_name,
       ls.completed_requirements,ls.missing_requirements,ls.blocking_failures
       FROM avatar_studio.characters c JOIN avatar_studio.character_versions cv ON cv.character_id=c.id
       AND cv.version=(SELECT max(version) FROM avatar_studio.character_versions WHERE character_id=c.id)
@@ -89,10 +89,15 @@ class AvatarStudioPostgresRepository {
       ['locations', 'SELECT * FROM avatar_studio.location_packs WHERE character_id=$1 ORDER BY created_at'],
       ['performancePacks', 'SELECT * FROM avatar_studio.performance_packs WHERE character_id=$1 ORDER BY created_at'],
       ['continuityReadiness', 'SELECT * FROM avatar_studio.continuity_readiness WHERE character_id=$1 ORDER BY approved_at'],
+      ['identityLocks', 'SELECT * FROM avatar_studio.identity_lock_versions WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
+      ['passportGenerationSpecs', 'SELECT * FROM avatar_studio.passport_generation_specs WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
+      ['passportCertificationEvents', 'SELECT * FROM avatar_studio.passport_certification_events WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
     ];
     const results = await Promise.all(tableQueries.map(([, sql]) => this.db.query(sql, [id])));
     const avatar = camel(base);
     tableQueries.forEach(([key], index) => { avatar[key] = results[index].rows.map(camel); });
+    for (const source of avatar.sources) source.roles = (await this.db.query(
+      'SELECT role FROM avatar_studio.source_asset_roles WHERE source_asset_id=$1 ORDER BY role',[source.id])).rows.map((item) => item.role);
     avatar.vertical = avatar.verticalCode; avatar.subjectType = avatar.subjectType; avatar.identity = avatar.identitySpec;
     avatar.brandIds = avatar.brandPermissions.filter((item) => item.allowed).map((item) => item.brandId);
     const latestFaceEvent = avatar.consentEvents.find((item) => item.modality === 'FACE');
@@ -102,7 +107,26 @@ class AvatarStudioPostgresRepository {
       FROM avatar_studio.passports p LEFT JOIN avatar_studio.passport_certifications pc ON pc.passport_id=p.id
       WHERE p.character_id=$1 ORDER BY p.candidate_no`, [id])).rows.map(camel);
     for (const passport of passports) passport.panels = (await this.db.query('SELECT * FROM avatar_studio.passport_panels WHERE passport_id=$1 ORDER BY angle', [passport.id])).rows.map(camel);
-    avatar.passports = passports; return avatar;
+    avatar.passports = passports;
+    const candidates = (await this.db.query(`SELECT pc.*,
+      qa.id AS qa_snapshot_id,qa.status AS qa_status,qa.same_person_confidence,qa.warnings AS qa_warnings,
+      qa.blocking_failures AS qa_blocking_failures,qa.panel_regions,qa.reasoning AS qa_reasoning,
+      review.action AS latest_review_action,review.rejection_reason,review.human_note,review.guided_review,
+      cert.id AS certification_event_id,ai.original_filename,ai.mime_type,ai.width,ai.height
+      FROM avatar_studio.passport_candidates pc
+      JOIN avatar_studio.asset_intakes ai ON ai.id=pc.intake_asset_id
+      LEFT JOIN LATERAL (SELECT * FROM avatar_studio.passport_qa_snapshots q WHERE q.candidate_id=pc.id ORDER BY q.created_at DESC,q.id DESC LIMIT 1) qa ON true
+      LEFT JOIN LATERAL (SELECT * FROM avatar_studio.passport_candidate_review_events r WHERE r.candidate_id=pc.id ORDER BY r.decided_at DESC,r.id DESC LIMIT 1) review ON true
+      LEFT JOIN avatar_studio.passport_certification_events cert ON cert.candidate_id=pc.id
+      WHERE pc.character_id=$1 ORDER BY pc.created_at,pc.id`, [id])).rows.map(camel);
+    for (const candidate of candidates) {
+      candidate.previewUrl = `/api/avatar-studio/intakes/${encodeURIComponent(candidate.intakeAssetId)}/content?brandId=${encodeURIComponent(candidate.brandId)}&avatarId=${encodeURIComponent(candidate.characterId)}`;
+      candidate.humanReviewState = candidate.certificationEventId ? 'CERTIFIED' : candidate.latestReviewAction === 'REJECT'
+        ? 'HUMAN_REJECTED' : candidate.latestReviewAction === 'KEEP' ? 'KEPT' : candidate.qaStatus === 'REJECT'
+          ? 'QA_REJECTED' : candidate.qaSnapshotId ? 'READY_FOR_HUMAN_REVIEW' : 'NEW';
+      candidate.certificationState = candidate.certificationEventId ? 'CERTIFIED' : 'UNCERTIFIED';
+    }
+    avatar.passportCandidates = candidates; return avatar;
   }
 
   async saveLevelState({ avatarId, workspaceId, state }) {
@@ -268,6 +292,111 @@ class AvatarStudioPostgresRepository {
         panel.contentHash || null, panel.referenceGeometry || {}, panel.provenance || {}]);
       await client.query('COMMIT'); return camel(passport);
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
+  }
+
+  async createIdentityLock({ avatar, brandId, identityLock, lockHash, provenance, actor }) {
+    const version = Number((await this.db.query(`SELECT coalesce(max(version),0)+1 AS version
+      FROM avatar_studio.identity_lock_versions WHERE identity_version_id=$1`, [avatar.identityVersionId])).rows[0].version);
+    return camel((await this.db.query(`INSERT INTO avatar_studio.identity_lock_versions
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,version,permanent_attributes,
+       temporary_attributes,uncertain_attributes,classification_notes,lock_hash,provenance,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [avatar.workspaceId,brandId,avatar.vertical,avatar.id,avatar.identityVersionId,version,identityLock.permanent,
+      identityLock.temporary,identityLock.uncertain,identityLock.notes,lockHash,provenance,actor])).rows[0]);
+  }
+
+  async storePassportGenerationSpec({ avatar, plan, actor }) {
+    const result = await this.db.query(`INSERT INTO avatar_studio.passport_generation_specs
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,source_asset_ids,
+       required_views,studio_specification,camera_specification,identity_constraints,negative_constraints,
+       requested_candidate_count,prompt_version,spec_version,provider_capability_requirements,preferred_provider,
+       preferred_model,cost_plan,planned_external_call_count,execution_authorized,human_approval_state,
+       original_generation_spec_id,repair_delta,plan_fingerprint,provenance,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,false,$21,$22,$23,$24,$25,$26)
+      ON CONFLICT(workspace_id,plan_fingerprint) DO NOTHING RETURNING *`,
+    [avatar.workspaceId,plan.brandId,avatar.vertical,avatar.id,plan.identityVersionId,plan.identityLockVersionId,
+      json(plan.sourceAssetIds),json(plan.requiredViews),plan.studioSpecification,plan.cameraSpecification,plan.identityConstraints,
+      { canonical: plan.negativeConstraints, temporaryExclusions: plan.temporaryExclusions, uncertainFeatures: plan.uncertainFeatures },
+      plan.requestedCandidateCount,plan.promptVersion,plan.specVersion,json(plan.providerCapabilityRequirements),plan.preferredProvider,
+      plan.preferredModel,plan.costPlan,plan.plannedExternalCallCount,plan.humanApprovalState,plan.originalGenerationSpecId || null,
+      plan.repairDelta ? json(plan.repairDelta) : null,plan.planFingerprint,plan.provenance,actor]);
+    if (result.rows[0]) return camel(result.rows[0]);
+    return camel((await this.db.query(`SELECT * FROM avatar_studio.passport_generation_specs
+      WHERE workspace_id=$1 AND plan_fingerprint=$2`, [avatar.workspaceId,plan.planFingerprint])).rows[0]);
+  }
+
+  async sourceForIntake({ intakeId, avatarId, brandId }) {
+    const row = (await this.db.query(`SELECT * FROM avatar_studio.source_assets
+      WHERE intake_asset_id=$1 AND character_id=$2 AND brand_id=$3`, [intakeId,avatarId,brandId])).rows[0];
+    if (!row) return null; const result = camel(row);
+    result.roles = (await this.db.query('SELECT role FROM avatar_studio.source_asset_roles WHERE source_asset_id=$1 ORDER BY role',[row.id])).rows.map((item) => item.role);
+    return result;
+  }
+
+  async generationSpec({ id, avatarId, brandId }) {
+    const row = (await this.db.query(`SELECT * FROM avatar_studio.passport_generation_specs
+      WHERE id=$1 AND character_id=$2 AND brand_id=$3`, [id,avatarId,brandId])).rows[0];
+    return row ? camel(row) : null;
+  }
+
+  async createPassportCandidate({ avatar, brandId, generationSpec, intake, source, repairParentCandidateId = null, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_candidates
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,generation_spec_id,
+       intake_asset_id,source_asset_id,artifact_id,artifact_version,source_asset_ids,provider,model,provider_request_id,
+       prompt_version,spec_version,known_cost,cost_status,provenance,repair_parent_candidate_id,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+    [avatar.workspaceId,brandId,avatar.vertical,avatar.id,generationSpec.identityVersionId,generationSpec.identityLockVersionId,
+      generationSpec.id,intake.id,source.id,intake.artifactId,intake.artifactVersion,json(generationSpec.sourceAssetIds),
+      'MANUAL_UPLOAD','none',null,generationSpec.promptVersion,generationSpec.specVersion,null,'UNKNOWN',
+      { source: 'AVATAR_STUDIO_MANUAL_PASSPORT_UPLOAD', intakeAssetId: intake.id, contentHash: intake.contentHash },
+      repairParentCandidateId,actor])).rows[0]);
+  }
+
+  async passportCandidate({ id, avatarId, brandId }) {
+    const row = (await this.db.query(`SELECT pc.*,ai.width,ai.height,ai.mime_type,ai.effective_gate0_status
+      FROM avatar_studio.passport_candidates pc JOIN (
+        SELECT ai.*,CASE WHEN ai.gate0_status='BLOCK' THEN 'BLOCK'
+          WHEN gre.action IN ('REJECT','KEEP_BLOCKED') THEN 'BLOCK'
+          WHEN ai.gate0_status='REVIEW' AND gre.action='APPROVE_FOR_USE' THEN 'PASS' ELSE ai.gate0_status END AS effective_gate0_status
+        FROM avatar_studio.asset_intakes ai LEFT JOIN LATERAL (SELECT * FROM avatar_studio.gate0_review_events e
+          WHERE e.intake_asset_id=ai.id AND e.action<>'MARK_RIGHTS_VERIFIED' ORDER BY e.decided_at DESC,e.id DESC LIMIT 1) gre ON true
+      ) ai ON ai.id=pc.intake_asset_id WHERE pc.id=$1 AND pc.character_id=$2 AND pc.brand_id=$3`, [id,avatarId,brandId])).rows[0];
+    return row ? camel(row) : null;
+  }
+
+  async createPassportQaSnapshot({ candidate, qa, sourceEvidence, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_qa_snapshots
+      (workspace_id,brand_id,character_id,candidate_id,engine,engine_version,status,same_person_confidence,dimensions,
+       panel_regions,checks,warnings,blocking_failures,reasoning,source_evidence,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+    [candidate.workspaceId,candidate.brandId,candidate.characterId,candidate.id,qa.engine,qa.engineVersion,qa.status,
+      qa.samePersonConfidence,qa.dimensions || {},json(qa.panelRegions),json(qa.checks),json(qa.warnings),
+      json(qa.blockingFailures),qa.reasoning,sourceEvidence,actor])).rows[0]);
+  }
+
+  async latestPassportQa({ candidateId }) {
+    const row = (await this.db.query(`SELECT * FROM avatar_studio.passport_qa_snapshots WHERE candidate_id=$1
+      ORDER BY created_at DESC,id DESC LIMIT 1`,[candidateId])).rows[0];
+    return row ? camel(row) : null;
+  }
+
+  async addPassportReviewEvent({ candidate, qaSnapshotId = null, action, rejectionReason = null, humanNote = null, guidedReview = {}, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.passport_candidate_review_events
+      (workspace_id,brand_id,character_id,candidate_id,qa_snapshot_id,action,rejection_reason,human_note,guided_review,decided_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [candidate.workspaceId,candidate.brandId,candidate.characterId,candidate.id,qaSnapshotId,action,rejectionReason,humanNote,
+      guidedReview,actor])).rows[0]);
+  }
+
+  async certifyPassportCandidate({ candidate, qa, warningsAcknowledged, actor }) {
+    const result = await this.db.query(`INSERT INTO avatar_studio.passport_certification_events
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,candidate_id,
+       source_artifact_id,source_artifact_version,qa_snapshot_id,warnings_acknowledged,explicit_confirmation,certified_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12) RETURNING *`,
+    [candidate.workspaceId,candidate.brandId,candidate.verticalCode,candidate.characterId,candidate.identityVersionId,
+      candidate.identityLockVersionId,candidate.id,candidate.artifactId,candidate.artifactVersion,qa.id,
+      json(warningsAcknowledged || []),actor]);
+    return camel(result.rows[0]);
   }
 
   async certifyPassport({ avatar, passportId, decision, notes, actor }) {

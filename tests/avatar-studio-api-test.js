@@ -25,6 +25,13 @@ async function main() {
     async create(value) { calls.push(['create', value]); return { id: 'avatar-1', currentLevel: 0 }; },
     async updateIdentity(value) { calls.push(['updateIdentity', value]); return { identityVersion: { version: 2 } }; },
     async avatar(value) { calls.push(['avatar', value]); return { id: value.id }; },
+    async passportLab(value) { calls.push(['passportLab', value]); return { id: value.avatarId, currentLevel: 0 }; },
+    async createIdentityLock(value) { calls.push(['identityLock', value]); return { identityLock: { id: 'lock-1' } }; },
+    async planPassportGeneration(value) { calls.push(['passportPlan', value]); return { id: 'plan-1', paidProviderCalls: 0, externalGenerationCalls: 0 }; },
+    async uploadPassportCandidate(value) { calls.push(['passportCandidate', value]); return { candidate: { id: 'candidate-1' }, externalGenerationCalls: 0 }; },
+    async runPassportQa(value) { calls.push(['passportQa', value]); return { qaSnapshot: { id: 'qa-1' }, automatedCertification: false }; },
+    async reviewPassportCandidate(value) { calls.push(['passportReview', value]); return { reviewEvent: { action: value.action } }; },
+    async certifyPassportCandidate(value) { calls.push(['passportCandidateCertify', value]); return { avatar: { currentLevel: 1 }, paidProviderCalls: 0 }; },
     async reviewQueue(value) { calls.push(['reviewQueue', value]); return []; },
     async listIntakes(value) { calls.push(['listIntakes', value]); return []; },
     async existingAssets(value) { calls.push(['existingAssets', value]); return []; },
@@ -48,6 +55,19 @@ async function main() {
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars', { internalName: 'Mara' })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity',
       { brandId: 'brand-1', identity: { personality: 'calm' } })).status, 201);
+    assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/passport-lab?brandId=brand-1')).status, 200);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity-locks',
+      { brandId: 'brand-1', humanApproval: true })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-generation-plans',
+      { brandId: 'brand-1', sourceAssetIds: ['source-1'] })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-candidates',
+      { brandId: 'brand-1', generationSpecId: 'plan-1', intakeId: 'intake-1' })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-candidates/candidate-1/qa',
+      { brandId: 'brand-1' })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-candidates/candidate-1/review',
+      { brandId: 'brand-1', action: 'KEEP', humanApproval: true })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-candidates/candidate-1/certify',
+      { brandId: 'brand-1', humanApproval: true, explicitConfirmation: true })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/sources', { brandId: 'brand-1' })).status, 201);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/gate0-reviews?brandId=brand-1')).status, 200);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/intakes?brandId=brand-1')).status, 200);
@@ -72,6 +92,8 @@ async function main() {
     assert.deepEqual(calls.find(([name]) => name === 'list')[1], { brandId: 'brand-1', vertical: 'TRAVEL' });
     assert.equal(calls.find(([name]) => name === 'certify')[1].passportId, 'passport-1');
     assert.equal(calls.find(([name]) => name === 'reviewIntake')[1].intakeId, 'intake-1');
+    assert.equal(calls.find(([name]) => name === 'passportQa')[1].candidateId, 'candidate-1');
+    assert.equal(calls.find(([name]) => name === 'passportCandidateCertify')[1].candidateId, 'candidate-1');
     assert.deepEqual(calls.find(([name]) => name === 'useIntake')[1].roles, ['IDENTITY']);
     assert.equal(providerCalls, 0);
   } finally { await new Promise((resolve) => server.close(resolve)); }

@@ -79,7 +79,8 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const avatarAssetIntakeService = new AvatarAssetIntakeService({ repository: avatarRepository,
     artifactService: new ArtifactService({ storage }), storage, mediaInspector: audioInspector,
     safeUrlImporter: new SafeUrlImporter(), actor });
-  const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService, actor });
+  const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
+    providerCatalog, actor });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, avatarService, avatarRepository, v210Repository,
     avatarAssetIntakeService, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
     server: createControlServer({ service, creativeService, avatarService }) };
