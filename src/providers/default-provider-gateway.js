@@ -13,7 +13,10 @@ function createDefaultProviderGateway({
   routing = {},
   videoProvider = process.env.VIDEO_PROVIDER || null,
 } = {}) {
-  const providers = { nvidia: createNvidiaProvider(nvidia) };
+  const providers = {};
+  if (nvidia.enabled !== false && (nvidia.client || nvidia.apiKey || process.env.NVIDIA_API_KEY)) {
+    providers.nvidia = createNvidiaProvider(nvidia);
+  }
   if (replicate.enabled !== false && (replicate.apiToken || process.env.REPLICATE_API_TOKEN)) {
     providers.replicate = new ReplicateWanVideoAdapter(replicate);
   }
