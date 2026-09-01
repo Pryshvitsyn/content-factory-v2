@@ -1,12 +1,28 @@
 'use strict';
 
+function safeString(value) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 160) : null;
+}
+
+function safeStatus(value) {
+  const status = Number(value);
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+}
+
 class ProviderError extends Error {
   constructor(message, { provider, model, cause } = {}) {
-    super(message);
+    super(message, cause ? { cause } : undefined);
     this.name = 'ProviderError';
     this.provider = provider;
     this.model = model;
     this.cause = cause;
+    // Preserve only structured, non-secret diagnostics from the provider/SDK error.
+    // Consumers must never persist arbitrary provider error messages or response bodies.
+    this.code = safeString(cause?.code) || null;
+    this.status = safeStatus(cause?.status);
+    this.type = safeString(cause?.type) || null;
+    this.causeName = safeString(cause?.name) || null;
+    this.requestId = safeString(cause?.requestID || cause?.requestId || cause?.request_id || cause?._request_id) || null;
   }
 }
 
