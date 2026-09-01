@@ -110,6 +110,26 @@ function createControlServer({ service, creativeService = null, avatarService = 
         if (segments[6] === 'certify') return json(response, 201, await avatarService.certifyPassportCandidate(args));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-generation-plans' && segments[6] === 'preflight'
+        && segments.length === 7) {
+        return json(response, 201, await avatarService.preflightPassportGeneration({ avatarId: segments[3],
+          generationSpecId: segments[5], ...await readJson(request) }));
+      }
+      if (avatarService && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-executions' && segments.length === 6
+        && request.method === 'GET') {
+        return json(response, 200, await avatarService.passportExecution({ id: segments[5], avatarId: segments[3],
+          workspaceId: url.searchParams.get('workspaceId'), brandId: url.searchParams.get('brandId'),
+          vertical: url.searchParams.get('vertical'), identityVersionId: url.searchParams.get('identityVersionId') }));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-executions' && segments.length === 7) {
+        const args = { avatarId: segments[3], executionId: segments[5], ...await readJson(request) };
+        if (segments[6] === 'approve') return json(response, 201, await avatarService.approvePassportGeneration(args));
+        if (segments[6] === 'generate') return json(response, 202, await avatarService.generatePassportCandidates(args));
+        if (segments[6] === 'cancel') return json(response, 201, await avatarService.cancelPassportExecution(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'passports' && segments[6] === 'certify' && segments.length === 7) {
         return json(response, 201, await avatarService.certifyPassport({ avatarId: segments[3], passportId: segments[5],
           ...await readJson(request) }));
