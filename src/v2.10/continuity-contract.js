@@ -93,5 +93,25 @@ function validatePassportIdentityContinuity(input = {}) {
     }) });
 }
 
-module.exports = { resolveReferenceEvidence, validateAvatarContinuityReadiness, validateContinuity,
-  validatePassportIdentityContinuity };
+function validateAvatarL2Continuity(input = {}) {
+  const family = String(input.family || '').toUpperCase();
+  const dimensions = family === 'BODY' ? ['FACE_IDENTITY','APPARENT_AGE','BODY_BUILD','SHOULDER_PROPORTIONS',
+    'TORSO_PROPORTIONS','ARM_PROPORTIONS','LEG_PROPORTIONS','HEAD_BODY_RATIO','POSTURE']
+    : family === 'EXPRESSION' ? ['IDENTITY_STABILITY','EXPRESSION_MATCH','APPARENT_AGE','JAW_STABILITY','NOSE_STABILITY',
+      'EYE_IDENTITY','TEETH_CONTINUITY','HAIR','SKIN']
+      : ['IDENTITY_STABILITY','MOUTH_STATE_MATCH','LIP_GEOMETRY','JAW_STABILITY','TEETH_CONTINUITY','AGE'];
+  const observations=input.observations||{};
+  const checks=dimensions.map((code)=>{const raw=observations[code];const score=typeof raw==='number'&&Number.isFinite(raw)
+    ?Math.max(0,Math.min(1,raw)):null;const status=score!=null?(score>=0.8?'PASS':score>=0.65?'WARN':'FAIL')
+      :String(raw||'').toUpperCase()==='FAIL'?'FAIL':String(raw||'').toUpperCase()==='PASS'?'PASS':'NOT_MEASURED';
+    return Object.freeze({code,status,score,evidence:input.evidence?.[code]||null});});
+  const scored=checks.filter((item)=>item.score!=null);const confidence=scored.length
+    ?Number((scored.reduce((sum,item)=>sum+item.score,0)/scored.length).toFixed(4)):null;
+  return Object.freeze({family,dimensions:Object.freeze(dimensions),checks:Object.freeze(checks),continuityConfidence:confidence,
+    failures:Object.freeze(checks.filter((item)=>item.status==='FAIL').map((item)=>item.code)),
+    warnings:Object.freeze(checks.filter((item)=>['WARN','NOT_MEASURED'].includes(item.status)).map((item)=>item.code)),
+    engine:'V2.10_CONTINUITY_CONTRACT',engineVersion:'v2.10-avatar-l2-v1'});
+}
+
+module.exports = { resolveReferenceEvidence, validateAvatarContinuityReadiness, validateAvatarL2Continuity,
+  validateContinuity, validatePassportIdentityContinuity };

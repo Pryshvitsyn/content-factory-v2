@@ -41,6 +41,18 @@ function evaluateAvatarLevels(avatar = {}) {
   const legacyCertified = (!Array.isArray(avatar.identityLocks) || !avatar.identityLocks.length) && legacyPassportEvidence;
   const passportCertified = v12Certification || legacyCertified;
   const bodyKinds = values(avatar.bodyReferences, 'kind'); const expressionKinds = values(avatar.expressionReferences, 'expression');
+  const hasV13Evidence = avatar.l2ContractVersion === 'V1.3' || ['bodyBuildVersions','bodyGenerationSpecs','bodyReferenceCandidates','bodyReferenceCertifications',
+    'expressionGenerationSpecs','expressionCandidates','expressionCertifications','mouthCalibrationCandidates','l2PackCertificationEvents']
+    .some((key) => Array.isArray(avatar[key]) && avatar[key].length);
+  const l2Certified = (avatar.l2PackCertificationEvents || []).some((event) =>
+    (event.identityVersionId || event.identity_version_id) === currentIdentityVersionId
+      && (event.passportCertificationEventId || event.passport_certification_event_id)
+      && (avatar.passportCertificationEvents || []).some((passport) => passport.id ===
+        (event.passportCertificationEventId || event.passport_certification_event_id)
+        && (passport.identityVersionId || passport.identity_version_id) === currentIdentityVersionId));
+  const legacyL2Complete = !hasV13Evidence && bodyKinds.has('CHEST_UP') && bodyKinds.has('FULL_BODY_STANDING')
+    && bodyKinds.has('SEATED') && expressionKinds.has('NEUTRAL') && expressionKinds.has('WARM_SMILE')
+    && expressionKinds.has('CONCERNED_SERIOUS');
   const continuity = approved(avatar.continuityReadiness || []).find((item) => ['identityStatus','wardrobeStatus','propStatus',
     'locationStatus','geometryStatus','voiceStatus','lipSyncStatus'].every((key) => (item[key] || item[key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)]) === 'PASS'));
 
@@ -57,9 +69,7 @@ function evaluateAvatarLevels(avatar = {}) {
       requirement('IDENTITY_CONSENT_RIGHTS', consent?.status === 'APPROVED'),
       requirement('IDENTITY_LOCK_CURRENT_VERSION', Boolean(currentIdentityLock))],
     [requirement('CERTIFIED_PASSPORT_REQUIRED', passportCertified)],
-    [requirement('BODY_CHEST_UP', bodyKinds.has('CHEST_UP')), requirement('BODY_FULL_STANDING', bodyKinds.has('FULL_BODY_STANDING')),
-      requirement('BODY_SEATED', bodyKinds.has('SEATED')), requirement('EXPRESSION_NEUTRAL', expressionKinds.has('NEUTRAL')),
-      requirement('EXPRESSION_WARM', expressionKinds.has('WARM_SMILE')), requirement('EXPRESSION_SERIOUS', expressionKinds.has('CONCERNED_SERIOUS'))],
+    [requirement('L2_PACK_HUMAN_CERTIFICATION', l2Certified || legacyL2Complete)],
     [requirement('WARDROBE_APPROVED', approved(avatar.wardrobes).length > 0)],
     [requirement('VOICE_APPROVED', approved(avatar.voiceProfiles).length > 0),
       requirement('VOICE_CONSENT', approved(avatar.voiceProfiles).every((voice) => voice.sourceType === 'SYNTHETIC'

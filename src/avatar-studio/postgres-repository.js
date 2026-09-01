@@ -92,6 +92,14 @@ class AvatarStudioPostgresRepository {
       ['identityLocks', 'SELECT * FROM avatar_studio.identity_lock_versions WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
       ['passportGenerationSpecs', 'SELECT * FROM avatar_studio.passport_generation_specs WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
       ['passportCertificationEvents', 'SELECT * FROM avatar_studio.passport_certification_events WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
+      ['bodyBuildVersions', 'SELECT * FROM avatar_studio.body_build_versions WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
+      ['bodyGenerationSpecs', 'SELECT * FROM avatar_studio.body_generation_specs WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
+      ['bodyReferenceCertifications', 'SELECT * FROM avatar_studio.body_reference_certifications WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
+      ['expressionGenerationSpecs', 'SELECT * FROM avatar_studio.expression_generation_specs WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
+      ['expressionCertifications', 'SELECT * FROM avatar_studio.expression_certifications WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
+      ['mouthCalibrationSpecs', 'SELECT * FROM avatar_studio.mouth_calibration_specs WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
+      ['mouthCalibrationCertifications', 'SELECT * FROM avatar_studio.mouth_calibration_certifications WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
+      ['l2PackCertificationEvents', 'SELECT * FROM avatar_studio.l2_pack_certification_events WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
     ];
     const results = await Promise.all(tableQueries.map(([, sql]) => this.db.query(sql, [id])));
     const avatar = camel(base);
@@ -127,6 +135,10 @@ class AvatarStudioPostgresRepository {
       candidate.certificationState = candidate.certificationEventId ? 'CERTIFIED' : 'UNCERTIFIED';
     }
     avatar.passportCandidates = candidates;
+    avatar.l2ContractVersion = 'V1.3';
+    avatar.bodyReferenceCandidates = await this.listL2Candidates({ family:'BODY',avatarId:id,brandId });
+    avatar.expressionCandidates = await this.listL2Candidates({ family:'EXPRESSION',avatarId:id,brandId });
+    avatar.mouthCalibrationCandidates = await this.listL2Candidates({ family:'MOUTH',avatarId:id,brandId });
     avatar.passportExecutions = await this.listPassportExecutions({ avatarId: id, brandId });
     return avatar;
   }
@@ -137,6 +149,120 @@ class AvatarStudioPostgresRepository {
     [workspaceId, avatarId, state.currentLevel, state.currentLevelName, json(state.completedRequirements),
       json(state.missingRequirements), json(state.blockingFailures)]);
   }
+
+  l2Tables(family) {
+    const map={BODY:{spec:'body_generation_specs',candidate:'body_reference_candidates',qa:'body_qa_snapshots',review:'body_review_events',cert:'body_reference_certifications'},
+      EXPRESSION:{spec:'expression_generation_specs',candidate:'expression_candidates',qa:'expression_qa_snapshots',review:'expression_review_events',cert:'expression_certifications'},
+      MOUTH:{spec:'mouth_calibration_specs',candidate:'mouth_calibration_candidates',qa:'mouth_calibration_qa',review:null,cert:'mouth_calibration_certifications'}};
+    if(family&&!map[family]) throw new AvatarStudioError(400,'L2_SPEC_KIND_INVALID','Unknown L2 family');return family?map[family]:map;
+  }
+
+  async createBodyBuildVersion({avatar,brandId,passport,identityLock,profile,profileHash,actor}) {
+    const version=Number((await this.db.query('SELECT coalesce(max(version),0)+1 AS version FROM avatar_studio.body_build_versions WHERE passport_certification_event_id=$1',[passport.id])).rows[0].version);
+    return camel((await this.db.query(`INSERT INTO avatar_studio.body_build_versions
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,passport_certification_event_id,version,profile,profile_hash,provenance,approved_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,[avatar.workspaceId,brandId,avatar.vertical,avatar.id,
+      avatar.identityVersionId,identityLock.id,passport.id,version,profile,profileHash,{source:'AVATAR_STUDIO_BODY_BUILD_HUMAN_APPROVAL',immutable:true},actor])).rows[0]);
+  }
+
+  async storeL2GenerationSpec({avatar,spec,actor}) {
+    const table=this.l2Tables(spec.kind).spec;
+    const result=await this.db.query(`INSERT INTO avatar_studio.${table}
+      (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,passport_certification_event_id,
+       body_build_version_id,reference_type,specification,provider_capability,preferred_provider,preferred_model,requested_candidate_count,
+       calls_per_candidate,cost_plan,prompt_version,spec_version,approval_state,execution_authorized,original_generation_spec_id,repair_delta,
+       plan_fingerprint,provenance,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1,$15,$16,$17,$18,false,$19,$20,$21,$22,$23)
+      ON CONFLICT DO NOTHING RETURNING *`,[avatar.workspaceId,spec.brandId,avatar.vertical,avatar.id,spec.identityVersionId,spec.identityLockVersionId,
+      spec.passportCertificationEventId,spec.bodyBuildVersionId,spec.referenceType,spec,spec.providerCapability,spec.preferredProvider,spec.preferredModel,
+      spec.requestedCandidateCount,spec.costPlan,spec.promptVersion,spec.specVersion,spec.approvalState,spec.originalGenerationSpecId,spec.repairDelta,
+      spec.planFingerprint,spec.provenance,actor]);
+    if(result.rows[0])return camel(result.rows[0]);return camel((await this.db.query(`SELECT * FROM avatar_studio.${table} WHERE workspace_id=$1 AND plan_fingerprint=$2`,[avatar.workspaceId,spec.planFingerprint])).rows[0]);
+  }
+
+  async l2GenerationSpec({id,kind=null,avatarId,brandId}) {
+    const families=kind?[kind]:Object.keys(this.l2Tables());
+    for(const family of families){const table=this.l2Tables(family).spec;const row=(await this.db.query(`SELECT *, '${family}' AS kind FROM avatar_studio.${table} WHERE id=$1 AND character_id=$2 AND brand_id=$3`,[id,avatarId,brandId])).rows[0];if(row)return camel(row);}return null;
+  }
+  async listL2Candidates({family,avatarId,brandId}) { const t=this.l2Tables(family);const rows=(await this.db.query(`SELECT c.*,q.id AS qa_snapshot_id,q.status AS qa_status,
+      cert.id AS certification_event_id,ai.width,ai.height,ai.mime_type FROM avatar_studio.${t.candidate} c JOIN avatar_studio.asset_intakes ai ON ai.id=c.intake_asset_id
+      LEFT JOIN LATERAL(SELECT * FROM avatar_studio.${t.qa} x WHERE x.candidate_id=c.id ORDER BY x.created_at DESC,x.id DESC LIMIT 1) q ON true
+      LEFT JOIN avatar_studio.${t.cert} cert ON cert.candidate_id=c.id WHERE c.character_id=$1 AND ($2::uuid IS NULL OR c.brand_id=$2) ORDER BY c.created_at,c.id`,[avatarId,brandId])).rows.map(camel);
+    return rows.map((item)=>({...item,previewUrl:`/api/avatar-studio/intakes/${encodeURIComponent(item.intakeAssetId)}/content?brandId=${encodeURIComponent(item.brandId)}&avatarId=${encodeURIComponent(item.characterId)}`})); }
+  async l2Candidate({id,family,avatarId,brandId}) { return (await this.listL2Candidates({family,avatarId,brandId})).find((item)=>item.id===id)||null; }
+  async createL2Candidate({family,avatar,spec,intake,source,repairParentCandidateId,actor}) { const table=this.l2Tables(family).candidate;
+    return camel((await this.db.query(`INSERT INTO avatar_studio.${table}(workspace_id,brand_id,vertical_code,character_id,identity_version_id,
+      identity_lock_version_id,passport_certification_event_id,body_build_version_id,generation_spec_id,reference_type,intake_asset_id,source_asset_id,
+      artifact_id,artifact_version,provider,model,prompt_version,spec_version,cost_status,provenance,repair_parent_candidate_id,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'MANUAL_UPLOAD','none',$15,$16,'UNKNOWN',$17,$18,$19) RETURNING *`,
+    [avatar.workspaceId,spec.brandId,avatar.vertical,avatar.id,spec.identityVersionId,spec.identityLockVersionId,spec.passportCertificationEventId,
+      spec.bodyBuildVersionId,spec.id,spec.referenceType,intake.id,source.id,intake.artifactId,intake.artifactVersion,spec.promptVersion,spec.specVersion,
+      {source:'AVATAR_STUDIO_L2_MANUAL_UPLOAD',intakeAssetId:intake.id,contentHash:intake.contentHash},repairParentCandidateId,actor])).rows[0]); }
+  async createL2QaSnapshot({family,candidate,qa,sourceEvidence,actor}) { const table=this.l2Tables(family).qa;
+    return camel((await this.db.query(`INSERT INTO avatar_studio.${table}(workspace_id,brand_id,character_id,candidate_id,engine,engine_version,status,
+      continuity_confidence,dimensions,checks,warnings,blocking_failures,geometry,reasoning,source_evidence,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,[candidate.workspaceId,candidate.brandId,
+      candidate.characterId,candidate.id,qa.engine,qa.engineVersion,qa.status,qa.bodyContinuityConfidence,json(qa.dimensions),json(qa.checks),
+      json(qa.warnings),json(qa.blockingFailures),qa.geometry,qa.reasoning,sourceEvidence,actor])).rows[0]); }
+  async latestL2Qa({family,candidateId}) { const table=this.l2Tables(family).qa;const row=(await this.db.query(`SELECT * FROM avatar_studio.${table} WHERE candidate_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1`,[candidateId])).rows[0];return row?camel(row):null; }
+  async addL2ReviewEvent({family,candidate,qaSnapshotId,action,rejectionReason,humanNote,guidedReview,actor}) { const table=this.l2Tables(family).review;
+    if(!table)return Object.freeze({id:null,action,note:'Mouth calibration uses direct guided certification'});
+    return camel((await this.db.query(`INSERT INTO avatar_studio.${table}(workspace_id,brand_id,character_id,candidate_id,qa_snapshot_id,action,rejection_reason,human_note,guided_review,decided_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[candidate.workspaceId,candidate.brandId,candidate.characterId,candidate.id,
+      qaSnapshotId,action,rejectionReason,humanNote,guidedReview,actor])).rows[0]); }
+  async latestL2Review({family,candidateId}) { const table=this.l2Tables(family).review;if(!table)return null;const row=(await this.db.query(
+    `SELECT * FROM avatar_studio.${table} WHERE candidate_id=$1 ORDER BY decided_at DESC,id DESC LIMIT 1`,[candidateId])).rows[0];return row?camel(row):null; }
+  async certifyL2Reference({family,candidate,qa,guidedReview,warningsAcknowledged,actor}) { const table=this.l2Tables(family).cert;
+    return camel((await this.db.query(`INSERT INTO avatar_studio.${table}(workspace_id,brand_id,vertical_code,character_id,identity_version_id,
+      passport_certification_event_id,body_build_version_id,candidate_id,reference_type,qa_snapshot_id,source_artifact_id,source_artifact_version,
+      guided_review,warnings_acknowledged,explicit_confirmation,certified_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,$15) RETURNING *`,
+    [candidate.workspaceId,candidate.brandId,candidate.verticalCode,candidate.characterId,candidate.identityVersionId,candidate.passportCertificationEventId,
+      candidate.bodyBuildVersionId,candidate.id,candidate.referenceType,qa.id,candidate.artifactId,candidate.artifactVersion,guidedReview,json(warningsAcknowledged),actor])).rows[0]); }
+  async certifyL2Pack({avatar,brandId,passport,bodyBuild,bodyCertifications,expressionCertifications,warningsAcknowledged,actor}) {
+    const bodies=bodyCertifications.filter((item)=>item.bodyBuildVersionId===bodyBuild.id);const expressions=expressionCertifications.filter((item)=>item.bodyBuildVersionId===bodyBuild.id);
+    return camel((await this.db.query(`INSERT INTO avatar_studio.l2_pack_certification_events(workspace_id,brand_id,vertical_code,character_id,
+      identity_version_id,identity_lock_version_id,passport_certification_event_id,body_build_version_id,body_certification_ids,expression_certification_ids,
+      qa_snapshot_ids,warnings_acknowledged,explicit_confirmation,certified_by,provenance) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13,$14) RETURNING *`,
+    [avatar.workspaceId,brandId,avatar.vertical,avatar.id,avatar.identityVersionId,bodyBuild.identityLockVersionId,passport.id,bodyBuild.id,
+      json(bodies.map((x)=>x.id)),json(expressions.filter((x)=>['NEUTRAL','WARM_SMILE','SERIOUS_CONCERNED'].includes(x.referenceType)).map((x)=>x.id)),
+      json([...bodies,...expressions].map((x)=>x.qaSnapshotId)),json(warningsAcknowledged),actor,{source:'AVATAR_STUDIO_L2_FINAL_HUMAN_CERTIFICATION',immutable:true}])).rows[0]); }
+  async createL2Execution({spec,snapshot,preflightFingerprint,actor}) { return camel((await this.db.query(`INSERT INTO avatar_studio.l2_generation_executions
+    (workspace_id,brand_id,vertical_code,character_id,identity_version_id,passport_certification_event_id,generation_kind,generation_spec_id,
+     provider,model,adapter_family,capability,candidate_count,total_planned_calls,cost_plan,maximum_allowed_cost,preflight_snapshot,preflight_fingerprint,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,[snapshot.workspaceId,snapshot.brandId,
+    snapshot.vertical,snapshot.avatarId,snapshot.identityVersionId,snapshot.passportCertificationEventId,spec.kind,spec.id,snapshot.provider,snapshot.model,
+    snapshot.adapterFamily,snapshot.capability,snapshot.candidateCount,snapshot.totalPlannedCalls,snapshot.costPlan,snapshot.maximumAllowedCost,snapshot,preflightFingerprint,actor])).rows[0]); }
+  async l2Execution({id,workspaceId,brandId,vertical,avatarId,identityVersionId}) { const row=(await this.db.query(`SELECT e.*,a.id AS approval_id,
+    a.preflight_fingerprint AS approval_preflight_fingerprint,a.maximum_allowed_cost AS approval_maximum_allowed_cost,a.unknown_cost_acknowledged
+    FROM avatar_studio.l2_generation_executions e LEFT JOIN avatar_studio.l2_generation_execution_approvals a ON a.execution_id=e.id
+    WHERE e.id=$1 AND e.workspace_id=$2 AND e.brand_id=$3 AND e.vertical_code=$4 AND e.character_id=$5 AND e.identity_version_id=$6`,[id,workspaceId,brandId,vertical,avatarId,identityVersionId])).rows[0];
+    if(!row)return null;const out=camel(row);if(out.approvalId)out.approval={id:out.approvalId,preflightFingerprint:out.approvalPreflightFingerprint};out.attempts=(await this.db.query('SELECT * FROM avatar_studio.l2_generation_attempts WHERE execution_id=$1',[id])).rows.map(camel);return out; }
+  async approveL2Execution({execution,unknownCostAcknowledged,actor}) { return camel((await this.db.query(`INSERT INTO avatar_studio.l2_generation_execution_approvals
+    (execution_id,preflight_fingerprint,maximum_allowed_cost,unknown_cost_acknowledged,approved_by) VALUES($1,$2,$3,$4,$5) RETURNING *`,
+    [execution.id,execution.preflightFingerprint,execution.maximumAllowedCost,unknownCostAcknowledged,actor])).rows[0]); }
+  async createL2Attempt({execution,ordinal,requestFingerprint,actor}) { const idempotencyKey=`avatar-l2:${execution.id}:${ordinal}`;
+    const attempt=camel((await this.db.query(`INSERT INTO avatar_studio.l2_generation_attempts(execution_id,ordinal,request_fingerprint,idempotency_key,status,provenance)
+      VALUES($1,$2,$3,$4,'STARTED',$5) RETURNING *`,[execution.id,ordinal,requestFingerprint,idempotencyKey,{source:'EXPLICIT_APPROVED_L2_EXECUTION',actor}])).rows[0]);
+    await this.addL2AttemptEvent({execution,attempt,status:'STARTED',actor});return attempt; }
+  async addL2AttemptEvent({execution,attempt,status,providerRequestId=null,failureClassification=null,safeErrorMessage=null,responseMetadata={},actor}) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.l2_generation_attempt_events(workspace_id,brand_id,character_id,attempt_id,status,
+      provider_request_id,failure_classification,safe_error_message,response_metadata,recorded_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [execution.workspaceId,execution.brandId,execution.characterId,attempt.id,status,providerRequestId,failureClassification,safeErrorMessage,responseMetadata,actor])).rows[0]); }
+  async createGeneratedL2Candidate({family,avatar,spec,intake,source,execution,attempt,providerResult,actor}) { const table=this.l2Tables(family).candidate;
+    return camel((await this.db.query(`INSERT INTO avatar_studio.${table}(workspace_id,brand_id,vertical_code,character_id,identity_version_id,
+      identity_lock_version_id,passport_certification_event_id,body_build_version_id,generation_spec_id,reference_type,intake_asset_id,source_asset_id,
+      artifact_id,artifact_version,provider,model,provider_request_id,prompt_version,spec_version,known_cost,cost_status,provenance,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
+    [avatar.workspaceId,execution.brandId,avatar.vertical,avatar.id,spec.identityVersionId,spec.identityLockVersionId,spec.passportCertificationEventId,
+      spec.bodyBuildVersionId,spec.id,spec.referenceType,intake.id,source.id,intake.artifactId,intake.artifactVersion,execution.provider,execution.model,
+      providerResult.requestId,spec.promptVersion,spec.specVersion,providerResult.actualKnownCost,providerResult.actualKnownCost==null?'UNKNOWN':'KNOWN',
+      {source:'AVATAR_STUDIO_APPROVED_L2_PROVIDER_EXECUTION',executionId:execution.id,attemptId:attempt.id,contentHash:intake.contentHash,
+        repairDelta:spec.repairDelta||null},actor])).rows[0]); }
+  async createL2ExecutionResult({family,execution,attempt,candidate,intake,providerResult,actor}) { return camel((await this.db.query(`INSERT INTO avatar_studio.l2_generation_results
+    (workspace_id,brand_id,vertical_code,character_id,execution_id,attempt_id,generation_kind,candidate_id,artifact_id,artifact_version,
+     content_hash,storage_key,provider_request_id,provenance,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+    [execution.workspaceId,execution.brandId,execution.verticalCode,execution.characterId,execution.id,attempt.id,family,candidate.id,
+      intake.artifactId,intake.artifactVersion,intake.contentHash,intake.artifactStorageKey,providerResult.requestId,
+      {source:'AVATAR_STUDIO_L2_EXECUTION_RESULT',immutable:true},actor])).rows[0]); }
 
   async appendIdentityVersion({ avatar, brandId, identity, identityHash, provenance, actor }) {
     const client = await this.db.connect();

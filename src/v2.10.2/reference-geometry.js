@@ -195,7 +195,18 @@ function validateLocationReferenceGeometry(location = {}) {
     geometry: decoded, checks: Object.freeze(checks), contract: 'V2.10.2_REFERENCE_GEOMETRY' });
 }
 
+function validateAvatarL2ReferenceGeometry({ width,height,referenceType }={}) {
+  let decoded=null;const checks=[];
+  try { decoded=geometry(width,height);checks.push(Object.freeze({code:'DECODED_DIMENSIONS',status:'PASS'})); }
+  catch(error){checks.push(Object.freeze({code:'DECODED_DIMENSIONS',status:'FAIL',reason:error.message}));}
+  const portraitRequired=['FULL_BODY_STANDING_NEUTRAL','SEATED_NEUTRAL'].includes(referenceType);
+  if(decoded) checks.push(Object.freeze({code:'REFERENCE_FRAMING_GEOMETRY',status:portraitRequired&&decoded.orientation==='LANDSCAPE'?'WARN':'PASS',
+    evidence:{orientation:decoded.orientation,referenceType}}));
+  return Object.freeze({status:checks.some((item)=>item.status==='FAIL')?'FAIL':checks.some((item)=>item.status==='WARN')?'WARN':'PASS',
+    geometry:decoded,checks:Object.freeze(checks),contract:'V2.10.2_REFERENCE_GEOMETRY'});
+}
+
 module.exports = { ASPECT_TOLERANCE, MAX_SAFE_RELATIVE_ASPECT_DELTA, FfmpegReferenceGeometryNormalizer,
   NORMALIZATION_VERSION, ReferenceGeometryError, compatible, expectedOrientation, geometry,
   normalizeRotationDegrees, parseAspectRatio, referenceEvidence, relativeAspectDelta, targetDimensions,
-  validateLocationReferenceGeometry };
+  validateAvatarL2ReferenceGeometry, validateLocationReferenceGeometry };
