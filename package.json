@@ -7,6 +7,7 @@
   "scripts": {
     "test:v2.10.3": "node tests/v2.10.3-cross-shot-continuity-test.js && node tests/v2.10.3-dashboard-continuity-ui-test.js && node tests/v2.10.3-dashboard-quality-recovery-wiring-test.js",
     "test:v2.10.4": "node tests/v2.10.4-source-creative-recovery-test.js",
+    "test:v2.10.4.1": "node tests/v2.10.4-source-creative-recovery-test.js",
     "test:v2.10.4:postgres": "node tests/v2.10.4-source-creative-recovery-postgres-test.js",
     "test:v2.10.2": "node tests/v2.10.2-reference-geometry-recovery-test.js",
     "test:v2.10.2:postgres": "node tests/v2.10.2-reference-geometry-postgres-test.js",

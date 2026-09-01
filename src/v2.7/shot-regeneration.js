@@ -3,6 +3,9 @@
 const crypto = require('node:crypto');
 const { buildProductionInput, stableFingerprint } = require('../v2.5/production-input');
 
+const SOURCE_RECOVERY_EXECUTION_PROJECTION_VERSION = 'v2.10.4.1';
+const SOURCE_RECOVERY_KINDS = new Set(['SOURCE_CREATIVE', 'SOURCE_GEOMETRY']);
+
 function revisionAssetId(sourceAssetId, requestId) {
   return `${sourceAssetId}-rev-${requestId.replaceAll('-', '').slice(0, 12)}`;
 }
@@ -59,4 +62,47 @@ function buildShotRevision(raw, { shotId, requestId, instruction = null, revisio
   return Object.freeze({ raw: updated, input, sourceAssetId, replacementAssetId, revisionNo });
 }
 
-module.exports = { buildShotRevision, revisionAssetId };
+function buildSourceRecoveryExecutionInput(canonicalRevision, { sourceAssetId, replacementAssetId,
+  recoveryKind, retryReason = null, revisionNo = 1 } = {}) {
+  if (!SOURCE_RECOVERY_KINDS.has(recoveryKind)) {
+    throw Object.assign(new Error('Source recovery execution requires a bounded recovery kind'), {
+      code: 'SOURCE_RECOVERY_PLAN_INVALID',
+    });
+  }
+  const source = structuredClone(canonicalRevision);
+  const replacement = source.assetPlan?.assets?.find((asset) => asset.asset_id === replacementAssetId
+    && asset.kind === 'video');
+  const shot = source.shotPlan?.shots?.find((candidate) => candidate.required_assets?.includes(replacementAssetId));
+  const scene = source.script?.scenes?.find((candidate) => String(candidate.scene_number) === String(shot?.scene_id));
+  if (!replacement || !shot || !scene) {
+    throw Object.assign(new Error('Bounded source recovery projection cannot resolve its replacement shot'), {
+      code: 'SOURCE_RECOVERY_PLAN_INVALID',
+    });
+  }
+
+  const durationSeconds = Number(shot.duration_seconds);
+  const projectedAsset = { ...replacement, required_for_shots: Object.freeze([shot.shot_id]) };
+  const projectedShot = { ...shot, required_assets: Object.freeze([replacementAssetId]) };
+  const projectedScene = { ...scene, duration_seconds: durationSeconds,
+    dialogue_or_voiceover: source.script.approved_spoken_copy };
+  const recovery = Object.freeze({ projectionVersion: SOURCE_RECOVERY_EXECUTION_PROJECTION_VERSION,
+    canonicalRevisionFingerprint: canonicalRevision.fingerprint, recoveryKind, sourceAssetId,
+    replacementAssetId, retryReason, revisionNo });
+  const normalized = { ...source,
+    targetDurationSeconds: durationSeconds,
+    voiceover: Object.freeze({ ...(source.voiceover || {}), enabled: false }),
+    captions: Object.freeze({ ...(source.captions || {}), enabled: false, end_title: null }),
+    postProduction: source.postProduction ? Object.freeze({ ...source.postProduction,
+      endTitle: source.postProduction.endTitle
+        ? Object.freeze({ ...source.postProduction.endTitle, enabled: false }) : source.postProduction.endTitle }) : null,
+    script: Object.freeze({ ...source.script, scenes: Object.freeze([Object.freeze(projectedScene)]) }),
+    shotPlan: Object.freeze({ ...source.shotPlan, shots: Object.freeze([Object.freeze(projectedShot)]) }),
+    assetPlan: Object.freeze({ ...source.assetPlan, assets: Object.freeze([Object.freeze(projectedAsset)]) }),
+    profile: Object.freeze({ ...projectedAsset.generation_requirements }),
+    sourceRecoveryExecution: recovery };
+  delete normalized.fingerprint;
+  return Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
+}
+
+module.exports = { buildShotRevision, buildSourceRecoveryExecutionInput, revisionAssetId,
+  SOURCE_RECOVERY_EXECUTION_PROJECTION_VERSION };
