@@ -15,6 +15,7 @@ describe('Avatar Studio dashboard', () => {
     expect(screen.getByRole('heading', { name: 'Avatar Studio' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'LIBRARY' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'PASSPORT LAB' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'BODY + EXPRESSIONS LAB' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'GATE 0 REVIEW' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'CREATE AVATAR' }));
     expect(screen.getByRole('heading', { name: 'Context' })).toBeTruthy();
@@ -139,8 +140,8 @@ describe('Avatar Studio dashboard', () => {
       vertical: 'PSYCHOLOGY_WELLBEING', currentLevel: 1, currentLevelName: 'PASSPORT', nextLevel: { level: 2, name: 'BODY_EXPRESSIONS' },
       completedRequirements: [], missingRequirements: ['BODY_CHEST_UP'], blockingFailures: [], consent: { status: 'APPROVED' } }} />);
     expect(screen.getByRole('heading', { name: 'Next level · L2 BODY_EXPRESSIONS' })).toBeTruthy();
-    expect(screen.getByLabelText('Chest-up artifact ID')).toBeTruthy();
+    expect(screen.getByText(/Open BODY \+ EXPRESSIONS LAB/)).toBeTruthy();
     expect(screen.queryByLabelText('Wardrobe pack name')).toBeNull();
-    expect(screen.getByRole('button', { name: 'APPROVE LEVEL 2' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'APPROVE LEVEL 2' })).toBeNull();
   });
 });

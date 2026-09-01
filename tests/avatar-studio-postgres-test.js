@@ -10,6 +10,7 @@ const { AvatarAssetIntakeService } = require('../src/avatar-studio/asset-intake-
 const { ArtifactService } = require('../src/artifacts/artifact-service');
 const { FilesystemStorageAdapter } = require('../src/storage/storage-adapter');
 const { PassportExecutionService } = require('../src/avatar-studio/passport-execution-service');
+const { AvatarL2Service } = require('../src/avatar-studio/l2-service');
 const { ProviderCatalog } = require('../src/v2.8/provider-catalog');
 
 const WORKSPACE_ID = 'a0000000-0000-4000-8000-000000000001';
@@ -42,6 +43,7 @@ async function main() {
     await db.query(await fs.readFile(path.resolve('migrations/20260831_avatar_studio_v1_1_asset_intake.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab_controlled_execution.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'), 'utf8'));
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Avatar Studio disposable') ON CONFLICT(id) DO NOTHING`, [WORKSPACE_ID]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Attune Avatar Test','attune-avatar-test','ACTIVE')
       ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [BRAND_ID, WORKSPACE_ID]);
@@ -55,8 +57,10 @@ async function main() {
       providerGateway: { async generate() { mockProviderCalls += 1; return { provider:'openai-media',model:'gpt-image-1',
         output:composite,contentType:'image/png',requestId:`mock-postgres-${mockProviderCalls}`,usage:null }; } },
       assetIntakeService:intakeService,storage,env:{LIVE_PAID_GENERATION:'true'},actor:'avatar-test-operator' });
+    const l2Service = new AvatarL2Service({ repository,providerCatalog,providerGateway:{async generate(){mockProviderCalls+=1;}},
+      assetIntakeService:intakeService,storage,env:{LIVE_PAID_GENERATION:'false'},actor:'avatar-test-operator' });
     const service = new AvatarStudioService({ repository, assetIntakeService: intakeService, providerCatalog,
-      passportExecutionService, actor: 'avatar-test-operator' });
+      passportExecutionService,l2Service, actor: 'avatar-test-operator' });
     const l0 = await service.create({ vertical: 'PSYCHOLOGY_WELLBEING', brandIds: [BRAND_ID], internalName: 'Mara Fixture',
       subjectType: 'SYNTHETIC', identity: { agePresentation: 'TO_BE_DEFINED', personality: 'TO_BE_DEFINED',
         role: 'behavioral coach', languages: ['und'], visualDirection: 'TO_BE_DEFINED', permanentAttributes: {},
@@ -177,14 +181,28 @@ async function main() {
       repairDelta:{profile:'preserve original nose silhouette'}});
     assert.equal(repairPlan.originalGenerationSpecId,passportPlan.id); assert.equal(repairPlan.externalGenerationCalls,0);
 
-    let progressed = certified.avatar;
-    for (const kind of ['CHEST_UP','FULL_BODY_STANDING','SEATED']) progressed = (await service.addLevelAsset({ avatarId: l0.id,
-      brandId: BRAND_ID, type: 'BODY', humanApproval: true, value: { kind, artifactId: `body-${kind}`, artifactVersion: 1,
-        approvalStatus: 'APPROVED', provenance: { source: 'POSTGRES_TEST_FIXTURE' } } })).avatar;
-    for (const expression of ['NEUTRAL','WARM_SMILE','CONCERNED_SERIOUS']) progressed = (await service.addLevelAsset({ avatarId: l0.id,
-      brandId: BRAND_ID, type: 'EXPRESSION', humanApproval: true, value: { expression, artifactId: `expression-${expression}`, artifactVersion: 1,
-        approvalStatus: 'APPROVED', provenance: { source: 'POSTGRES_TEST_FIXTURE' } } })).avatar;
-    assert.equal(progressed.currentLevel, 2);
+    const l2Scope={...executionScope,identityVersionId:certified.avatar.identityVersionId};
+    const bodyBuild=await service.createBodyBuild({...l2Scope,profile:{shoulderWidth:'balanced',posture:'relaxed upright'},humanApproval:true});
+    assert.equal(bodyBuild.bodyBuild.profile.apparentHeightRange,'UNKNOWN');
+    const l2Kinds=[...['CHEST_UP_NEUTRAL','FULL_BODY_STANDING_NEUTRAL','SEATED_NEUTRAL'].map((referenceType)=>['BODY',referenceType,'BODY_REFERENCE_CANDIDATE']),
+      ...['NEUTRAL','WARM_SMILE','SERIOUS_CONCERNED'].map((referenceType)=>['EXPRESSION',referenceType,'EXPRESSION_REFERENCE_CANDIDATE'])];
+    for(const [kind,referenceType,role] of l2Kinds){
+      const generationPlan=await service.planL2Reference({...l2Scope,kind,referenceType,requestedCandidateCount:1});
+      const candidateIntake=await service.intakeAsset({avatarId:l0.id,brandId:BRAND_ID,sourceType:'UPLOAD',
+        file:{name:`${referenceType}.png`,mimeType:'image/png',contentBase64:png.toString('base64')},provenance:{source:'POSTGRES_L2_MANUAL_FIXTURE'}});
+      await service.useIntake({avatarId:l0.id,brandId:BRAND_ID,intakeId:candidateIntake.asset.id,roles:[role]});
+      const candidate=(await service.uploadL2Candidate({...l2Scope,kind,generationSpecId:generationPlan.id,intakeId:candidateIntake.asset.id})).candidate;
+      const qa=await service.runL2Qa({...l2Scope,kind,candidateId:candidate.id});
+      await service.reviewL2Candidate({...l2Scope,kind,candidateId:candidate.id,action:'KEEP',humanApproval:true});
+      const guidedReview=kind==='BODY'?{passport:true,bodyBuild:true,anatomy:true,posture:true,temporaryOutfit:true}
+        :{passport:true,targetMatch:true,identityStable:true,facialStructure:true,teeth:true};
+      await service.certifyL2Reference({...l2Scope,kind,candidateId:candidate.id,guidedReview,
+        warningsAcknowledged:qa.analysis.warnings,explicitConfirmation:true,humanApproval:true});
+      assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,1,'individual L2 evidence must remain L1');
+    }
+    const readiness=await service.l2Readiness(l2Scope);assert.equal(readiness.status,'READY_FOR_FINAL_CERTIFICATION');
+    const finalL2=await service.certifyL2Pack({...l2Scope,explicitConfirmation:true,humanApproval:true,warningsAcknowledged:[]});
+    let progressed=finalL2.avatar;assert.equal(progressed.currentLevel,2);
     progressed = (await service.addLevelAsset({ avatarId: l0.id, brandId: BRAND_ID, type: 'WARDROBE', humanApproval: true, value: {
       name: 'Calm Expert', clothingDescription: 'neutral structured knit and trousers', accessories: [],
       prohibitedCombinations: ['construction logos'], referenceArtifacts: [], approvalStatus: 'APPROVED',

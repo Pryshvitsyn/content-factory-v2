@@ -26,6 +26,18 @@ async function main() {
     async updateIdentity(value) { calls.push(['updateIdentity', value]); return { identityVersion: { version: 2 } }; },
     async avatar(value) { calls.push(['avatar', value]); return { id: value.id }; },
     async passportLab(value) { calls.push(['passportLab', value]); return { id: value.avatarId, currentLevel: 0 }; },
+    async bodyExpressionsLab(value) { calls.push(['l2Lab',value]); return {id:value.avatarId,currentLevel:1}; },
+    async createBodyBuild(value) { calls.push(['bodyBuild',value]); return {bodyBuild:{id:'build-1'}}; },
+    async planL2Reference(value) { calls.push(['l2Plan',value]); return {id:'l2-plan-1',externalGenerationCalls:0}; },
+    async uploadL2Candidate(value) { calls.push(['l2Upload',value]); return {candidate:{id:'l2-candidate-1'}}; },
+    async runL2Qa(value) { calls.push(['l2Qa',value]); return {qaSnapshot:{id:'l2-qa-1'},automatedCertification:false}; },
+    async reviewL2Candidate(value) { calls.push(['l2Review',value]); return {reviewEvent:{action:value.action}}; },
+    async certifyL2Reference(value) { calls.push(['l2ReferenceCertify',value]); return {levelUnchanged:true}; },
+    async l2Readiness(value) { calls.push(['l2Readiness',value]); return {status:'READY_FOR_FINAL_CERTIFICATION'}; },
+    async certifyL2Pack(value) { calls.push(['l2PackCertify',value]); return {avatar:{currentLevel:2}}; },
+    async preflightL2Generation(value) { calls.push(['l2Preflight',value]); return {executionId:'l2-execution-1',externalGenerationCalls:0}; },
+    async approveL2Generation(value) { calls.push(['l2Approve',value]); return {status:'APPROVED',externalGenerationCalls:0}; },
+    async generateL2Candidates(value) { calls.push(['l2Generate',value]); providerCalls+=1; return {status:'GENERATED',automaticRetries:0}; },
     async createIdentityLock(value) { calls.push(['identityLock', value]); return { identityLock: { id: 'lock-1' } }; },
     async planPassportGeneration(value) { calls.push(['passportPlan', value]); return { id: 'plan-1', paidProviderCalls: 0, externalGenerationCalls: 0 }; },
     async preflightPassportGeneration(value) { calls.push(['passportPreflight',value]); return {executionId:'execution-1',providerCalls:0}; },
@@ -61,6 +73,7 @@ async function main() {
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity',
       { brandId: 'brand-1', identity: { personality: 'calm' } })).status, 201);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/passport-lab?brandId=brand-1')).status, 200);
+    assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/body-expressions-lab?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1')).status,200);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity-locks',
       { brandId: 'brand-1', humanApproval: true })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-generation-plans',
@@ -81,6 +94,17 @@ async function main() {
       { brandId: 'brand-1', action: 'KEEP', humanApproval: true })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/passport-candidates/candidate-1/certify',
       { brandId: 'brand-1', humanApproval: true, explicitConfirmation: true })).status, 201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/body-builds',{...executionScope,humanApproval:true,profile:{}})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-generation-plans',{...executionScope,kind:'BODY',referenceType:'CHEST_UP_NEUTRAL'})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-generation-plans/l2-plan-1/preflight',{...executionScope,maximumAllowedCost:1})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-executions/l2-execution-1/approve',{...executionScope,explicitConfirmation:true,unknownCostAcknowledged:true})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-executions/l2-execution-1/generate',executionScope)).status,202);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-candidates',{...executionScope,kind:'BODY',generationSpecId:'l2-plan-1',intakeId:'intake-1'})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-candidates/l2-candidate-1/qa',{...executionScope,kind:'BODY'})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-candidates/l2-candidate-1/review',{...executionScope,kind:'BODY',action:'KEEP',humanApproval:true})).status,201);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-candidates/l2-candidate-1/certify',{...executionScope,kind:'BODY',explicitConfirmation:true,humanApproval:true})).status,201);
+    assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/l2-readiness?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1')).status,200);
+    assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-certification',{...executionScope,explicitConfirmation:true,humanApproval:true})).status,201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/sources', { brandId: 'brand-1' })).status, 201);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/gate0-reviews?brandId=brand-1')).status, 200);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/intakes?brandId=brand-1')).status, 200);
@@ -110,9 +134,9 @@ async function main() {
     assert.deepEqual(calls.find(([name]) => name === 'useIntake')[1].roles, ['IDENTITY']);
     assert.equal(calls.find(([name])=>name==='passportPreflight')[1].generationSpecId,'plan-1');
     assert.equal(calls.find(([name])=>name==='passportGenerate')[1].executionId,'execution-1');
-    assert.equal(providerCalls, 1,'only explicit Generate reaches the mocked execution boundary');
+    assert.equal(providerCalls, 2,'only explicit Passport and L2 Generate actions reach mocked execution boundaries');
   } finally { await new Promise((resolve) => server.close(resolve)); }
-  console.log('Avatar Studio dashboard API routing passed; plan/preflight/approval provider calls = 0; explicit mocked Generate calls = 1; real provider calls = 0');
+  console.log('Avatar Studio dashboard API routing passed; plan/preflight/approval provider calls = 0; explicit mocked Generate calls = 2; real provider calls = 0');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });
