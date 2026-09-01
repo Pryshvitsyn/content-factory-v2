@@ -24,6 +24,7 @@ const { AvatarStudioService } = require('../../../src/avatar-studio/service');
 const { AvatarAssetIntakeService } = require('../../../src/avatar-studio/asset-intake-service');
 const { SafeUrlImporter } = require('../../../src/avatar-studio/safe-url-import');
 const { PassportExecutionService } = require('../../../src/avatar-studio/passport-execution-service');
+const { AvatarL2Service } = require('../../../src/avatar-studio/l2-service');
 const { createDefaultProviderGateway } = require('../../../src/providers/default-provider-gateway');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
@@ -81,12 +82,15 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const avatarAssetIntakeService = new AvatarAssetIntakeService({ repository: avatarRepository,
     artifactService: new ArtifactService({ storage }), storage, mediaInspector: audioInspector,
     safeUrlImporter: new SafeUrlImporter(), actor });
+  const avatarProviderGateway = createDefaultProviderGateway({ openai: { apiKey: env.OPENAI_API_KEY },
+      replicate: { enabled: false }, routing: { fallbackOnError: false } });
   const passportExecutionService = new PassportExecutionService({ repository: avatarRepository, providerCatalog,
-    providerGateway: createDefaultProviderGateway({ openai: { apiKey: env.OPENAI_API_KEY },
-      replicate: { enabled: false }, routing: { fallbackOnError: false } }),
+    providerGateway: avatarProviderGateway,
     assetIntakeService: avatarAssetIntakeService, storage, env, actor });
+  const l2Service = new AvatarL2Service({ repository:avatarRepository,providerCatalog,providerGateway:avatarProviderGateway,
+    assetIntakeService:avatarAssetIntakeService,storage,env,actor });
   const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
-    providerCatalog, passportExecutionService, actor });
+    providerCatalog, passportExecutionService, l2Service, actor });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, avatarService, avatarRepository, v210Repository,
     avatarAssetIntakeService, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
     server: createControlServer({ service, creativeService, avatarService }) };

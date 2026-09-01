@@ -21,11 +21,11 @@ function approval(value) {
 }
 
 class AvatarStudioService {
-  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null,
+  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null,
     actor = 'local-operator' } = {}) {
     if (!repository) throw new Error('AvatarStudioService requires repository');
     this.repository = repository; this.assetIntakeService = assetIntakeService; this.providerCatalog = providerCatalog;
-    this.passportExecutionService = passportExecutionService; this.actor = actor;
+    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.actor = actor;
   }
 
   async verticals() { return this.repository.verticals(); }
@@ -178,6 +178,21 @@ class AvatarStudioService {
   async passportExecution(input = {}) { return this.requirePassportExecution().inspect(input); }
   async cancelPassportExecution(input = {}) { return this.requirePassportExecution().cancel(input); }
 
+  requireL2() { if (!this.l2Service) throw new AvatarStudioError(503,'L2_SERVICE_UNAVAILABLE','Body + Expressions Lab is not configured'); return this.l2Service; }
+  async bodyExpressionsLab(input={}) { return this.requireL2().lab(input); }
+  async createBodyBuild(input={}) { return this.requireL2().createBodyBuild(input); }
+  async planL2Reference(input={}) { return this.requireL2().plan(input); }
+  async uploadL2Candidate(input={}) { return this.requireL2().uploadCandidate(input); }
+  async runL2Qa(input={}) { return this.requireL2().qa(input); }
+  async reviewL2Candidate(input={}) { return this.requireL2().review(input); }
+  async certifyL2Reference(input={}) { return this.requireL2().certifyReference(input); }
+  async l2Readiness(input={}) { return this.requireL2().readiness(input); }
+  async certifyL2Pack(input={}) { const result=await this.requireL2().certifyPack(input);return Object.freeze({...result,
+    avatar:await this.refresh(input.avatarId,input.brandId)}); }
+  async preflightL2Generation(input={}) { return this.requireL2().preflight(input); }
+  async approveL2Generation(input={}) { return this.requireL2().approve(input); }
+  async generateL2Candidates(input={}) { return this.requireL2().generate(input); }
+
   async planPassportGeneration({ avatarId, brandId, sourceAssetIds, requestedCandidateCount = 4,
     preferredProvider = null, preferredModel = null, originalGenerationSpecId = null, repairDelta = null } = {}) {
     const avatar = await this.avatar({ id: avatarId, brandId });
@@ -290,6 +305,8 @@ class AvatarStudioService {
 
   async addLevelAsset({ avatarId, brandId, type, value = {}, humanApproval = false } = {}) {
     const avatar = await this.avatar({ id: avatarId, brandId }); const normalizedType = String(type || '').toUpperCase();
+    if (avatar.l2ContractVersion === 'V1.3' && ['BODY','EXPRESSION'].includes(normalizedType)) throw new AvatarStudioError(409,
+      'L2_PACK_CERTIFICATION_REQUIRED','Use Body + Expressions Lab; individual legacy assets cannot produce L2');
     value = { ...value, approvalStatus: approval(value.approvalStatus) };
     if (value.approvalStatus === 'APPROVED' && !humanApproval) {
       throw new AvatarStudioError(409, 'HUMAN_APPROVAL_REQUIRED', 'Approved Avatar Level assets require explicit human approval');

@@ -6,6 +6,8 @@ const { ProviderError, assertProviderResult } = require('./provider-contract');
 
 const DEFAULT_IMAGE_MODEL = 'gpt-image-1';
 const DEFAULT_SPEECH_MODEL = 'gpt-4o-mini-tts';
+const REFERENCE_IMAGE_CAPABILITIES = new Set(['multi-view-identity-reference','character-body-reference',
+  'character-expression-reference','mouth-shape-reference']);
 
 function parseAssetPrompt(prompt) {
   if (!prompt || typeof prompt !== 'string') throw new Error('Media prompt must be a non-empty string');
@@ -25,13 +27,13 @@ function createOpenAIMediaProvider({
     provider: 'openai-media',
 
     modelFor({ capability } = {}) {
-      if (capability === 'image-generation' || capability === 'multi-view-identity-reference') return imageModel;
+      if (capability === 'image-generation' || REFERENCE_IMAGE_CAPABILITIES.has(capability)) return imageModel;
       if (capability === 'speech-generation') return speechModel;
       return null;
     },
 
     supports({ capability, model } = {}) {
-      if (capability === 'image-generation' || capability === 'multi-view-identity-reference') return !model || model === imageModel;
+      if (capability === 'image-generation' || REFERENCE_IMAGE_CAPABILITIES.has(capability)) return !model || model === imageModel;
       if (capability === 'speech-generation') return !model || model === speechModel;
       return false;
     },
@@ -61,9 +63,9 @@ function createOpenAIMediaProvider({
           });
         }
 
-        if (capability === 'multi-view-identity-reference') {
+        if (REFERENCE_IMAGE_CAPABILITIES.has(capability)) {
           if (!Array.isArray(referenceImages) || !referenceImages.length) {
-            throw new Error('Multi-view identity generation requires at least one approved reference image');
+            throw new Error('Character reference generation requires at least one approved reference image');
           }
           const selectedModel = model || imageModel;
           const images = await Promise.all(referenceImages.map((reference, index) => toFile(
@@ -87,7 +89,8 @@ function createOpenAIMediaProvider({
           return assertProviderResult({
             provider: 'openai-media', model: selectedModel, capability, output, mediaUrl: item.url || null,
             contentType: 'image/png', requestId: response.id || null, usage: response.usage || null,
-            provenance: { provider: 'openai-media', model: selectedModel, strategy: 'ONE_EDIT_CALL_PER_THREE_VIEW_COMPOSITE',
+            provenance: { provider: 'openai-media', model: selectedModel, strategy: capability === 'multi-view-identity-reference'
+              ? 'ONE_EDIT_CALL_PER_THREE_VIEW_COMPOSITE' : 'ONE_EDIT_CALL_PER_REFERENCE_CANDIDATE',
               referenceImageCount: referenceImages.length },
           });
         }

@@ -7,7 +7,8 @@ const { inspectAssetGateZero } = require('./gate-zero');
 const { decodeBase64, inspectMedia } = require('./media-intake');
 
 const SOURCE_TYPES = Object.freeze(['UPLOAD','CAMERA','MICROPHONE','EXISTING_ASSET','SAFE_URL_IMPORT']);
-const SOURCE_ROLES = Object.freeze(['IDENTITY','PASSPORT_SOURCE','PASSPORT_CANDIDATE','VOICE_SOURCE','WARDROBE','PRODUCT','LOCATION','STYLE_REFERENCE','PREVIOUS_SHOT']);
+const SOURCE_ROLES = Object.freeze(['IDENTITY','PASSPORT_SOURCE','PASSPORT_CANDIDATE','BODY_REFERENCE_CANDIDATE',
+  'EXPRESSION_REFERENCE_CANDIDATE','MOUTH_CALIBRATION_CANDIDATE','VOICE_SOURCE','WARDROBE','PRODUCT','LOCATION','STYLE_REFERENCE','PREVIOUS_SHOT']);
 const REVIEW_ACTIONS = Object.freeze(['APPROVE_FOR_USE','REJECT','REQUEST_CONSENT','MARK_RIGHTS_VERIFIED','KEEP_BLOCKED']);
 
 function publicIntake(intake) {
@@ -19,7 +20,8 @@ function publicIntake(intake) {
 
 function roleModalities(roles) {
   const result = new Set();
-  if (roles.includes('IDENTITY') || roles.includes('PASSPORT_SOURCE') || roles.includes('PASSPORT_CANDIDATE')) result.add('FACE');
+  if (roles.some((role)=>['IDENTITY','PASSPORT_SOURCE','PASSPORT_CANDIDATE','BODY_REFERENCE_CANDIDATE',
+    'EXPRESSION_REFERENCE_CANDIDATE','MOUTH_CALIBRATION_CANDIDATE'].includes(role))) result.add('FACE');
   if (roles.includes('VOICE_SOURCE')) result.add('VOICE');
   return [...result];
 }
