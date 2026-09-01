@@ -84,7 +84,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const passportExecutionService = new PassportExecutionService({ repository: avatarRepository, providerCatalog,
     providerGateway: createDefaultProviderGateway({ openai: { apiKey: env.OPENAI_API_KEY },
       replicate: { enabled: false }, routing: { fallbackOnError: false } }),
-    assetIntakeService: avatarAssetIntakeService, storage, actor });
+    assetIntakeService: avatarAssetIntakeService, storage, env, actor });
   const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
     providerCatalog, passportExecutionService, actor });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, avatarService, avatarRepository, v210Repository,

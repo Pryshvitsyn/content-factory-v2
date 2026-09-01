@@ -33,12 +33,13 @@ function safeFailure(error) {
 function numberOrNull(value) { return value == null || value === '' ? null : Number(value); }
 
 class PassportExecutionService {
-  constructor({ repository, providerCatalog, providerGateway, assetIntakeService, storage, actor = 'local-operator' } = {}) {
+  constructor({ repository, providerCatalog, providerGateway, assetIntakeService, storage, env = process.env,
+    actor = 'local-operator' } = {}) {
     if (!repository || !providerCatalog || !providerGateway || !assetIntakeService || !storage) {
       throw new Error('PassportExecutionService requires repository, providerCatalog, providerGateway, assetIntakeService and storage');
     }
     this.repository = repository; this.providerCatalog = providerCatalog; this.providerGateway = providerGateway;
-    this.assetIntakeService = assetIntakeService; this.storage = storage; this.actor = actor;
+    this.assetIntakeService = assetIntakeService; this.storage = storage; this.env = env; this.actor = actor;
   }
 
   async context(scope = {}) {
@@ -150,6 +151,8 @@ class PassportExecutionService {
   }
 
   async generate({ executionId, ...scope } = {}) {
+    if (this.env.LIVE_PAID_GENERATION !== 'true') throw new AvatarStudioError(409, 'PASSPORT_LIVE_EXECUTION_DISABLED',
+      'Passport provider execution is disabled; explicitly enable the existing LIVE_PAID_GENERATION gate after cost review');
     const execution = await this.repository.passportExecution({ id: executionId, ...scope });
     if (!execution) throw new AvatarStudioError(404, 'PASSPORT_EXECUTION_NOT_FOUND', 'Execution was not found in this scope');
     if (!execution.approval) throw new AvatarStudioError(409, 'EXECUTION_APPROVAL_REQUIRED', 'No immutable approval exists for this execution');

@@ -54,7 +54,7 @@ async function main() {
     const passportExecutionService = new PassportExecutionService({ repository, providerCatalog,
       providerGateway: { async generate() { mockProviderCalls += 1; return { provider:'openai-media',model:'gpt-image-1',
         output:composite,contentType:'image/png',requestId:`mock-postgres-${mockProviderCalls}`,usage:null }; } },
-      assetIntakeService:intakeService,storage,actor:'avatar-test-operator' });
+      assetIntakeService:intakeService,storage,env:{LIVE_PAID_GENERATION:'true'},actor:'avatar-test-operator' });
     const service = new AvatarStudioService({ repository, assetIntakeService: intakeService, providerCatalog,
       passportExecutionService, actor: 'avatar-test-operator' });
     const l0 = await service.create({ vertical: 'PSYCHOLOGY_WELLBEING', brandIds: [BRAND_ID], internalName: 'Mara Fixture',

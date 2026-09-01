@@ -51,3 +51,5 @@ Provider output artifacts use the existing `ArtifactService` and `FilesystemStor
 ## First live smoke test (not executed by implementation or tests)
 
 Use a synthetic avatar with one approved PNG/JPEG identity source and a current Identity Lock. Create a plan with `openai / gpt-image-1`, run a one-candidate cost preflight, review the exact `UNKNOWN` cost disclosure and maximum budget, approve it, then press Generate once. Expected output is one immutable composite artifact, one auto-registered candidate, and one automatic QA snapshot. Do not proceed to a full batch until artifact ingest and QA are confirmed. Generation and QA do not certify the candidate.
+
+The existing global paid-execution kill switch also remains authoritative: `LIVE_PAID_GENERATION=true` must be set explicitly in the Dashboard runtime. A configured credential, successful preflight, and approval cannot bypass this switch.

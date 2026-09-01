@@ -119,7 +119,7 @@ async function fixture({gateway,catalogOptions}={}) {
       contentType:'image/png',requestId:`mock-request-${ordinal}`,usage:null,provenance:{mock:true}};}};
   const intakeService=new AvatarAssetIntakeService({repository,artifactService:artifacts,storage,actor:'test-operator'});
   const service=new PassportExecutionService({repository,providerCatalog:catalog(catalogOptions),providerGateway,
-    assetIntakeService:intakeService,storage,actor:'test-operator'});
+    assetIntakeService:intakeService,storage,env:{LIVE_PAID_GENERATION:'true'},actor:'test-operator'});
   return {directory,storage,artifacts,repository,service,get mockCalls(){return mockCalls;}};
 }
 
@@ -205,6 +205,12 @@ async function main() {
     maximumAllowedCost:10,executionCandidateCount:1}); const result=await cancelled.service.cancel({...scope(),executionId:p.executionId});
     assert.equal(result.status,'CANCELLED'); assert.equal(cancelled.mockCalls,0);
   } finally { await fs.rm(cancelled.directory,{recursive:true,force:true}); }
+
+  const liveDisabled=await fixture(); try { const p=await approveReady(liveDisabled,{count:1});
+    liveDisabled.service.env={LIVE_PAID_GENERATION:'false'};
+    await assert.rejects(()=>liveDisabled.service.generate({...scope(),executionId:p.executionId}),
+      (e)=>e.code==='PASSPORT_LIVE_EXECUTION_DISABLED'); assert.equal(liveDisabled.mockCalls,0);
+  } finally { await fs.rm(liveDisabled.directory,{recursive:true,force:true}); }
 
   const gate=await fixture(); try { const p=await approveReady(gate,{count:1}); gate.repository.sources.get('source-1').gate0Status='BLOCK';
     await assert.rejects(()=>gate.service.generate({...scope(),executionId:p.executionId}),(e)=>e.code==='GATE0_INVALIDATED');
