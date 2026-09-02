@@ -20,6 +20,16 @@ const MINOR_PROHIBITED_USES = Object.freeze([
   'voice cloning without separate voice consent',
   'unapproved brands, channels, or sublicensing',
 ]);
+const MANUAL_PHYSICAL_FEATURES = Object.freeze([
+  ['facialIdentity','Facial identity / likeness'],
+  ['faceShapeProportions','Face shape and proportions'],
+  ['eyes','Eyes'],
+  ['nose','Nose'],
+  ['mouthLips','Mouth / lips'],
+  ['jawChin','Jaw / chin'],
+  ['skinToneCoreComplexion','Skin tone / core complexion'],
+  ['hairlineStableVisibleTraits','Hairline / stable visible traits'],
+]);
 
 function filePayload(file) {
   return new Promise((resolve,reject) => {
@@ -88,6 +98,10 @@ function removeAgeClassification(value = {}) {
   }));
 }
 
+function legacyLockMap(lock, modernKey, legacyKey) {
+  return lock?.[modernKey] || lock?.[legacyKey] || {};
+}
+
 export function currentIdentityLock(avatar) {
   return (avatar?.identityLocks || []).find((item) => item.identityVersionId === avatar?.identityVersionId) || null;
 }
@@ -114,13 +128,14 @@ export function buildMinorIdentityRevision(avatar) {
   });
 }
 
-export function buildMinorIdentityLockRevision(avatar) {
-  const prior = currentIdentityLock(avatar) || avatar?.identityLocks?.[0];
-  if (!prior) throw new Error('A prior Identity Lock is required so physical identity classifications can be preserved without invention.');
-  const permanent = removeAgeClassification(prior.permanentAttributes || {});
-  const temporary = removeAgeClassification(prior.temporaryAttributes || {});
-  const uncertain = removeAgeClassification(prior.uncertainAttributes || {});
-  if (!Object.keys(permanent).length) throw new Error('The prior Identity Lock has no reusable permanent physical features. Classify them manually before revision.');
+export function buildMinorIdentityLockRevision(avatar, manualPermanent = {}) {
+  const prior = currentIdentityLock(avatar) || avatar?.identityLocks?.[0] || null;
+  const priorPermanent = removeAgeClassification(legacyLockMap(prior,'permanentAttributes','permanent'));
+  const manual = removeAgeClassification(manualPermanent || {});
+  const permanent = Object.keys(priorPermanent).length ? priorPermanent : manual;
+  const temporary = removeAgeClassification(legacyLockMap(prior,'temporaryAttributes','temporary'));
+  const uncertain = removeAgeClassification(legacyLockMap(prior,'uncertainAttributes','uncertain'));
+  if (!Object.keys(permanent).length) throw new Error('No reusable permanent physical features are stored in the prior Identity Lock. Select at least one source-supported physical feature manually before revision.');
   return Object.freeze({
     permanent:Object.freeze({
       ...permanent,
@@ -129,19 +144,25 @@ export function buildMinorIdentityLockRevision(avatar) {
     }),
     temporary:Object.freeze(temporary),
     uncertain:Object.freeze(uncertain),
-    notes:'Operator-declared MINOR age classification. Preserve source-supported child age and natural proportions. The prior adult-age Identity/Lock remain immutable historical evidence and are not current for new Passport generation.',
+    notes:'Operator-declared MINOR age classification. Preserve only source-supported physical identity features and natural child proportions. The prior adult-age Identity/Lock remain immutable historical evidence and are not current for new Passport generation.',
   });
 }
 
 export function MinorIdentityRevisionPanel({ avatar, brandId, onUpdated }) {
   const [confirmed,setConfirmed] = useState(false); const [busy,setBusy] = useState(false); const [error,setError] = useState(null); const [message,setMessage] = useState('');
+  const [manualPhysical,setManualPhysical] = useState({});
   const minor = isMinorIdentity(avatar); const activeLock = currentIdentityLock(avatar);
-  const minorLock = activeLock?.permanentAttributes?.subjectAgeClass === 'MINOR';
+  const minorLock = legacyLockMap(activeLock,'permanentAttributes','permanent')?.subjectAgeClass === 'MINOR';
+  const prior = activeLock || avatar?.identityLocks?.[0] || null;
+  const reusablePermanent = removeAgeClassification(legacyLockMap(prior,'permanentAttributes','permanent'));
+  const manualRequired = !Object.keys(reusablePermanent).length;
+  const selectedManual = MANUAL_PHYSICAL_FEATURES.filter(([key]) => manualPhysical[key]);
+  const manualPermanent = Object.fromEntries(selectedManual.map(([key]) => [key,'Preserve as operator-confirmed source-supported identity feature.']));
 
   async function revise() {
     setBusy(true); setError(null); setMessage(''); let identityCreated=false;
     try {
-      const lockRevision=buildMinorIdentityLockRevision(avatar);
+      const lockRevision=buildMinorIdentityLockRevision(avatar,manualPermanent);
       if (!minor) {
         const identity=buildMinorIdentityRevision(avatar);
         await api(`/api/avatar-studio/avatars/${avatar.id}/identity`,{ method:'POST',body:JSON.stringify({
@@ -152,10 +173,11 @@ export function MinorIdentityRevisionPanel({ avatar, brandId, onUpdated }) {
       }
       await api(`/api/avatar-studio/avatars/${avatar.id}/identity-locks`,{ method:'POST',body:JSON.stringify({
         brandId,...lockRevision,humanApproval:true,provenance:{ source:'AVATAR_STUDIO_OPERATOR_MINOR_IDENTITY_LOCK_REVISION',
-          operatorDeclaredSubjectAgeClass:'MINOR',automatedAgeInference:false,immutable:true },
+          operatorDeclaredSubjectAgeClass:'MINOR',automatedAgeInference:false,immutable:true,
+          manualPhysicalClassification:manualRequired,manualPhysicalFeatureKeys:selectedManual.map(([key])=>key) },
       }) });
       setMessage('MINOR Identity Version + Identity Lock are current. No provider call was made. Create a fresh Passport plan only after source coverage is sufficient.');
-      setConfirmed(false); await onUpdated?.();
+      setConfirmed(false); setManualPhysical({}); await onUpdated?.();
     } catch (cause) {
       if (identityCreated) setMessage('The new MINOR Identity Version was created, but its Identity Lock did not complete. Generation is fail-closed until the lock is recorded; retry this panel after reload.');
       setError({ code:cause?.code || 'MINOR_IDENTITY_REVISION_FAILED',message:cause?.message || String(cause) });
@@ -172,11 +194,12 @@ export function MinorIdentityRevisionPanel({ avatar, brandId, onUpdated }) {
     <header><div><strong>{minor ? 'COMPLETE MINOR IDENTITY LOCK' : 'REVISE IDENTITY · MINOR'}</strong><p>{minor
       ? 'The current Identity Version is already marked MINOR, but it has no matching current Identity Lock. Complete the fail-closed revision before planning a new Passport.'
       : 'Create a new immutable Identity Version and Lock. The previous adult-age version remains historical and is never mutated.'}</p></div><span>0 provider calls</span></header>
-    <div className="warning-panel"><strong>OPERATOR DECLARATION — NOT VISION INFERENCE</strong><p>This action records MINOR because the operator knows the subject age class. It does not estimate age from the photograph. It removes adult-age classification from the current working identity, preserves prior physical identity classifications, and adds child-safe production restrictions.</p></div>
+    <div className="warning-panel"><strong>OPERATOR DECLARATION — NOT VISION INFERENCE</strong><p>This action records MINOR because the operator knows the subject age class. It does not estimate age from the photograph. It removes adult-age classification from the current working identity, preserves prior physical identity classifications when available, and adds child-safe production restrictions.</p></div>
+    {manualRequired ? <div className="warning-panel"><strong>MANUAL PHYSICAL IDENTITY CLASSIFICATION REQUIRED</strong><p>The legacy Lock does not contain reusable permanent physical fields. Select only features that you personally confirm are stable identity features supported by the source evidence. Nothing below is auto-selected or inferred.</p><div className="coverage-grid">{MANUAL_PHYSICAL_FEATURES.map(([key,label]) => <label key={key}><input aria-label={`Preserve ${label}`} type="checkbox" checked={Boolean(manualPhysical[key])} onChange={(event)=>setManualPhysical((current)=>({...current,[key]:event.target.checked}))}/>{label}</label>)}</div></div> : null}
     {error ? <div className="error-panel"><strong>{error.code}</strong><p>{error.message}</p></div> : null}
     {message ? <p className="source-manager-message">{message}</p> : null}
     <label className="check wide"><input aria-label="Confirm minor subject classification" type="checkbox" checked={confirmed} onChange={(event)=>setConfirmed(event.target.checked)} />I explicitly confirm that this real subject is a MINOR and that the new Identity Version must preserve source-supported child age/proportions without adultization or de-aging.</label>
-    <button className="primary" disabled={busy||!confirmed} onClick={revise}>{busy?'RECORDING IMMUTABLE REVISION…':minor?'CREATE CURRENT MINOR IDENTITY LOCK':'CREATE NEW MINOR IDENTITY VERSION + LOCK'}</button>
+    <button className="primary" disabled={busy||!confirmed||(manualRequired&&!selectedManual.length)} onClick={revise}>{busy?'RECORDING IMMUTABLE REVISION…':minor?'CREATE CURRENT MINOR IDENTITY LOCK':'CREATE NEW MINOR IDENTITY VERSION + LOCK'}</button>
   </section>;
 }
 
