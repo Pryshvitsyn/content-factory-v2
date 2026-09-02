@@ -1,0 +1,25 @@
+.identity-source-manager,.identity-coverage{margin-top:18px;padding:18px;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:rgba(255,255,255,.025)}
+.identity-source-manager>header,.identity-coverage>header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.identity-source-manager header p{margin:.35rem 0 0;color:var(--muted,#9ca3af);max-width:720px}
+.identity-source-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.upload-button{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 14px;border:1px solid rgba(255,255,255,.18);border-radius:10px;cursor:pointer;font-weight:700}
+.upload-button input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.identity-source-grid,.video-frame-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:14px}
+.identity-source-grid article,.video-frame-grid article,.passport-source-card{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid rgba(255,255,255,.1);border-radius:12px;background:rgba(0,0,0,.14)}
+.identity-source-grid button,.video-frame-grid button{align-self:end}
+.identity-source-grid select,.video-frame-grid select{width:100%}
+.video-frame-grid img,.passport-source-thumb,.comparison-evidence img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:9px;background:#111}
+.reference-video-stage{margin-top:12px;padding:14px;border:1px dashed rgba(255,255,255,.2);border-radius:12px}
+.source-manager-message{padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.06)}
+.coverage-state{font-weight:800;letter-spacing:.05em}
+.coverage-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:14px 0}
+.coverage-grid span{display:flex;justify-content:space-between;padding:9px 10px;border-radius:9px;background:rgba(255,255,255,.04)}
+.coverage-notes p{margin:.25rem 0;color:var(--muted,#9ca3af)}
+.passport-source-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px}
+.passport-source-card label{display:flex;gap:8px;align-items:flex-start}
+.passport-source-card small{word-break:break-word;color:var(--muted,#9ca3af)}
+.passport-source-card.video-source{opacity:.86}
+.comparison-evidence{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:10px 0}
+.comparison-evidence a{display:flex;flex-direction:column;gap:5px;text-decoration:none}
+.no-source-evidence{display:block;margin:10px 0;font-weight:800}
+@media (max-width:700px){.identity-source-manager>header,.identity-coverage>header{flex-direction:column}.identity-source-grid,.video-frame-grid,.passport-source-grid{grid-template-columns:1fr}}
