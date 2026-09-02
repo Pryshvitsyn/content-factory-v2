@@ -1,0 +1,77 @@
+name: Avatar Studio Multi-Source CI
+
+on:
+  push:
+    branches:
+      - feat/avatar-studio-multisource-identity
+  pull_request:
+    branches:
+      - avatar-studio-current
+      - main
+    paths:
+      - "src/avatar-studio/**"
+      - "apps/dashboard/client/**"
+      - "scripts/dashboard-*.js"
+      - "scripts/local-runtime.js"
+      - "tests/avatar-studio*"
+      - ".github/workflows/avatar-studio-multisource-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  zero-call-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: content_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d content_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PAID_PROVIDER_CALLS: "0"
+      EXTERNAL_GENERATION_CALLS: "0"
+      LIVE_PAID_GENERATION: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Multi-source identity contracts
+        run: node tests/avatar-studio-multisource-identity-test.js
+      - name: Avatar Studio regression suite
+        run: npm run test:avatar-studio
+      - name: Dashboard UI suite
+        run: npm run test:v2.3:client
+      - name: Dashboard build
+        run: npm run dashboard:build
+      - name: V2.5 regression suite
+        run: npm run test:v2.5
+      - name: Avatar Studio PostgreSQL integration
+        env:
+          CONTENT_FACTORY_TEST_DATABASE: "1"
+          PGDATABASE: avatar_multisource_test
+        run: |
+          createdb --maintenance-db=postgres avatar_multisource_test
+          npm run test:avatar-studio:postgres
+      - name: Whitespace check
+        run: git diff --check
