@@ -125,6 +125,8 @@ async function main() {
     const realAvatar = { ...avatar, id: 'a0000000-0000-4000-8000-000000000005', subjectType: 'CONSENTED_REAL_PERSON' };
     const real = await service.intake({ avatar: realAvatar, brandId: BRAND, sourceType: 'UPLOAD', file: file('person.png','image/png',png()), provenance: {} });
     assert.equal(real.gate0.status,'REVIEW');
+    assert(real.gate0.findings.some((item) => item.code === 'PROVENANCE_UNCERTAIN'));
+    assert(real.gate0.findings.some((item) => item.code === 'FACE_CONSENT_REQUIRED'));
     await service.review({ avatar: realAvatar, brandId: BRAND, intakeId: real.asset.id, action: 'APPROVE_FOR_USE', reason: 'No security finding remains', humanApproval: true });
     await assert.rejects(() => service.use({ avatar: realAvatar, brandId: BRAND, intakeId: real.asset.id, roles: ['IDENTITY'] }),
       (error) => error.code === 'ASSET_NOT_ELIGIBLE' && error.details.failures.includes('FACE_CONSENT_REQUIRED'));

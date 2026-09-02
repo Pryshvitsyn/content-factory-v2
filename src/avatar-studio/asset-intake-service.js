@@ -116,8 +116,9 @@ class AvatarAssetIntakeService {
       throw new AvatarStudioError(502, 'PROVIDER_OUTPUT_INVALID', 'Provider output failed MIME, decode or dimension validation',
         { findings: media.findings, width: media.width, height: media.height });
     }
+    const derivedProvenance = { ...provenance, source: 'APPROVED_PROVIDER_EXECUTION', provider, model };
     const gate0 = inspectAssetGateZero({ media: completeMedia, sourceType: 'PROVIDER_OUTPUT',
-      sourceLocator: `provider://${provider}/response`, provenance: { source: 'APPROVED_PROVIDER_EXECUTION', provider, model },
+      sourceLocator: `provider://${provider}/response`, provenance: derivedProvenance,
       subjectType: avatar.subjectType, consentVerified });
     if (gate0.status !== 'PASS') throw new AvatarStudioError(409, 'SECURITY_REJECTED_OUTPUT',
       `Provider output was rejected by Gate 0 with ${gate0.status}`, { status: gate0.status, findings: gate0.findings });
@@ -130,7 +131,7 @@ class AvatarAssetIntakeService {
     const stored = await this.repository.createIntake({ id: intakeId, avatar, brandId, artifact,
       media: completeMedia, sourceType: 'PROVIDER_OUTPUT', sourceLocator: `provider://${provider}/${providerRequestId || attemptId}`,
       existingAssetId: null, gate0, rightsStatus: avatar.subjectType === 'SYNTHETIC' ? 'NOT_REQUIRED' : 'VERIFIED',
-      provenance: { ...provenance, source: 'APPROVED_PROVIDER_EXECUTION', provider, model, providerRequestId,
+      provenance: { ...derivedProvenance, providerRequestId,
         attemptId, artifactService: 'CONTENT_FACTORY_IMMUTABLE_ARTIFACT_V1', importedAt: new Date().toISOString() },
       actor: this.actor });
     return Object.freeze({ asset: publicIntake(stored), artifact, gate0 });

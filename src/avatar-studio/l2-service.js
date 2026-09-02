@@ -166,7 +166,7 @@ class AvatarL2Service {
     if(this.env.LIVE_PAID_GENERATION!=='true')throw new AvatarStudioError(409,'L2_LIVE_EXECUTION_DISABLED','L2 provider execution is disabled by LIVE_PAID_GENERATION');
     const execution=await this.repository.l2Execution({id:executionId,...scope});if(!execution?.approval)throw new AvatarStudioError(409,'EXECUTION_APPROVAL_REQUIRED','Approved execution required');
     if((execution.attempts||[]).length)throw new AvatarStudioError(409,'EXECUTION_ALREADY_ATTEMPTED','No automatic retry; create and approve a repair plan');
-    const {avatar,passport}=await this.context(scope);const spec=await this.repository.l2GenerationSpec({id:execution.generationSpecId,kind:execution.generationKind,...scope});
+    const {avatar,passport,identityLock}=await this.context(scope);const spec=await this.repository.l2GenerationSpec({id:execution.generationSpecId,kind:execution.generationKind,...scope});
     if(!spec||spec.planFingerprint!==execution.preflightSnapshot?.generationPlanFingerprint||execution.approval.preflightFingerprint!==execution.preflightFingerprint)
       throw new AvatarStudioError(409,'STALE_APPROVAL','Approval no longer matches the current immutable plan');
     const passportCandidate=(avatar.passportCandidates||[]).find((item)=>item.certificationEventId===passport.id);
@@ -190,9 +190,16 @@ class AvatarL2Service {
         if(!Buffer.isBuffer(result.output))throw Object.assign(new Error('Provider did not return image bytes'),{code:'PROVIDER_OUTPUT_INVALID'});
         const ingested=await this.assetIntakeService.ingestProviderOutput({avatar,brandId:scope.brandId,bytes:result.output,
           filename:`l2-${spec.referenceType.toLowerCase()}-${ordinal}.png`,mimeType:result.contentType,provider:execution.provider,
-          model:execution.model,attemptId:attempt.id,providerRequestId:result.requestId,consentVerified:true,provenance:{executionId:execution.id,
-            generationSpecId:spec.id,identityVersionId:avatar.identityVersionId,passportCertificationEventId:passport.id,
-            bodyBuildVersionId:spec.bodyBuildVersionId,promptVersion:spec.promptVersion,specVersion:spec.specVersion,repairDelta:spec.repairDelta||null}});
+          model:execution.model,attemptId:attempt.id,providerRequestId:result.requestId,consentVerified:true,provenance:{
+            provenanceClass:'DERIVED_PROVIDER_OUTPUT',executionLineage:{executionId:execution.id,attemptId:attempt.id,
+              generationSpecId:spec.id,identityVersionId:avatar.identityVersionId,identityLockVersionId:identityLock.id,
+              certifiedReferenceId:passport.id},assurances:{originalSourceEligible:true,originalSourceGate0Status:'PASS',
+              requiredFaceConsent:avatar.subjectType==='SYNTHETIC'?'NOT_REQUIRED':'VALID',identityVersionCurrent:true,
+              identityLockCurrent:spec.identityLockVersionId===identityLock.id,providerExecutionApproved:Boolean(execution.approval)},
+            identityContract:{permanentSource:'CURRENT_IDENTITY_VERSION_AND_LOCK',
+              excludedFromIdentity:['WARDROBE','BACKGROUND','ACCESSORIES','LOCATION','LIGHTING']},
+            passportCertificationEventId:passport.id,bodyBuildVersionId:spec.bodyBuildVersionId,
+            promptVersion:spec.promptVersion,specVersion:spec.specVersion,repairDelta:spec.repairDelta||null}});
         const role=FAMILIES[execution.generationKind].role;const source=await this.repository.useIntake({avatar,intake:ingested.asset,roles:[role],actor:this.actor});
         const candidate=await this.repository.createGeneratedL2Candidate({family:execution.generationKind,avatar,spec,intake:ingested.asset,source,
           execution,attempt,providerResult:result,actor:this.actor});

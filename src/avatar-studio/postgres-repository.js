@@ -581,7 +581,7 @@ class AvatarStudioPostgresRepository {
       this.db.query('SELECT * FROM avatar_studio.passport_execution_events WHERE execution_id=$1 ORDER BY recorded_at,id',[id]),
       this.db.query('SELECT * FROM avatar_studio.passport_execution_approvals WHERE execution_id=$1',[id]),
       this.db.query(`SELECT a.*,e.status AS latest_status,e.failure_classification,e.safe_error_message,e.may_have_spent,
-        e.provider_request_id FROM avatar_studio.passport_provider_attempts a LEFT JOIN LATERAL
+        e.provider_request_id,e.response_metadata FROM avatar_studio.passport_provider_attempts a LEFT JOIN LATERAL
         (SELECT * FROM avatar_studio.passport_provider_attempt_events x WHERE x.attempt_id=a.id ORDER BY x.recorded_at DESC,x.id DESC LIMIT 1) e ON true
         WHERE a.execution_id=$1 ORDER BY a.candidate_ordinal`,[id]),
       this.db.query('SELECT * FROM avatar_studio.passport_execution_results WHERE execution_id=$1 ORDER BY created_at,id',[id]),

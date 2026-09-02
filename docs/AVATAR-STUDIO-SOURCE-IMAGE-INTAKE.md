@@ -20,6 +20,12 @@ Every accepted intake records the original filename, declared MIME, detected MIM
 
 Gate 0 scans only bounded structured inputs: source locator, the safe media summary, explicit provenance, and text extracted from defined JPEG COM/XMP, PNG tEXt/iTXt, or WebP XMP containers. Random compressed/trailing bytes are never scanned as prompts or executable text. Genuine suspicious text in those structured containers remains fail-closed.
 
+## Derived provider output
+
+Provider-generated media is recorded as `DERIVED_PROVIDER_OUTPUT`; the provider is never represented as the human rights owner. The missing-owner review is waived only when typed internal lineage proves an approved provider execution, an eligible Gate 0 PASS source, valid or non-required face consent, the current Identity version and Identity Lock, and a source asset or certified-reference dependency. Missing or stale lineage produces `DERIVED_PROVIDER_LINEAGE_INVALID` and remains in review.
+
+Execution UUIDs and other typed lineage identifiers are validated as fields, not coerced into free text. Gate 0 still scans bounded text-bearing fields such as repair instructions and JPEG COM/XMP, PNG tEXt/iTXt, or WebP XMP. Any genuine security BLOCK remains terminal.
+
 ## Readiness and validation classes
 
 The Dashboard reports one of `SOURCE READY`, `REVIEW REQUIRED`, `UNSUPPORTED FORMAT`, `INVALID MEDIA`, `SECURITY BLOCKED`, `QUALITY INSUFFICIENT`, or `PROVENANCE/CONSENT REQUIRED` with a safe explanation. Internally, failures are classified as `MEDIA_INVALID`, `FORMAT_UNSUPPORTED`, `SECURITY_BLOCK`, `SECURITY_FALSE_POSITIVE`, `PROVENANCE_REQUIRED`, `QUALITY_INSUFFICIENT`, or `REVIEW_REQUIRED` rather than a generic upload failure.

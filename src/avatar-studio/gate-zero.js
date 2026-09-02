@@ -36,11 +36,29 @@ const FINDING_EXPLANATIONS = Object.freeze({
   MEDIA_UNREADABLE: 'The media decoder could not read the file.',
   MEDIA_VIDEO_STREAM_MISSING: 'The decoder found no readable image stream.',
   MEDIA_DIMENSIONS_INVALID: 'The decoder found no positive image dimensions.',
+  DERIVED_PROVIDER_LINEAGE_INVALID: 'Provider output is missing verified source, consent, identity, lock, or approval lineage.',
 });
 
 function explainFinding(item) {
   return Object.freeze({ severity: item.severity, code: item.code,
     explanation: FINDING_EXPLANATIONS[item.code] || 'The source did not satisfy a bounded intake policy check.' });
+}
+
+function approvedDerivedProviderOutput({ sourceType, provenance = {} } = {}) {
+  const lineage = provenance.executionLineage || {};
+  const assurances = provenance.assurances || {};
+  return sourceType === 'PROVIDER_OUTPUT'
+    && provenance.provenanceClass === 'DERIVED_PROVIDER_OUTPUT'
+    && provenance.source === 'APPROVED_PROVIDER_EXECUTION'
+    && Boolean(lineage.executionId && lineage.attemptId && lineage.generationSpecId
+      && lineage.identityVersionId && lineage.identityLockVersionId
+      && (Array.isArray(lineage.sourceAssetIds) && lineage.sourceAssetIds.length || lineage.certifiedReferenceId))
+    && assurances.originalSourceEligible === true
+    && assurances.originalSourceGate0Status === 'PASS'
+    && ['VALID','NOT_REQUIRED'].includes(assurances.requiredFaceConsent)
+    && assurances.identityVersionCurrent === true
+    && assurances.identityLockCurrent === true
+    && assurances.providerExecutionApproved === true;
 }
 
 function inspectGateZero(input = {}) {
@@ -56,12 +74,18 @@ function inspectGateZero(input = {}) {
 
 function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, provenance = {}, subjectType = 'SYNTHETIC',
   consentVerified = false } = {}) {
+  const scanProvenance = sourceType === 'PROVIDER_OUTPUT' ? {
+    provenanceClass: provenance.provenanceClass, source: provenance.source, provider: provenance.provider,
+    model: provenance.model, repairDelta: provenance.repairDelta || null, identityContract: provenance.identityContract || null,
+  } : provenance;
   const base = inspectGateZero({ sourceLocator, text: media.embeddedText || 'immutable media asset',
     metadata: { filename: media.filename, mimeType: media.mimeType, extension: media.extension,
-      detectedMime: media.detectedMime, byteSize: media.byteSize }, provenance });
+      detectedMime: media.detectedMime, byteSize: media.byteSize }, provenance: scanProvenance });
   const findings = [...(media.findings || []), ...base.findings];
   if (sourceType === 'SAFE_URL_IMPORT') findings.push({ severity: 'REVIEW', code: 'EXTERNAL_URL_SOURCE' });
-  if (!provenance.owner && subjectType !== 'SYNTHETIC') findings.push({ severity: 'REVIEW', code: 'PROVENANCE_UNCERTAIN' });
+  const approvedDerivative = approvedDerivedProviderOutput({ sourceType, provenance });
+  if (sourceType === 'PROVIDER_OUTPUT' && !approvedDerivative) findings.push({ severity: 'REVIEW', code: 'DERIVED_PROVIDER_LINEAGE_INVALID' });
+  if (!provenance.owner && subjectType !== 'SYNTHETIC' && !approvedDerivative) findings.push({ severity: 'REVIEW', code: 'PROVENANCE_UNCERTAIN' });
   if (subjectType !== 'SYNTHETIC' && media.kind === 'image' && !consentVerified) findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' });
   if (subjectType !== 'SYNTHETIC' && media.kind === 'audio') findings.push({ severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
   if (subjectType !== 'SYNTHETIC' && media.kind === 'video') {
@@ -82,4 +106,4 @@ function assertGateUsable(source, { allowReview = true } = {}) {
   return true;
 }
 
-module.exports = { FINDING_EXPLANATIONS, RULES, assertGateUsable, inspectAssetGateZero, inspectGateZero };
+module.exports = { FINDING_EXPLANATIONS, RULES, approvedDerivedProviderOutput, assertGateUsable, inspectAssetGateZero, inspectGateZero };

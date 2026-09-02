@@ -225,18 +225,29 @@ class PassportExecutionService {
       const compiled = compilePassportProviderRequest({ generationSpec: fresh.spec, sourceImages: referenceImages, candidateOrdinal: ordinal });
       const attempt = await this.repository.createPassportProviderAttempt({ execution, ordinal, request: compiled, actor: this.actor });
       await this.repository.addPassportProviderAttemptEvent({ attempt, status: 'STARTED', actor: this.actor });
+      let providerResult = null;
       try {
         const result = await this.providerGateway.generate({ provider: execution.adapterFamily,
           model: execution.model, capability: compiled.capability, prompt: compiled.prompt,
           referenceImages: compiled.referenceImages, idempotencyKey: attempt.idempotencyKey });
+        providerResult = result;
         if (!Buffer.isBuffer(result.output)) throw Object.assign(new Error('Provider did not return inline image bytes'),
           { code: 'PROVIDER_OUTPUT_INVALID' });
         const ingested = await this.assetIntakeService.ingestProviderOutput({ avatar: fresh.avatar, brandId: scope.brandId,
           bytes: result.output, filename: `passport-candidate-${ordinal}.png`, mimeType: result.contentType,
           provider: execution.provider, model: execution.model, attemptId: attempt.id, providerRequestId: result.requestId,
-          consentVerified: true, provenance: { executionId: execution.id, generationSpecId: fresh.spec.id,
-            sourceAssetIds: fresh.spec.sourceAssetIds, identityVersionId: fresh.spec.identityVersionId,
-            identityLockVersionId: fresh.spec.identityLockVersionId, promptVersion: fresh.spec.promptVersion,
+          consentVerified: true, provenance: { provenanceClass: 'DERIVED_PROVIDER_OUTPUT',
+            executionLineage: { executionId: execution.id, attemptId: attempt.id, generationSpecId: fresh.spec.id,
+              sourceAssetIds: fresh.spec.sourceAssetIds, identityVersionId: fresh.spec.identityVersionId,
+              identityLockVersionId: fresh.spec.identityLockVersionId },
+            assurances: { originalSourceEligible: true, originalSourceGate0Status: 'PASS',
+              requiredFaceConsent: fresh.avatar.subjectType === 'SYNTHETIC' ? 'NOT_REQUIRED' : 'VALID',
+              identityVersionCurrent: fresh.avatar.identityVersionId === fresh.spec.identityVersionId,
+              identityLockCurrent: fresh.snapshot.identityLockVersionId === fresh.spec.identityLockVersionId,
+              providerExecutionApproved: Boolean(execution.approval) },
+            identityContract: { permanentSource: 'CURRENT_IDENTITY_VERSION_AND_LOCK',
+              excludedFromIdentity: ['WARDROBE','BACKGROUND','ACCESSORIES','LOCATION','LIGHTING'] },
+            promptVersion: fresh.spec.promptVersion,
             specVersion: fresh.spec.specVersion, repairDelta: fresh.spec.repairDelta || null,
             strategy: PASSPORT_PROVIDER_STRATEGY, candidateOrdinal: ordinal } });
         const source = await this.repository.useIntake({ avatar: fresh.avatar, intake: ingested.asset,
@@ -259,10 +270,16 @@ class PassportExecutionService {
         successful.push(Object.freeze({ candidate, qaSnapshot }));
       } catch (error) {
         const failure = safeFailure(error);
+        const gate0Status = error?.details?.status || null;
+        const gate0FindingCodes = Array.isArray(error?.details?.findings)
+          ? error.details.findings.map((item) => String(item?.code || '')).filter(Boolean).slice(0,50) : [];
         await this.repository.addPassportProviderAttemptEvent({ attempt, status: 'FAILED',
+          providerRequestId: providerResult?.requestId || failure.diagnostic.requestIds[0] || null,
           failureClassification: failure.classification, safeErrorMessage: failure.safeMessage,
-          mayHaveSpent: failure.mayHaveSpent, responseMetadata: { failureDiagnostic: failure.diagnostic }, actor: this.actor });
-        failures.push(Object.freeze({ attemptId: attempt.id, ordinal, ...failure }));
+          mayHaveSpent: failure.mayHaveSpent, responseMetadata: { failureDiagnostic: failure.diagnostic,
+            gate0: gate0Status ? { status: gate0Status, findingCodes: gate0FindingCodes } : null }, actor: this.actor });
+        failures.push(Object.freeze({ attemptId: attempt.id, ordinal, providerRequestId: providerResult?.requestId
+          || failure.diagnostic.requestIds[0] || null, gate0Status, gate0FindingCodes: Object.freeze(gate0FindingCodes), ...failure }));
       }
     }
     const status = successful.length === execution.candidateCount ? 'GENERATED'

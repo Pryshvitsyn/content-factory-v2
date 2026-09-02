@@ -143,10 +143,19 @@ async function main() {
     assert.equal((await service.refresh(l0.id,BRAND_ID)).currentLevel,0,'provider-generated + automatic QA remains L0');
     for(const table of ['passport_generation_executions','passport_execution_approvals','passport_provider_attempts',
       'passport_execution_results']) assert.equal(Number((await db.query(`SELECT count(*) AS count FROM avatar_studio.${table}`)).rows[0].count),1);
+    const detailedExecution=await repository.passportExecution({id:preflight.executionId,...executionScope});
+    await repository.addPassportProviderAttemptEvent({attempt:detailedExecution.attempts[0],status:'FAILED',
+      providerRequestId:'postgres-safe-request-id',failureClassification:'SECURITY_REJECTED_OUTPUT',
+      safeErrorMessage:'Passport generation failed: SECURITY_REJECTED_OUTPUT.',mayHaveSpent:true,
+      responseMetadata:{gate0:{status:'BLOCK',findingCodes:['PROMPT_INJECTION']}},actor:'avatar-test-operator'});
+    const inspectedFailure=(await repository.passportExecution({id:preflight.executionId,...executionScope})).attempts[0];
+    assert.equal(inspectedFailure.providerRequestId,'postgres-safe-request-id'); assert.equal(inspectedFailure.mayHaveSpent,true);
+    assert.deepEqual(inspectedFailure.responseMetadata.gate0,{status:'BLOCK',findingCodes:['PROMPT_INJECTION']});
     await assert.rejects(()=>db.query('UPDATE avatar_studio.passport_execution_approvals SET maximum_allowed_cost=10 WHERE execution_id=$1',
       [preflight.executionId]),(error)=>error.code==='P0001');
     await assert.rejects(()=>db.query(`UPDATE avatar_studio.passport_provider_attempt_events SET safe_error_message='mutated'
-      WHERE attempt_id=(SELECT id FROM avatar_studio.passport_provider_attempts WHERE execution_id=$1)`,[preflight.executionId]),
+      WHERE id=(SELECT id FROM avatar_studio.passport_provider_attempt_events WHERE attempt_id=$1 ORDER BY recorded_at DESC,id DESC LIMIT 1)`,
+      [inspectedFailure.id]),
     (error)=>error.code==='P0001','provider attempt evidence must be immutable');
     const candidates=[];
     for (const label of ['A','B','C','D']) {

@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AvatarDetail, AvatarStudio, LevelLadder } from '../src/AvatarStudio';
-import { approvalDisplay } from '../src/PassportLab';
+import { approvalDisplay, AttemptDiagnostics } from '../src/PassportLab';
 
 const brand = { id: '11111111-1111-4111-8111-111111111111', name: 'Attune' };
 function response(payload, ok = true) { return Promise.resolve({ ok, status: ok ? 200 : 400, json: async () => payload }); }
@@ -15,6 +15,17 @@ describe('Avatar Studio dashboard', () => {
     expect(approvalDisplay({status:'AWAITING_APPROVAL',approvalRecorded:false})).toBe('REQUIRED');
     expect(approvalDisplay({status:'APPROVED',approvalRecorded:true})).toBe('RECORDED');
     expect(approvalDisplay({status:'GENERATED',approvalRecorded:true})).toBe('RECORDED · EXECUTED');
+  });
+
+  it('renders persisted safe post-provider failure diagnostics', () => {
+    render(<AttemptDiagnostics attempt={{candidateOrdinal:2,latestStatus:'FAILED',failureClassification:'SECURITY_REJECTED_OUTPUT',
+      safeErrorMessage:'Passport generation failed: SECURITY_REJECTED_OUTPUT.',mayHaveSpent:true,
+      providerRequestId:'req_safe_123',responseMetadata:{gate0:{status:'BLOCK',findingCodes:['PROMPT_INJECTION','EMBEDDED_EXECUTION']}}}}/>);
+    for (const value of ['Candidate 2','Status: FAILED','Failure classification: SECURITY_REJECTED_OUTPUT',
+      'Safe error: Passport generation failed: SECURITY_REJECTED_OUTPUT.','Gate 0 status: BLOCK',
+      'Gate 0 findings: PROMPT_INJECTION, EMBEDDED_EXECUTION','May have spent: YES','Provider request ID: req_safe_123']) {
+      expect(screen.getByText(value)).toBeTruthy();
+    }
   });
 
   it('renders the Library, Create Avatar and plan-only Test Content screens', async () => {
