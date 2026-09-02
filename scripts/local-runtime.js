@@ -2,6 +2,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
+const { existsSync } = require('node:fs');
 const { execFileSync } = require('node:child_process');
 
 function hasPlaceholder(url) {
@@ -66,8 +67,14 @@ function discoverLocalDatabase(env = process.env, execute = execFileSync) {
   };
 }
 
-function localStorageRoot(env = process.env) {
-  return path.resolve(env.CONTENT_FACTORY_STORAGE_ROOT || path.join(os.homedir(), '.content-factory', 'storage'));
+function localStorageRoot(env = process.env, { cwd = process.cwd(), exists = existsSync } = {}) {
+  if (env.CONTENT_FACTORY_STORAGE_ROOT) return path.resolve(env.CONTENT_FACTORY_STORAGE_ROOT);
+  const repositoryRoot = path.resolve(cwd, '.artifacts');
+  // Existing local Content Factory databases historically point at repo-local `.artifacts`.
+  // Prefer that durable root whenever it exists so `dashboard` and `dashboard:local` cannot
+  // silently address the same database with different artifact roots.
+  if (exists(repositoryRoot)) return repositoryRoot;
+  return path.resolve(path.join(os.homedir(), '.content-factory', 'storage'));
 }
 
 module.exports = {

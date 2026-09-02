@@ -73,7 +73,7 @@ function inspectGateZero(input = {}) {
 }
 
 function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, provenance = {}, subjectType = 'SYNTHETIC',
-  consentVerified = false } = {}) {
+  consentVerified = false, voiceConsentVerified = false, visualOnly = false } = {}) {
   const scanProvenance = sourceType === 'PROVIDER_OUTPUT' ? {
     provenanceClass: provenance.provenanceClass, source: provenance.source, provider: provenance.provider,
     model: provenance.model, repairDelta: provenance.repairDelta || null, identityContract: provenance.identityContract || null,
@@ -87,9 +87,10 @@ function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, pr
   if (sourceType === 'PROVIDER_OUTPUT' && !approvedDerivative) findings.push({ severity: 'REVIEW', code: 'DERIVED_PROVIDER_LINEAGE_INVALID' });
   if (!provenance.owner && subjectType !== 'SYNTHETIC' && !approvedDerivative) findings.push({ severity: 'REVIEW', code: 'PROVENANCE_UNCERTAIN' });
   if (subjectType !== 'SYNTHETIC' && media.kind === 'image' && !consentVerified) findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' });
-  if (subjectType !== 'SYNTHETIC' && media.kind === 'audio') findings.push({ severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
+  if (subjectType !== 'SYNTHETIC' && media.kind === 'audio' && !voiceConsentVerified) findings.push({ severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
   if (subjectType !== 'SYNTHETIC' && media.kind === 'video') {
-    findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' }, { severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
+    if (!consentVerified) findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' });
+    if (!(visualOnly || provenance.visualOnly === true) && !voiceConsentVerified) findings.push({ severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
   }
   const unique = [...new Map(findings.map((item) => [`${item.severity}:${item.code}`, explainFinding(item)])).values()];
   const status = unique.some((item) => item.severity === 'BLOCK') ? 'BLOCK'

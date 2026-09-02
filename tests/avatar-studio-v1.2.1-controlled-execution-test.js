@@ -132,7 +132,7 @@ function makeRealPersonEligible(fx,subjectType='CONSENTED_REAL_PERSON') {
   fx.repository.avatar.subjectType=subjectType; fx.repository.avatar.productionEligibility='ELIGIBLE';
   const source=fx.repository.intakes.get('source-intake'); source.effectiveRightsStatus='VERIFIED';
   source.rightsStatus='VERIFIED'; source.effectiveConsents=[{modality:'FACE',status:'APPROVED',eventType:'GRANT',
-    allowedBrandIds:[BRAND],allowedVerticals:[VERTICAL],expiresAt:null}];
+    allowedBrandIds:[BRAND],allowedVerticals:[VERTICAL],allowedUseTypes:['AVATAR_IDENTITY','PASSPORT_REFERENCE'],expiresAt:null}];
 }
 
 async function approveReady(fx,{count=4,budget=10}={}) {
