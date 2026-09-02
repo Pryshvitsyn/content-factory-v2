@@ -57,8 +57,17 @@ function consentAllows(event, { brandId, vertical, modality, useType = null }) {
 }
 
 function currentAvatarConsent(avatar, modality) {
-  const event = (avatar?.consentEvents || []).find((item) => item.modality === modality);
-  if (event) return event;
+  const events = (avatar?.consentEvents || []).filter((item) => item.modality === modality);
+  if (events.length) {
+    const dated = events.map((event, index) => ({ event, index,
+      time: Date.parse(event.recordedAt || event.recorded_at || event.decidedAt || event.createdAt || '') }))
+      .filter((item) => Number.isFinite(item.time));
+    if (dated.length) {
+      dated.sort((left, right) => right.time - left.time || right.index - left.index);
+      return dated[0].event;
+    }
+    return events[events.length - 1];
+  }
   if (modality === 'FACE' && avatar?.consent?.modality === 'FACE') return avatar.consent;
   return null;
 }
