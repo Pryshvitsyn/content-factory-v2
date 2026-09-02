@@ -89,4 +89,23 @@ describe('Avatar Studio multi-source identity evidence',()=>{
     expect(revised.uncertain.eyeColor).toBe('source unclear');
     expect(avatar.identityLocks[0].permanentAttributes.adultAgeRange).toBe('adult');
   });
+
+  it('uses an explicit manual physical classification when a legacy lock has no reusable permanent fields',()=>{
+    const avatar=adultAvatar();
+    avatar.identityLocks[0].permanentAttributes={ adultAgeRange:'adult' };
+    const revised=buildMinorIdentityLockRevision(avatar,{
+      facialIdentity:'Preserve as operator-confirmed source-supported identity feature.',
+      nose:'Preserve as operator-confirmed source-supported identity feature.',
+    });
+    expect(revised.permanent.subjectAgeClass).toBe('MINOR');
+    expect(revised.permanent.facialIdentity).toMatch(/operator-confirmed/);
+    expect(revised.permanent.nose).toMatch(/operator-confirmed/);
+    expect(revised.permanent.adultAgeRange).toBeUndefined();
+  });
+
+  it('stays fail-closed when neither legacy nor manual permanent physical features exist',()=>{
+    const avatar=adultAvatar();
+    avatar.identityLocks[0].permanentAttributes={ adultAgeRange:'adult' };
+    expect(()=>buildMinorIdentityLockRevision(avatar)).toThrow(/Select at least one source-supported physical feature manually/);
+  });
 });
