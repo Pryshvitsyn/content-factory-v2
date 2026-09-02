@@ -63,9 +63,12 @@ function currentAvatarConsent(avatar, modality) {
       time: Date.parse(event.recordedAt || event.recorded_at || event.decidedAt || event.createdAt || '') }))
       .filter((item) => Number.isFinite(item.time));
     if (dated.length) {
-      dated.sort((left, right) => right.time - left.time || right.index - left.index);
+      // PostgreSQL returns consentEvents newest-first. Preserve that order when JS Date
+      // precision collapses distinct database timestamps into the same millisecond.
+      dated.sort((left, right) => right.time - left.time || left.index - right.index);
       return dated[0].event;
     }
+    // In-memory append-only repositories have no durable timestamp and append newest last.
     return events[events.length - 1];
   }
   if (modality === 'FACE' && avatar?.consent?.modality === 'FACE') return avatar.consent;
