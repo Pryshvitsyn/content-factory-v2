@@ -2,6 +2,7 @@
 
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { localStorageRoot } = require('./local-runtime');
 
 const viteExecutable = path.resolve(
   process.cwd(),
@@ -10,9 +11,13 @@ const viteExecutable = path.resolve(
   process.platform === 'win32' ? 'vite.cmd' : 'vite',
 );
 
+const storageRoot = localStorageRoot(process.env);
+const childEnv = { ...process.env, CONTENT_FACTORY_STORAGE_ROOT: storageRoot };
+console.log(`Artifact storage: ${storageRoot}`);
+
 const children = [
-  { name: 'Control API', process: spawn(process.execPath, ['apps/dashboard/server/index.js'], { stdio: 'inherit', env: process.env }) },
-  { name: 'Vite frontend', process: spawn(viteExecutable, ['--config', 'apps/dashboard/client/vite.config.js'], { stdio: 'inherit', env: process.env }) },
+  { name: 'Control API', process: spawn(process.execPath, ['apps/dashboard/server/index.js'], { stdio: 'inherit', env: childEnv }) },
+  { name: 'Vite frontend', process: spawn(viteExecutable, ['--config', 'apps/dashboard/client/vite.config.js'], { stdio: 'inherit', env: childEnv }) },
 ];
 
 let stopping = false;
