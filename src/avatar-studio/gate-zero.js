@@ -14,6 +14,35 @@ const RULES = Object.freeze([
   { severity: 'REVIEW', code: 'UNSUPPORTED_CLAIM', pattern: /(guaranteed|guarantees|100%).{0,30}(result|cure|viral|return|success)/i },
 ]);
 
+const FINDING_EXPLANATIONS = Object.freeze({
+  PROMPT_INJECTION: 'Structured metadata attempts to override trusted instructions.',
+  CONCEALED_ACTION: 'Structured metadata asks for an action to be hidden from the operator.',
+  EMBEDDED_EXECUTION: 'Structured metadata contains an executable command pattern.',
+  SECRET_REQUEST: 'Structured metadata requests disclosure of a secret or credential.',
+  EXTERNAL_UPLOAD: 'Structured metadata requests transfer of private or credential data.',
+  TRACKING_PARAMETERS: 'The source URL contains tracking parameters.',
+  PII_RISK: 'Structured metadata contains a possible email address or telephone number.',
+  FACE_VOICE_RIGHTS: 'Structured metadata refers to copying a real person, face, or voice.',
+  UNSUPPORTED_CLAIM: 'Structured metadata contains a claim that needs human review.',
+  EXTERNAL_URL_SOURCE: 'The media came from an explicit external URL import.',
+  PROVENANCE_UNCERTAIN: 'The operator has not recorded who owns or supplied this source.',
+  FACE_CONSENT_REQUIRED: 'Use of a real person image requires explicit face consent.',
+  VOICE_CONSENT_REQUIRED: 'Use of a real person recording requires explicit voice consent.',
+  FORMAT_UNSUPPORTED: 'The detected image encoding is intentionally unsupported by Avatar Studio.',
+  INVALID_MIME_TYPE: 'The declared MIME type is not in the media intake contract.',
+  MIME_EXTENSION_MISMATCH: 'The filename extension does not match the declared media type.',
+  UNRECOGNIZED_MEDIA_SIGNATURE: 'The file signature is not recognized as supported media.',
+  MIME_SIGNATURE_MISMATCH: 'The detected file signature does not match the declared media type.',
+  MEDIA_UNREADABLE: 'The media decoder could not read the file.',
+  MEDIA_VIDEO_STREAM_MISSING: 'The decoder found no readable image stream.',
+  MEDIA_DIMENSIONS_INVALID: 'The decoder found no positive image dimensions.',
+});
+
+function explainFinding(item) {
+  return Object.freeze({ severity: item.severity, code: item.code,
+    explanation: FINDING_EXPLANATIONS[item.code] || 'The source did not satisfy a bounded intake policy check.' });
+}
+
 function inspectGateZero(input = {}) {
   const text = [input.sourceLocator, input.text, input.metadata && JSON.stringify(input.metadata),
     input.provenance && JSON.stringify(input.provenance)].filter(Boolean).join('\n');
@@ -38,7 +67,7 @@ function inspectAssetGateZero({ media = {}, sourceType, sourceLocator = null, pr
   if (subjectType !== 'SYNTHETIC' && media.kind === 'video') {
     findings.push({ severity: 'REVIEW', code: 'FACE_CONSENT_REQUIRED' }, { severity: 'REVIEW', code: 'VOICE_CONSENT_REQUIRED' });
   }
-  const unique = [...new Map(findings.map((item) => [`${item.severity}:${item.code}`, Object.freeze({ severity: item.severity, code: item.code })])).values()];
+  const unique = [...new Map(findings.map((item) => [`${item.severity}:${item.code}`, explainFinding(item)])).values()];
   const status = unique.some((item) => item.severity === 'BLOCK') ? 'BLOCK'
     : unique.some((item) => item.severity === 'REVIEW') ? 'REVIEW' : 'PASS';
   return Object.freeze({ ...base, status, findings: Object.freeze(unique), policyVersion: 'GATE_0_AVATAR_STUDIO_V1_2_STRUCTURED_MEDIA_TEXT',
@@ -53,4 +82,4 @@ function assertGateUsable(source, { allowReview = true } = {}) {
   return true;
 }
 
-module.exports = { RULES, assertGateUsable, inspectAssetGateZero, inspectGateZero };
+module.exports = { FINDING_EXPLANATIONS, RULES, assertGateUsable, inspectAssetGateZero, inspectGateZero };

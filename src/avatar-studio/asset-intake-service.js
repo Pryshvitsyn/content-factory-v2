@@ -5,6 +5,7 @@ const path = require('node:path');
 const { AvatarStudioError, assertBrandPermission, requiredText, stringList } = require('./domain');
 const { inspectAssetGateZero } = require('./gate-zero');
 const { decodeBase64, inspectMedia } = require('./media-intake');
+const { sourceReadiness } = require('./intake-readiness');
 
 const SOURCE_TYPES = Object.freeze(['UPLOAD','CAMERA','MICROPHONE','EXISTING_ASSET','SAFE_URL_IMPORT']);
 const SOURCE_ROLES = Object.freeze(['IDENTITY','PASSPORT_SOURCE','PASSPORT_CANDIDATE','BODY_REFERENCE_CANDIDATE',
@@ -14,8 +15,20 @@ const REVIEW_ACTIONS = Object.freeze(['APPROVE_FOR_USE','REJECT','REQUEST_CONSEN
 function publicIntake(intake) {
   if (!intake) return null;
   const { artifactStorageKey, tokenHash, ...safe } = intake;
+  const analysis = intake.provenance?.intakeAnalysis || {};
+  const faceConsent = (intake.effectiveConsents || []).some((item) => item.modality === 'FACE' && item.status === 'APPROVED');
+  const voiceConsent = (intake.effectiveConsents || []).some((item) => item.modality === 'VOICE' && item.status === 'APPROVED');
+  const unresolvedFindings = (intake.gate0Findings || []).filter((item) => {
+    if (item.code === 'FACE_CONSENT_REQUIRED' && faceConsent) return false;
+    if (item.code === 'VOICE_CONSENT_REQUIRED' && voiceConsent) return false;
+    if (item.code === 'PROVENANCE_UNCERTAIN' && intake.effectiveRightsStatus === 'VERIFIED') return false;
+    return item.severity === 'BLOCK' || intake.effectiveGate0Status !== 'PASS';
+  });
+  const readiness = sourceReadiness({ media: { kind: String(intake.mimeType || '').split('/')[0], width: intake.width,
+    height: intake.height, findings: unresolvedFindings, ...analysis },
+  gate0: { status: intake.effectiveGate0Status, findings: unresolvedFindings } });
   return Object.freeze({ ...safe, previewUrl: `/api/avatar-studio/intakes/${encodeURIComponent(intake.id)}/content?brandId=${encodeURIComponent(intake.brandId)}&avatarId=${encodeURIComponent(intake.characterId)}`,
-    paidProviderCalls: 0, externalGenerationCalls: 0 });
+    sourceReadiness: readiness, paidProviderCalls: 0, externalGenerationCalls: 0 });
 }
 
 function roleModalities(roles) {
@@ -68,6 +81,7 @@ class AvatarAssetIntakeService {
     const completeMedia = { ...media, filename };
     const gate0 = inspectAssetGateZero({ media: completeMedia, sourceType: normalizedType, sourceLocator, provenance,
       subjectType: avatar.subjectType });
+    const readiness = sourceReadiness({ media: completeMedia, gate0 });
     const intakeId = crypto.randomUUID(); let artifact;
     if (existing) artifact = { artifactId: existing.artifactId, version: existing.artifactVersion, storageKey: existing.storageKey,
       contentHash: crypto.createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
@@ -78,10 +92,17 @@ class AvatarAssetIntakeService {
     const rightsStatus = avatar.subjectType === 'SYNTHETIC' ? 'NOT_REQUIRED' : 'UNKNOWN';
     const stored = await this.repository.createIntake({ id: intakeId, avatar, brandId, artifact,
       media: completeMedia, sourceType: normalizedType, sourceLocator, existingAssetId: existing?.id, gate0, rightsStatus,
-      provenance: { ...provenance, artifactService: 'CONTENT_FACTORY_IMMUTABLE_ARTIFACT_V1', uploader: this.actor,
+      provenance: { ...provenance, intakeAnalysis: { detectedMime: media.detectedMime, width: media.width, height: media.height,
+        orientation: media.orientation, rotation: media.rotation, byteSize: media.byteSize, encoding: media.encoding,
+        metadataParser: media.metadataParser, readiness },
+        artifactService: 'CONTENT_FACTORY_IMMUTABLE_ARTIFACT_V1', uploader: this.actor,
         importedAt: new Date().toISOString(), originalFilename: filename }, actor: this.actor });
-    return Object.freeze({ asset: publicIntake(stored), gate0: { ...gate0, externalCalls: importExternalCalls,
-      paidProviderCalls: 0, externalGenerationCalls: 0 }, eligibility: this.eligibility(stored, avatar, []) });
+    const publicAsset = publicIntake(stored);
+    return Object.freeze({ asset: publicAsset, gate0: { ...gate0, externalCalls: importExternalCalls,
+      paidProviderCalls: 0, externalGenerationCalls: 0 }, sourceReadiness: readiness,
+      mediaAnalysis: Object.freeze({ originalFilename: filename, declaredMime: mimeType, detectedMime: media.detectedMime,
+        width: media.width, height: media.height, orientation: media.orientation, byteSize: media.byteSize,
+        encoding: media.encoding, metadataParser: media.metadataParser }), eligibility: this.eligibility(stored, avatar, []) });
   }
 
   async ingestProviderOutput({ avatar, brandId, bytes, filename, mimeType, provider, model, attemptId,

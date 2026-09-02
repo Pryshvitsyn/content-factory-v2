@@ -61,6 +61,7 @@ describe('Avatar Studio dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'START ASSET INTAKE' }));
     await screen.findByRole('heading', { name: 'Asset intake' });
     expect(screen.queryByLabelText(/artifact id/i)).toBeNull();
+    expect(screen.getByLabelText('Avatar source file').getAttribute('accept')).toBe('image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm');
     const file = new File([new Uint8Array([0xff,0xd8,0xff,0xd9])], 'mara.jpg', { type: 'image/jpeg' });
     fireEvent.change(screen.getByLabelText('Avatar source file'), { target: { files: [file] } });
     await screen.findByRole('heading', { name: 'Gate 0, rights and source roles' });
@@ -75,6 +76,28 @@ describe('Avatar Studio dashboard', () => {
     await screen.findByRole('heading', { name: 'Ready for Passport Lab' });
     expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/use'))).toBe(true);
     expect(fetch.mock.calls.some(([url]) => String(url).includes('provider'))).toBe(false);
+  });
+
+  it('rejects HEIC clearly before the Dashboard upload request', async () => {
+    const avatar = { id:'avatar-heic-test',vertical:'PSYCHOLOGY_WELLBEING',subjectType:'CONSENTED_REAL_PERSON',brandIds:[brand.id] };
+    fetch.mockImplementation((url,options={}) => {
+      if (url === '/api/brands') return response([brand]);
+      if (url === '/api/avatar-studio/avatars' && options.method === 'POST') return response(avatar);
+      return response([]);
+    });
+    render(<AvatarStudio />); await screen.findByRole('option',{name:'Attune'});
+    fireEvent.click(screen.getByRole('button',{name:'CREATE AVATAR'}));
+    fireEvent.change(screen.getByLabelText('Allowed brand'),{target:{value:brand.id}});
+    fireEvent.change(screen.getByLabelText('Identity source type'),{target:{value:'CONSENTED_REAL_PERSON'}});
+    fireEvent.change(screen.getByLabelText('Internal avatar name'),{target:{value:'Intake test only'}});
+    fireEvent.change(screen.getByLabelText('Persona role'),{target:{value:'intake test'}});
+    fireEvent.click(screen.getByRole('button',{name:'START ASSET INTAKE'}));
+    await screen.findByRole('heading',{name:'Asset intake'});
+    const heic = new File([new Uint8Array([0,0,0,24,102,116,121,112,104,101,105,99])],'IMG_0001.HEIC',{type:'image/heic'});
+    fireEvent.change(screen.getByLabelText('Avatar source file'),{target:{files:[heic]}});
+    expect(await screen.findByText('FORMAT_UNSUPPORTED')).toBeTruthy();
+    expect(screen.getByText(/HEIC\/HEIF is not currently decoded/)).toBeTruthy();
+    expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/intakes'))).toBe(false);
   });
 
   it('opens a real Passport Lab and keeps L0 before human certification', async () => {

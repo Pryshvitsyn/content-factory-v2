@@ -150,6 +150,7 @@ function normalizeProbe(payload) {
   const audio = (payload.streams || []).find((stream) => stream.codec_type === 'audio');
   const rate = String(video?.avg_frame_rate || video?.r_frame_rate || '0/1').split('/').map(Number);
   const fps = rate[1] ? rate[0] / rate[1] : 0;
+  const rotationSideData = (video?.side_data_list || []).find((item) => Number.isFinite(Number(item.rotation)));
   return Object.freeze({
     durationMs: Math.round(Number(payload.format?.duration || video?.duration || 0) * 1000),
     size: Number(payload.format?.size || 0),
@@ -158,6 +159,9 @@ function normalizeProbe(payload) {
     fps,
     videoCodec: video?.codec_name || null,
     pixelFormat: video?.pix_fmt || null,
+    colorSpace: video?.color_space || null,
+    colorRange: video?.color_range || null,
+    rotation: Number(rotationSideData?.rotation || video?.tags?.rotate || 0),
     hasAudio: Boolean(audio),
     audioCodec: audio?.codec_name || null,
     audioSampleRate: Number(audio?.sample_rate || 0),

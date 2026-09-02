@@ -5,6 +5,12 @@ const { AvatarStudioError } = require('./domain');
 
 const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 const MAX_EMBEDDED_TEXT_CHARS = 20000;
+const SUPPORTED_SOURCE_IMAGE_FORMATS = Object.freeze([
+  Object.freeze({ mimeType: 'image/jpeg', extensions: Object.freeze(['.jpg','.jpeg']), label: 'JPEG/JPG' }),
+  Object.freeze({ mimeType: 'image/png', extensions: Object.freeze(['.png']), label: 'PNG' }),
+  Object.freeze({ mimeType: 'image/webp', extensions: Object.freeze(['.webp']), label: 'WebP' }),
+]);
+const SUPPORTED_SOURCE_IMAGE_MIMES = new Set(SUPPORTED_SOURCE_IMAGE_FORMATS.map((item) => item.mimeType));
 const MIME_EXTENSIONS = Object.freeze({
   'image/jpeg': ['.jpg','.jpeg'], 'image/png': ['.png'], 'image/webp': ['.webp'], 'image/gif': ['.gif'],
   'video/mp4': ['.mp4','.m4v'], 'video/webm': ['.webm'], 'video/quicktime': ['.mov'],
@@ -28,7 +34,12 @@ function sniffMime(bytes) {
   if (bytes.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))) return 'image/png';
   if (bytes.subarray(0, 4).toString('ascii') === 'GIF8') return 'image/gif';
   if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
-  if (bytes.subarray(4, 8).toString('ascii') === 'ftyp') return 'video/mp4';
+  if (bytes.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = bytes.subarray(8,12).toString('ascii').toLowerCase();
+    if (['heic','heix','hevc','hevx','heim','heis','mif1','msf1'].includes(brand)) return 'image/heif';
+    if (brand === 'avif' || brand === 'avis') return 'image/avif';
+    return 'video/mp4';
+  }
   if (bytes.subarray(0, 4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3]))) return 'video/webm';
   if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WAVE') return 'audio/wav';
   if (bytes.subarray(0, 4).toString('ascii') === 'OggS') return 'audio/ogg';
@@ -43,6 +54,15 @@ function imageDimensions(bytes, mimeType) {
   if (mime === 'image/webp' && bytes.length >= 30 && bytes.subarray(12,16).toString('ascii') === 'VP8X') {
     return { width: 1 + bytes.readUIntLE(24,3), height: 1 + bytes.readUIntLE(27,3) };
   }
+  if (mime === 'image/webp' && bytes.length >= 25 && bytes.subarray(12,16).toString('ascii') === 'VP8L'
+    && bytes[20] === 0x2f) {
+    const packed = bytes.readUInt32LE(21);
+    return { width: 1 + (packed & 0x3fff), height: 1 + ((packed >>> 14) & 0x3fff) };
+  }
+  if (mime === 'image/webp' && bytes.length >= 30 && bytes.subarray(12,16).toString('ascii') === 'VP8 '
+    && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
+    return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+  }
   if (mime === 'image/jpeg') {
     let offset = 2;
     while (offset + 8 < bytes.length) {
@@ -55,6 +75,30 @@ function imageDimensions(bytes, mimeType) {
     }
   }
   return { width: null, height: null };
+}
+
+function jpegEncoding(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 4) return {};
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) { offset += 1; continue; }
+    const marker = bytes[offset + 1];
+    if (marker === 0xda || marker === 0xd9) break;
+    if (offset + 4 > bytes.length) break;
+    const length = bytes.readUInt16BE(offset + 2);
+    if (length < 2 || offset + 2 + length > bytes.length) break;
+    if ([0xc0,0xc1,0xc2].includes(marker)) return { progressive: marker === 0xc2, bitsPerSample: bytes[offset + 4] || null };
+    offset += 2 + length;
+  }
+  return {};
+}
+
+function geometricOrientation(width, height, rotation = 0) {
+  const swapped = Math.abs(Number(rotation || 0)) % 180 === 90;
+  const displayWidth = swapped ? height : width; const displayHeight = swapped ? width : height;
+  if (!displayWidth || !displayHeight) return 'UNKNOWN';
+  if (displayWidth === displayHeight) return 'SQUARE';
+  return displayWidth > displayHeight ? 'LANDSCAPE' : 'PORTRAIT';
 }
 
 function printableMetadata(value, limit = MAX_EMBEDDED_TEXT_CHARS) {
@@ -149,20 +193,25 @@ function decodeBase64(value) {
 async function inspectMedia({ bytes, filename, mimeType, mediaInspector = null } = {}) {
   const mime = normalizedMime(mimeType); const extension = extensionOf(filename); const kind = mediaKind(mime);
   const findings = [];
-  if (!MIME_EXTENSIONS[mime] || !kind) findings.push({ severity: 'BLOCK', code: 'INVALID_MIME_TYPE' });
-  if (!extension || !MIME_EXTENSIONS[mime]?.includes(extension)) findings.push({ severity: 'BLOCK', code: 'MIME_EXTENSION_MISMATCH' });
   const detectedMime = sniffMime(bytes);
+  const detectedImageUnsupported = Boolean(detectedMime?.startsWith('image/') && !SUPPORTED_SOURCE_IMAGE_MIMES.has(detectedMime));
+  const declaredImageUnsupported = Boolean(mime.startsWith('image/') && !SUPPORTED_SOURCE_IMAGE_MIMES.has(mime));
+  if (detectedImageUnsupported || declaredImageUnsupported) findings.push({ severity: 'BLOCK', code: 'FORMAT_UNSUPPORTED' });
+  else if (!MIME_EXTENSIONS[mime] || !kind) findings.push({ severity: 'BLOCK', code: 'INVALID_MIME_TYPE' });
+  if (!detectedImageUnsupported && !declaredImageUnsupported && (!extension || !MIME_EXTENSIONS[mime]?.includes(extension))) {
+    findings.push({ severity: 'BLOCK', code: 'MIME_EXTENSION_MISMATCH' });
+  }
   if (!detectedMime) findings.push({ severity: 'BLOCK', code: 'UNRECOGNIZED_MEDIA_SIGNATURE' });
-  else if (detectedMime !== mime && !(mime === 'video/quicktime' && detectedMime === 'video/mp4')
+  else if (!detectedImageUnsupported && !declaredImageUnsupported && detectedMime !== mime && !(mime === 'video/quicktime' && detectedMime === 'video/mp4')
     && !(mime === 'audio/mp4' && detectedMime === 'video/mp4') && !(mime === 'audio/webm' && detectedMime === 'video/webm')) {
     findings.push({ severity: 'BLOCK', code: 'MIME_SIGNATURE_MISMATCH' });
   }
-  let dimensions = { width: null, height: null }; let durationMs = null;
+  let dimensions = { width: null, height: null }; let durationMs = null; let probe = null;
   let embeddedText = extractEmbeddedText(bytes, mime);
   if (kind === 'image' && detectedMime) dimensions = imageDimensions(bytes, mime);
   if (mediaInspector && kind && findings.every((item) => item.severity !== 'BLOCK')) {
     try {
-      const probe = await mediaInspector.inspect({ bytes, contentType: mime, kind });
+      probe = await mediaInspector.inspect({ bytes, contentType: mime, kind });
       dimensions = { width: probe.width || dimensions.width, height: probe.height || dimensions.height };
       durationMs = Number.isFinite(probe.durationMs) ? probe.durationMs : null;
       if (probe.embeddedText) embeddedText = printableMetadata([embeddedText,probe.embeddedText].filter(Boolean).join('\n'));
@@ -170,9 +219,20 @@ async function inspectMedia({ bytes, filename, mimeType, mediaInspector = null }
       findings.push({ severity: 'BLOCK', code: error.code || 'MEDIA_UNREADABLE' });
     }
   }
+  const parserName = mime === 'image/jpeg' ? 'JPEG_COM_XMP' : mime === 'image/png' ? 'PNG_TEXT_ITXT'
+    : mime === 'image/webp' ? 'WEBP_XMP' : 'NONE';
+  const encoding = Object.freeze({ codec: probe?.videoCodec || ({ 'image/jpeg':'mjpeg','image/png':'png','image/webp':'webp' })[mime] || null,
+    pixelFormat: probe?.pixelFormat || null, colorSpace: probe?.colorSpace || null, colorRange: probe?.colorRange || null,
+    hasAlpha: probe?.pixelFormat ? /a/.test(probe.pixelFormat) : mime === 'image/png' ? null : false,
+    ...((mime === 'image/jpeg') ? jpegEncoding(bytes) : {}) });
+  const rotation = Number(probe?.rotation || 0);
   return Object.freeze({ mimeType: mime, extension, kind, detectedMime, byteSize: bytes.length,
-    width: dimensions.width || null, height: dimensions.height || null, durationMs, findings: Object.freeze(findings), embeddedText });
+    width: dimensions.width || null, height: dimensions.height || null, durationMs,
+    orientation: geometricOrientation(dimensions.width, dimensions.height, rotation), rotation,
+    encoding, metadataParser: Object.freeze({ parser: parserName, status: parserName === 'NONE' ? 'NOT_APPLICABLE' : 'PARSED',
+      extractedTextChars: embeddedText.length, scope: 'BOUNDED_STRUCTURED_METADATA_ONLY' }),
+    findings: Object.freeze(findings), embeddedText });
 }
 
 module.exports = { MAX_ASSET_BYTES, MIME_EXTENSIONS, decodeBase64, extensionOf, extractEmbeddedText, imageDimensions, inspectMedia,
-  mediaKind, normalizedMime, printableMetadata, sniffMime };
+  mediaKind, normalizedMime, printableMetadata, sniffMime, SUPPORTED_SOURCE_IMAGE_FORMATS };

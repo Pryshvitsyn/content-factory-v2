@@ -132,7 +132,12 @@ async function main() {
       subjectIdentity: { name: 'Test Person' }, rightsBasis: 'SIGNED_RELEASE', allowedBrandIds: [BRAND],
       allowedVerticals: [realAvatar.vertical], allowedChannels: ['Instagram'], allowedUseTypes: ['AVATAR_IDENTITY'],
       evidenceNotes: 'Local recorded disclosure fixture', disclosureAccepted: true, humanApproval: true });
-    assert.equal(grant.event.status,'APPROVED'); await service.use({ avatar: realAvatar, brandId: BRAND, intakeId: real.asset.id, roles: ['IDENTITY'] });
+    assert.equal(grant.event.status,'APPROVED');
+    const rightsVerified = await service.review({ avatar: realAvatar, brandId: BRAND, intakeId: real.asset.id,
+      action: 'MARK_RIGHTS_VERIFIED', reason: 'Fixture provenance and rights were explicitly verified', humanApproval: true });
+    assert.equal(rightsVerified.asset.sourceReadiness.validationClass,'QUALITY_INSUFFICIENT',
+      'after rights and consent resolve, this deliberately 2x3 fixture must remain blocked only by source quality');
+    await service.use({ avatar: realAvatar, brandId: BRAND, intakeId: real.asset.id, roles: ['IDENTITY'] });
     const consentAudio = await service.intake({ avatar: realAvatar, brandId: BRAND, sourceType: 'MICROPHONE',
       file: file('consent.wav','audio/wav',wav()), provenance: { owner: 'SELF_RECORDED_CONSENT' } });
     await service.review({ avatar: realAvatar, brandId: BRAND, intakeId: consentAudio.asset.id, action: 'APPROVE_FOR_USE',
