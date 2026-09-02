@@ -39,10 +39,28 @@ function roleModalities(roles) {
   return [...result];
 }
 
-function consentAllows(event, { brandId, vertical, modality }) {
+function roleUseTypes(roles, modality) {
+  if (modality !== 'FACE') return [];
+  const result = new Set();
+  if (roles.includes('IDENTITY')) result.add('AVATAR_IDENTITY');
+  if (roles.some((role) => ['PASSPORT_SOURCE','PASSPORT_CANDIDATE','BODY_REFERENCE_CANDIDATE',
+    'EXPRESSION_REFERENCE_CANDIDATE','MOUTH_CALIBRATION_CANDIDATE'].includes(role))) result.add('PASSPORT_REFERENCE');
+  return [...result];
+}
+
+function consentAllows(event, { brandId, vertical, modality, useType = null }) {
   if (!event || event.modality !== modality || event.status !== 'APPROVED' || event.eventType !== 'GRANT') return false;
   if (event.expiresAt && new Date(event.expiresAt) <= new Date()) return false;
-  return (event.allowedBrandIds || []).includes(brandId) && (event.allowedVerticals || []).includes(vertical);
+  if (!(event.allowedBrandIds || []).includes(brandId) || !(event.allowedVerticals || []).includes(vertical)) return false;
+  if (useType && !(event.allowedUseTypes || []).includes(useType)) return false;
+  return true;
+}
+
+function currentAvatarConsent(avatar, modality) {
+  const event = (avatar?.consentEvents || []).find((item) => item.modality === modality);
+  if (event) return event;
+  if (modality === 'FACE' && avatar?.consent?.modality === 'FACE') return avatar.consent;
+  return null;
 }
 
 class AvatarAssetIntakeService {
@@ -79,8 +97,15 @@ class AvatarAssetIntakeService {
     }
     const media = await inspectMedia({ bytes, filename, mimeType, mediaInspector: this.mediaInspector });
     const completeMedia = { ...media, filename };
+    const faceConsent = currentAvatarConsent(avatar, 'FACE');
+    const voiceConsent = currentAvatarConsent(avatar, 'VOICE');
+    const faceConsentVerified = avatar.subjectType === 'SYNTHETIC' || consentAllows(faceConsent,
+      { brandId, vertical: avatar.vertical, modality: 'FACE' });
+    const voiceConsentVerified = avatar.subjectType === 'SYNTHETIC' || consentAllows(voiceConsent,
+      { brandId, vertical: avatar.vertical, modality: 'VOICE' });
     const gate0 = inspectAssetGateZero({ media: completeMedia, sourceType: normalizedType, sourceLocator, provenance,
-      subjectType: avatar.subjectType });
+      subjectType: avatar.subjectType, consentVerified: faceConsentVerified, voiceConsentVerified,
+      visualOnly: provenance.visualOnly === true });
     const readiness = sourceReadiness({ media: completeMedia, gate0 });
     const intakeId = crypto.randomUUID(); let artifact;
     if (existing) artifact = { artifactId: existing.artifactId, version: existing.artifactVersion, storageKey: existing.storageKey,
@@ -143,8 +168,15 @@ class AvatarAssetIntakeService {
     if (avatar.subjectType !== 'SYNTHETIC') {
       const modalities = roleModalities(roles);
       for (const modality of modalities) {
-        const event = (intake.effectiveConsents || []).find((item) => item.modality === modality);
-        if (!consentAllows(event, { brandId: intake.brandId, vertical: intake.verticalCode, modality })) failures.push(`${modality}_CONSENT_REQUIRED`);
+        const events = [...(intake.effectiveConsents || [])];
+        const avatarEvent = currentAvatarConsent(avatar, modality);
+        if (avatarEvent && !events.some((item) => item.id === avatarEvent.id)) events.push(avatarEvent);
+        const useTypes = roleUseTypes(roles, modality);
+        const allowed = useTypes.length
+          ? useTypes.every((useType) => events.some((event) => consentAllows(event,
+            { brandId: intake.brandId, vertical: intake.verticalCode, modality, useType })))
+          : events.some((event) => consentAllows(event, { brandId: intake.brandId, vertical: intake.verticalCode, modality }));
+        if (!allowed) failures.push(`${modality}_CONSENT_REQUIRED`);
       }
       if (!modalities.length && intake.effectiveRightsStatus !== 'VERIFIED') failures.push('RIGHTS_VERIFICATION_REQUIRED');
     }
@@ -272,4 +304,5 @@ class AvatarAssetIntakeService {
   }
 }
 
-module.exports = { AvatarAssetIntakeService, REVIEW_ACTIONS, SOURCE_ROLES, SOURCE_TYPES, consentAllows, publicIntake, roleModalities };
+module.exports = { AvatarAssetIntakeService, REVIEW_ACTIONS, SOURCE_ROLES, SOURCE_TYPES, consentAllows, currentAvatarConsent,
+  publicIntake, roleModalities, roleUseTypes };
