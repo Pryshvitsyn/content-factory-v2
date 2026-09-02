@@ -10,6 +10,11 @@ const webPort = Number(process.env.DASHBOARD_WEB_PORT || 3000);
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react()],
+  resolve: {
+    // Keep the established AvatarStudio module intact for legacy direct imports/tests while
+    // routing the dashboard entry to the additive multi-source operator workflow.
+    alias: [{ find: /^\.\/AvatarStudio$/, replacement: fileURLToPath(new URL('./src/AvatarStudioMultiSource.jsx', import.meta.url)) }],
+  },
   server: {
     host: webHost,
     port: webPort,
