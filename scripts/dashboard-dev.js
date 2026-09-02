@@ -13,6 +13,9 @@ const viteExecutable = path.resolve(
 
 const storageRoot = localStorageRoot(process.env);
 const childEnv = { ...process.env, CONTENT_FACTORY_STORAGE_ROOT: storageRoot };
+let database = process.env.CONTENT_FACTORY_DATABASE || 'unresolved';
+try { if (process.env.DATABASE_URL) database = decodeURIComponent(new URL(process.env.DATABASE_URL).pathname.replace(/^\//,'')) || database; } catch {}
+console.log(`Database: ${database}`);
 console.log(`Artifact storage: ${storageRoot}`);
 
 const children = [
