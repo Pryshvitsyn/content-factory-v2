@@ -38,6 +38,8 @@ jobs:
         run: npm run test:v2.10.3
       - name: V2.10.4.1 isolated bounded source recovery execution
         run: npm run test:v2.10.4.1
+      - name: Locked-keyframe bounded workflow
+        run: npm run test:locked-keyframe
       - name: V2.10.1 exact-identity recovered continuation
         run: node tests/v2.10.1-v210-resume-identity-test.js
       - name: Real LiveProductionService collision guard
@@ -87,3 +89,7 @@ jobs:
         run: npm run test:v2.10.2:postgres
       - name: V2.10.4 PostgreSQL creative lineage, one-attempt bound, and exact-job continuation
         run: npm run test:v2.10.4:postgres
+      - name: Locked-keyframe PostgreSQL durability
+        run: |
+          createdb --maintenance-db=postgres locked_keyframe_test
+          PGDATABASE=locked_keyframe_test CONTENT_FACTORY_TEST_DATABASE=1 npm run test:locked-keyframe:postgres

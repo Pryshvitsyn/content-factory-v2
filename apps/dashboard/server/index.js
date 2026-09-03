@@ -18,6 +18,8 @@ const { V210PostgresRepository } = require('../../../src/v2.10/postgres-reposito
 const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
 const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
+const { LockedKeyframeService, createKeyframeImageGateway,
+  createSemanticStillEvaluator } = require('../../../src/v2.10/locked-keyframe-service');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -37,7 +39,8 @@ function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryServ
   return commandService;
 }
 
-function createDashboardRuntime(env = process.env, { previewProvider, creativeStarter } = {}) {
+function createDashboardRuntime(env = process.env, { previewProvider, creativeStarter,
+  keyframeImageGateway, semanticStillEvaluator } = {}) {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   const db = new Pool({ connectionString: env.DATABASE_URL, max: 10 });
   const storage = new FilesystemStorageAdapter({
@@ -70,9 +73,14 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const creativeService = new CreativeProductionService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
+  const lockedKeyframeService = new LockedKeyframeService({ repository: v210Repository,
+    brandRepository: repository, providerCatalog, starter: resolvedStarter, storage,
+    imageInspector: audioInspector, actor, env,
+    imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
+    stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env }) });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, v210Repository,
-    creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
-    server: createControlServer({ service, creativeService }) };
+    creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider, lockedKeyframeService,
+    server: createControlServer({ service, creativeService, lockedKeyframeService }) };
 }
 
 if (require.main === module) {

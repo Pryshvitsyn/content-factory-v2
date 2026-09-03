@@ -26,12 +26,14 @@ describe('V2.10 Creative Production UI', () => {
 
   it('shows every operator section, two-shot minimum, controls, and fail-closed Start', async () => {
     render(<CreativeProduction />);
-    for (const title of ['CREATIVE BRIEF','STORYBOARD · 2 SHOTS','CONTINUITY','VOICE STUDIO','POST PRODUCTION','CREATIVE VALIDATION','PRODUCTION PREFLIGHT']) {
+    for (const title of ['CREATIVE BRIEF','STORYBOARD · 2 SHOTS','LOCKED OPENING KEYFRAME','CONTINUITY','VOICE STUDIO','POST PRODUCTION','CREATIVE VALIDATION','PRODUCTION PREFLIGHT']) {
       expect(screen.getByRole('heading', { name: title })).toBeTruthy();
     }
     expect(screen.getAllByText(/SHOT [12] · 5 sec/)).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'REMOVE SHOT' }).every((button) => button.disabled)).toBe(true);
     expect(screen.queryByRole('button', { name: 'START PRODUCTION' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'KEYFRAME PREFLIGHT · 0 CALLS' }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'START FIRST VIDEO ONLY' }).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'ADD SHOT' }));
     expect(screen.getByRole('heading', { name: 'STORYBOARD · 3 SHOTS' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'DUPLICATE SHOT' })).toHaveLength(3);

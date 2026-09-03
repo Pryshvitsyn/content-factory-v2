@@ -339,16 +339,28 @@ class LiveProductionService {
         ...(command.regenerationOf ? { regeneration_of: command.regenerationOf } : {}),
       } : {}),
     };
-    const insertedProduction = await client.query(`/* v2.4:create-production */
-      INSERT INTO v2_1.productions(workspace_id,brand_id,name,status,objective,metadata)
-      VALUES($1,$2,$3,'DRAFT',$4,$5::jsonb)
-      ON CONFLICT(workspace_id,name) DO NOTHING RETURNING id`,
-    [input.workspaceId, input.brandId, this.productionName(input), input.objective, JSON.stringify(productionMetadata)]);
+    const requestedProductionId = command?.productionId || null;
+    if (requestedProductionId && !UUID_PATTERN.test(requestedProductionId)) {
+      throw new LiveProductionError('LIVE_OPERATOR_COMMAND_INVALID', 'Preallocated productionId must be a UUID');
+    }
+    const insertedProduction = requestedProductionId
+      ? await client.query(`/* v2.4:create-production-with-preallocated-id */
+        INSERT INTO v2_1.productions(id,workspace_id,brand_id,name,status,objective,metadata)
+        VALUES($1,$2,$3,$4,'DRAFT',$5,$6::jsonb)
+        ON CONFLICT(workspace_id,name) DO NOTHING RETURNING id`,
+      [requestedProductionId, input.workspaceId, input.brandId, this.productionName(input), input.objective,
+        JSON.stringify(productionMetadata)])
+      : await client.query(`/* v2.4:create-production */
+        INSERT INTO v2_1.productions(workspace_id,brand_id,name,status,objective,metadata)
+        VALUES($1,$2,$3,'DRAFT',$4,$5::jsonb)
+        ON CONFLICT(workspace_id,name) DO NOTHING RETURNING id`,
+      [input.workspaceId, input.brandId, this.productionName(input), input.objective, JSON.stringify(productionMetadata)]);
     const productionResult = await client.query(`/* v2.4:get-production-for-run */
       SELECT * FROM v2_1.productions WHERE workspace_id=$1 AND name=$2 FOR UPDATE`,
     [input.workspaceId, this.productionName(input)]);
     const production = productionResult.rows[0];
-    if (!production || production.brand_id !== input.brandId || production.metadata?.live_input_fingerprint !== input.fingerprint) {
+    if (!production || production.brand_id !== input.brandId || production.metadata?.live_input_fingerprint !== input.fingerprint
+      || (requestedProductionId && production.id !== requestedProductionId)) {
       throw new LiveProductionError('LIVE_INPUT_CONFLICT', 'Existing production does not match brand or structured input');
     }
     if (command && (production.metadata?.operator_request_id !== command.requestId

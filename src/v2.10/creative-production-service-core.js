@@ -167,6 +167,12 @@ class CreativeProductionService {
     if (draft.start_state === 'RUNNING') throw new CreativeProductionError(409, 'START_ALREADY_RUNNING', 'Production start is already running');
     if (draft.start_state === 'NEEDS_RECONCILIATION') throw new CreativeProductionError(409, 'START_NEEDS_RECONCILIATION',
       'Previous start may have crossed an external boundary; reconcile before retrying');
+    if (typeof this.repository.getLockedWorkflow === 'function') {
+      const locked = await this.repository.getLockedWorkflow({ draftId: id, ...scope });
+      if (locked && locked.state !== 'FIRST_VIDEO_ACCEPTED') throw new CreativeProductionError(409,
+        'LOCKED_KEYFRAME_STAGE_INCOMPLETE',
+        'The exact approved keyframe and bounded first-video validation must complete before remaining production can start');
+    }
     if (!draft.preflight_request || !draft.final_preflight) throw new CreativeProductionError(409, 'PREFLIGHT_BLOCKED', 'A persisted READY preflight is required');
     const computed = await this.computePreflight({ draft, scope, request: draft.preflight_request });
     assertStartAllowed({ preflight: draft.final_preflight, currentPreflight: computed.preflight, confirmed: confirmation === true });
@@ -179,6 +185,10 @@ class CreativeProductionService {
       if (!started?.productionId) throw new CreativeProductionError(502, 'PRODUCTION_START_FAILED', 'Canonical starter returned no production identity');
       await this.repository.finishStartSuccess({ id, ...scope, attempt: claimed.startAttempt,
         productionId: started.productionId, canonicalInputFingerprint: started.canonicalInputFingerprint });
+      if (typeof this.repository.markLockedContinuationStarted === 'function') {
+        await this.repository.markLockedContinuationStarted({ draftId: id, ...scope,
+          productionId: started.productionId });
+      }
       return Object.freeze({ ...started, draftId: id, humanApprovalRequired: true, autoPublish: false });
     } catch (error) {
       const boundaryState = error?.boundaryState === 'NOT_CROSSED' ? 'NOT_CROSSED'

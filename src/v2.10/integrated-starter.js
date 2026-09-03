@@ -4,6 +4,7 @@ const { stableFingerprint } = require('../v2.5/production-input');
 const { createProductionRuntime } = require('../v2.7/production-runtime');
 const { V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input } = require('./runtime-integration');
 const { V210PostProductionRenderer, V210ReferenceAwareMediaExecutor } = require('./reference-aware-media');
+const { buildFirstVideoStagePlan, LockedKeyframeError } = require('./locked-keyframe-contract');
 
 // Bump only when durable canonical execution-identity semantics change. The
 // version is salted into the deterministic identity hash while preserving the
@@ -93,6 +94,65 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
     const prepared = await runtime.service.prepare({ input: canonical.input, config: runtime.config });
     return Object.freeze({ canonicalInputFingerprint: canonical.input.fingerprint, plan: prepared.plan,
       providerExecutions: 0, canonical });
+  }
+
+  lockedFirstVideoProjection({ draft, preflight, keyframe }) {
+    const canonical = revisionSafeCanonical({ draft, preflight });
+    const asset = canonical.input.assetPlan.assets.find((item) => item.asset_id === keyframe.asset_id && item.kind === 'video');
+    if (!asset) throw new LockedKeyframeError('FIRST_VIDEO_ASSET_MISSING',
+      `Canonical production has no video asset '${keyframe.asset_id}' for the approved keyframe`);
+    const plan = buildFirstVideoStagePlan({ draft, canonical, keyframe, executionAsset: asset,
+      semantic: { provider: this.env.SEMANTIC_VISUAL_PROVIDER, model: this.env.SEMANTIC_VISUAL_MODEL } });
+    return Object.freeze({ canonical, asset, plan });
+  }
+
+  async preflightLockedFirstVideo({ draft, preflight, keyframe }) {
+    const projection = this.lockedFirstVideoProjection({ draft, preflight, keyframe });
+    const runtime = this.runtime(projection.canonical.input, false);
+    const selection = runtime.mediaExecutor.selection(projection.asset);
+    if (selection.provider !== projection.plan.provider || selection.model !== projection.plan.model) {
+      throw new LockedKeyframeError('FIRST_VIDEO_PROVIDER_MISMATCH',
+        'Prepared bounded execution differs from the authoritative provider/model selection');
+    }
+    return Object.freeze({ ...projection, providerExecutions: 0 });
+  }
+
+  async ensureLockedProduction({ draft, preflight, actor, productionId }) {
+    const canonical = revisionSafeCanonical({ draft, preflight });
+    const runtime = this.runtime(canonical.input, true);
+    this.credentialCheck({ config: runtime.config, input: canonical.input, env: runtime.env });
+    const rows = await runtime.service.createDraft({ input: canonical.input, config: runtime.config,
+      command: { source: 'v2.10-locked-keyframe', requestId: draft.id, actor,
+        productionId, canonicalRawInput: canonical.raw, canonicalRequest: canonical.canonicalRequest } });
+    if (rows.production.id !== productionId) throw new LockedKeyframeError('LOCKED_PRODUCTION_ID_MISMATCH',
+      'Canonical production does not match the preallocated locked-keyframe production identity');
+    return Object.freeze({ canonical, runtime, production: rows.production, job: rows.job });
+  }
+
+  async startLockedFirstVideo({ draft, preflight, keyframe, actor, productionId, expectedFingerprint,
+    beforeProviderBoundary = null }) {
+    if (this.env.LIVE_PAID_GENERATION !== 'true') throw new LockedKeyframeError('V210_EXECUTION_DISABLED',
+      'LIVE_PAID_GENERATION=true is required after reviewing the first-video preflight');
+    const projection = this.lockedFirstVideoProjection({ draft, preflight, keyframe });
+    if (!expectedFingerprint || projection.plan.fingerprint !== expectedFingerprint) {
+      throw new LockedKeyframeError('STALE_LOCKED_STAGE_PREFLIGHT', 'First-video input changed after authoritative preflight');
+    }
+    const prepared = await this.ensureLockedProduction({ draft, preflight, actor, productionId });
+    if (beforeProviderBoundary) await beforeProviderBoundary();
+    const media = await prepared.runtime.mediaExecutor.execute({ workspaceId: projection.canonical.input.workspaceId,
+      productionId, brandId: projection.canonical.input.brandId,
+      workerId: prepared.runtime.config.workerId, asset: projection.asset });
+    const quality = await prepared.runtime.visualQualityEvaluator.evaluate({ media,
+      creativePlan: projection.canonical.input.creativePlan,
+      expectedAspectRatio: projection.canonical.input.aspectRatio || '9:16', intendedContentType: 'cinematic',
+      qualityTier: projection.canonical.input.qualityVideoProfile?.name || 'STANDARD',
+      provider: media.provider, model: media.model,
+      generationSettings: projection.asset.generation_requirements || {}, motionExpected: true,
+      evaluationClass: 'SOURCE', semanticEvaluationRequired: true });
+    return Object.freeze({ productionId, jobId: prepared.job.id, media, quality,
+      accepted: quality.status !== 'FAIL', canonicalInputFingerprint: projection.canonical.input.fingerprint,
+      executionFingerprint: projection.plan.executionFingerprint, plan: projection.plan,
+      remainingProductionScheduled: false, publicationTriggered: false });
   }
 
   async start({ draft, preflight, actor }) {
