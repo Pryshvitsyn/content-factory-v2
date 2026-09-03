@@ -55,6 +55,8 @@ jobs:
         run: node tests/locked-keyframe-zero-call-preflight-test.js
       - name: Locked-keyframe stage-scoped semantic authorization
         run: node tests/keyframe-stage-scoped-semantic-auth-test.js
+      - name: Locked-keyframe semantic provider boundary
+        run: node tests/keyframe-semantic-boundary-test.js
       - name: Uploaded keyframe automatic 9:16 normalization
         run: node tests/keyframe-upload-auto-normalization-test.js
       - name: V2.10.1 exact-identity recovered continuation
