@@ -12,6 +12,17 @@ function conflict(code, message, details = null) {
 const STAGE_ORDER = Object.freeze(['SCRIPT', 'STORYBOARD', 'LOOK', 'PILOT']);
 
 class QualityScriptFirstPostgresRepository extends V210PostgresRepository {
+  async saveCreativeIngestion({ workspaceId, brandId, mode, normalized, actor }) {
+    const result = await this.db.query(`INSERT INTO v2_10.creative_ingestions (workspace_id,brand_id,mode,normalized_brief,source_metadata,missing_fields,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [workspaceId, brandId, mode, normalized.brief, normalized.sourceMetadata || {}, normalized.missing || [], actor]);
+    return result.rows[0];
+  }
+  async saveCreativeReference({ workspaceId, brandId, draftId, reference }) {
+    const result = await this.db.query(`INSERT INTO v2_10.creative_references (draft_id,workspace_id,brand_id,original_filename,media_type,content_hash,storage_key,reference_role,target_shot_id,operator_note,uploaded_by,uploaded_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (workspace_id,brand_id,content_hash,storage_key) DO NOTHING RETURNING *`,
+      [draftId,workspaceId,brandId,reference.originalFilename,reference.mediaType,reference.contentHash,reference.storageKey,reference.role,reference.targetShotId,reference.note,reference.actor,reference.uploadedAt]);
+    return result.rows[0] || (await this.db.query('SELECT * FROM v2_10.creative_references WHERE workspace_id=$1 AND brand_id=$2 AND content_hash=$3 AND storage_key=$4', [workspaceId,brandId,reference.contentHash,reference.storageKey])).rows[0];
+  }
   async saveQualityScriptRevision({ draftId, workspaceId, brandId, script, validation, actor }) {
     const contentFingerprint = fingerprint(script);
     const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;

@@ -21,6 +21,7 @@ const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrat
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 const { createKeyframeImageGateway, createSemanticStillEvaluator } = require('../../../src/v2.10/locked-keyframe-service');
 const { HardenedQualityLockedKeyframeService } = require('../../../src/v2.10/quality-locked-keyframe-service-hardened');
+const { CreativeIngestionService } = require('../../../src/v2.10/creative-ingestion-service');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -76,14 +77,16 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
   const qualityDirectorService = new HardenedQualityScriptFirstService({ repository: v210Repository,
     brandRepository: repository, actor });
+  const creativeIngestionService = new CreativeIngestionService({ repository: v210Repository,
+    brandRepository: repository, storage, actor });
   const lockedKeyframeService = new HardenedQualityLockedKeyframeService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, starter: resolvedStarter, storage,
     imageInspector: audioInspector, actor, env,
     imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
     stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env }) });
-  return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,
+  return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, creativeIngestionService, qualityDirectorService,
     v210Repository, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider, lockedKeyframeService,
-    server: createControlServer({ service, creativeService, lockedKeyframeService, qualityDirectorService }) };
+    server: createControlServer({ service, creativeService, creativeIngestionService, lockedKeyframeService, qualityDirectorService }) };
 }
 
 if (require.main === module) {
