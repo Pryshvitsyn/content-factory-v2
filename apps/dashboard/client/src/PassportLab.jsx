@@ -75,10 +75,15 @@ export function PassportLab({ brands }) {
   const [rejectReasons,setRejectReasons]=useState({}); const [repairDelta,setRepairDelta]=useState('');
   const [lock,setLock]=useState({ permanent:'facialStructure=preserve, apparentAge=preserve, nose=preserve, jaw=preserve, hairline=preserve',
     temporary:'hat=exclude, jacket=exclude, wardrobe=exclude, background=exclude, lighting=exclude',uncertain:'glasses=operator decision',notes:'' });
-  async function load(id=avatarId,{resetSources=false}={}) { if (!id || !brandId) return; const value=await api(`/api/avatar-studio/avatars/${id}/passport-lab?brandId=${encodeURIComponent(brandId)}`);
-    setAvatar(value); const latest=value.passportGenerationSpecs?.[0]; if (latest) setPlan((current) => current?.id===latest.id?current:{ ...latest,id:latest.id,
-      paidProviderCalls:0,externalGenerationCalls:0 });
-    const latestExecution=value.passportExecutions?.[0]; if(latestExecution)setExecution((current)=>current?.executionId===latestExecution.id?current:{...latestExecution,executionId:latestExecution.id});
+  async function load(id=avatarId,{resetSources=false,preserveHistoricalState=true}={}) { if (!id || !brandId) return; const value=await api(`/api/avatar-studio/avatars/${id}/passport-lab?brandId=${encodeURIComponent(brandId)}`);
+    setAvatar(value);
+    if (preserveHistoricalState) {
+      const latest=value.passportGenerationSpecs?.[0]; if (latest) setPlan((current) => current?.id===latest.id?current:{ ...latest,id:latest.id,
+        paidProviderCalls:0,externalGenerationCalls:0 });
+      const latestExecution=value.passportExecutions?.[0]; if(latestExecution)setExecution((current)=>current?.executionId===latestExecution.id?current:{...latestExecution,executionId:latestExecution.id});
+    } else {
+      setPlan(null); setExecution(null); setReadiness(null);
+    }
     const eligible=eligibleIdentityImages(value,brandId).map((source)=>source.id);
     setSourceIds((current)=>resetSources||!current.length?eligible:current.filter((idValue)=>eligible.includes(idValue))); }
   useEffect(()=>{ if(!brandId){setAvatars([]);return;} api(`/api/avatar-studio/avatars?brandId=${encodeURIComponent(brandId)}`).then(setAvatars).catch(setError); },[brandId]);
@@ -89,7 +94,7 @@ export function PassportLab({ brands }) {
   const selectedSources=useMemo(()=>eligibleIdentityImages(avatar,brandId).filter((source)=>sourceIds.includes(source.id)),[avatar,brandId,sourceIds]);
   function invalidatePlan(){setPlan(null);setExecution(null);setReadiness(null);}
   function toggleSource(sourceId){invalidatePlan();setSourceIds((current)=>current.includes(sourceId)?current.filter((id)=>id!==sourceId):[...current,sourceId]);}
-  async function sourcesChanged(){invalidatePlan();await load(avatarId,{resetSources:true});}
+  async function sourcesChanged(){invalidatePlan();await load(avatarId,{resetSources:true,preserveHistoricalState:false});}
   async function saveLock(event){event.preventDefault();setBusy(true);setError(null);try{await api(`/api/avatar-studio/avatars/${avatar.id}/identity-locks`,{method:'POST',body:JSON.stringify({brandId,
     permanent:classified(lock.permanent),temporary:classified(lock.temporary),uncertain:classified(lock.uncertain),notes:lock.notes,humanApproval:true,
     provenance:{source:'PASSPORT_LAB_CLASSIFICATION_UI'}})});await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
