@@ -7,16 +7,27 @@ const SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES = Object.freeze([
   'KEYFRAME_TYPE_UNSUPPORTED',
   'KEYFRAME_SIZE_INVALID',
 ]);
+const LEGACY_PRE_REQUEST_SEMANTIC_TIER_ERROR = 'Unsupported quality tier QUALITY';
 
 function lockedStageConflict(message = 'This immutable stage preflight already has an active, failed, or ambiguous attempt') {
   return Object.assign(new Error(message), { code: 'LOCKED_STAGE_ALREADY_ATTEMPTED', status: 409 });
 }
 
-function isSafeLocalLockedStageRetry(attempt, stage) {
+function isKnownPreRequestSemanticTierFailure(attempt, stage) {
   return stage === 'KEYFRAME'
+    && attempt?.status === 'NEEDS_RECONCILIATION'
+    && attempt?.boundary_state === 'MAY_HAVE_STARTED'
+    && !attempt?.provider_request_id
+    && attempt?.error?.code === 'KEYFRAME_STAGE_FAILED'
+    && attempt?.error?.message === LEGACY_PRE_REQUEST_SEMANTIC_TIER_ERROR;
+}
+
+function isSafeLocalLockedStageRetry(attempt, stage) {
+  const deterministicLocalFailure = stage === 'KEYFRAME'
     && attempt?.status === 'FAILED'
     && attempt?.boundary_state === 'NOT_CROSSED'
     && SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES.includes(attempt?.error?.code);
+  return deterministicLocalFailure || isKnownPreRequestSemanticTierFailure(attempt, stage);
 }
 
 class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPostgresRepository {
@@ -44,9 +55,10 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
       const active = await client.query(`SELECT * FROM v2_10.locked_stage_attempts
         WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4
           AND status IN ('RUNNING','NEEDS_RECONCILIATION')
-        ORDER BY started_at DESC,id DESC LIMIT 1`,
+        ORDER BY started_at DESC,id DESC`,
       [workflowId, workspaceId, brandId, stage]);
-      if (active.rows[0]) throw lockedStageConflict();
+      const blockingActive = active.rows.find((row) => !isKnownPreRequestSemanticTierFailure(row, stage));
+      if (blockingActive) throw lockedStageConflict();
 
       const latest = await client.query(`SELECT * FROM v2_10.locked_stage_attempts
         WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4 AND preflight_id=$5
@@ -101,6 +113,8 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
 
 module.exports = {
   HardenedQualityScriptFirstPostgresRepository,
+  LEGACY_PRE_REQUEST_SEMANTIC_TIER_ERROR,
   SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES,
+  isKnownPreRequestSemanticTierFailure,
   isSafeLocalLockedStageRetry,
 };

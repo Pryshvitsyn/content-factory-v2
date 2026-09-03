@@ -2,6 +2,7 @@
 
 const QUALITY_STATUSES = Object.freeze(['PASS', 'WARN', 'FAIL']);
 const QUALITY_TIERS = Object.freeze(['ECONOMY', 'STANDARD', 'PREMIUM']);
+const QUALITY_TIER_ALIASES = Object.freeze({ QUALITY: 'STANDARD' });
 
 const REASON_CODES = Object.freeze({
   MULTI_PANEL_COMPOSITION: 'MULTI_PANEL_COMPOSITION',
@@ -109,7 +110,8 @@ const TIER_POLICIES = Object.freeze({
 });
 
 function normalizeTier(value) {
-  const tier = String(value || 'STANDARD').toUpperCase();
+  const rawTier = String(value || 'STANDARD').toUpperCase();
+  const tier = QUALITY_TIER_ALIASES[rawTier] || rawTier;
   if (!QUALITY_TIERS.includes(tier)) throw new Error(`Unsupported quality tier ${value}`);
   return tier;
 }
@@ -155,6 +157,7 @@ module.exports = {
   HARD_FAILURE_CODES,
   QUALITY_STATUSES,
   QUALITY_TIERS,
+  QUALITY_TIER_ALIASES,
   REASON_CODES,
   TIER_POLICIES,
   combineResults,

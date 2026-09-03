@@ -133,6 +133,54 @@ async function main() {
       'unknown/provider-related failures must remain fenced',
     );
 
+    const legacyTierPreflight = await repository.saveLockedStagePreflight({
+      workflowId: workflow.id,
+      workspaceId: W1,
+      brandId: B1,
+      stage: 'KEYFRAME',
+      draftRevision: draft.revision,
+      plan: { fingerprint: 'legacy-tier-fp', externalCalls: { maximum: 1 } },
+      actor: 'operator',
+    });
+    const legacyTierAttempt = await repository.claimLockedStage({
+      workflowId: workflow.id, workspaceId: W1, brandId: B1, stage: 'KEYFRAME', preflightId: legacyTierPreflight.id,
+    });
+    await repository.markLockedStageBoundary({ attemptId: legacyTierAttempt.id });
+    await repository.finishLockedStage({
+      attemptId: legacyTierAttempt.id,
+      status: 'NEEDS_RECONCILIATION',
+      boundaryState: 'MAY_HAVE_STARTED',
+      error: { code: 'KEYFRAME_STAGE_FAILED', message: 'Unsupported quality tier QUALITY' },
+    });
+
+    const legacyEvidenceBefore = (await db.query('SELECT * FROM v2_10.locked_stage_attempts WHERE id=$1', [legacyTierAttempt.id])).rows[0];
+    assert.equal(legacyEvidenceBefore.status, 'NEEDS_RECONCILIATION');
+    assert.equal(legacyEvidenceBefore.provider_request_id, null);
+
+    const correctedPreflight = await repository.saveLockedStagePreflight({
+      workflowId: workflow.id,
+      workspaceId: W1,
+      brandId: B1,
+      stage: 'KEYFRAME',
+      draftRevision: draft.revision,
+      plan: { fingerprint: 'corrected-tier-fp', externalCalls: { maximum: 1 } },
+      actor: 'operator',
+    });
+    const correctedAttempt = await repository.claimLockedStage({
+      workflowId: workflow.id, workspaceId: W1, brandId: B1, stage: 'KEYFRAME', preflightId: correctedPreflight.id,
+    });
+    assert.notEqual(correctedAttempt.id, legacyTierAttempt.id,
+      'known pre-request tier failure must allow a new append-only attempt');
+    const legacyEvidenceAfter = (await db.query('SELECT * FROM v2_10.locked_stage_attempts WHERE id=$1', [legacyTierAttempt.id])).rows[0];
+    assert.equal(legacyEvidenceAfter.status, 'NEEDS_RECONCILIATION', 'legacy evidence remains immutable and unchanged');
+    assert.equal(legacyEvidenceAfter.error.message, 'Unsupported quality tier QUALITY');
+    await repository.finishLockedStage({
+      attemptId: correctedAttempt.id,
+      status: 'FAILED',
+      boundaryState: 'NOT_CROSSED',
+      error: { code: 'KEYFRAME_GEOMETRY_MISMATCH', message: 'close corrected synthetic attempt' },
+    });
+
     const ambiguousPreflight = await repository.saveLockedStagePreflight({
       workflowId: workflow.id,
       workspaceId: W1,
@@ -160,7 +208,7 @@ async function main() {
       'ambiguous provider-boundary history must never auto-retry',
     );
 
-    console.log('Locked-stage append-only retry history, terminal immutability and ambiguous-boundary fencing: PASS');
+    console.log('Locked-stage append-only retry, exact pre-request tier recovery, terminal immutability and ambiguous fencing: PASS');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_10 CASCADE').catch(() => {});
     await db.end();
