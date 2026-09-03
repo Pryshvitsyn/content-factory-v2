@@ -15,6 +15,7 @@ function compilePassportProviderRequest({ generationSpec, sourceImages, candidat
   const ordinal = Number(candidateOrdinal);
   if (!Number.isInteger(ordinal) || ordinal < 1) throw new AvatarStudioError(400,
     'PASSPORT_CANDIDATE_ORDINAL_INVALID', 'Candidate ordinal must be positive');
+  const minorWardrobe = generationSpec.minorWardrobe || generationSpec.studioSpecification?.minorWardrobe || null;
   const requirements = {
     prompt: [
       'Create one canonical horizontal three-panel identity passport composite.',
@@ -22,12 +23,14 @@ function compilePassportProviderRequest({ generationSpec, sourceImages, candidat
       `Studio: ${JSON.stringify(generationSpec.studioSpecification || {})}`,
       `Camera: ${JSON.stringify(generationSpec.cameraSpecification || {})}`,
       `Permanent identity constraints: ${JSON.stringify(generationSpec.identityConstraints || {})}`,
-      `Temporary elements to exclude: ${JSON.stringify(generationSpec.negativeConstraints?.temporaryExclusions || {})}`,
+      `Temporary elements to exclude are source details, not identity traits, and must not be preserved: ${JSON.stringify(generationSpec.negativeConstraints?.temporaryExclusions || {})}. This never means removing required standardized production clothing.`,
+      minorWardrobe ? 'MINOR SAFETY CLOTHING CONTRACT: Subject wears a plain, age-appropriate neutral crew-neck T-shirt or simple top. Shoulders and torso remain fully covered in every panel. Use identical simple standardized production clothing across all views; it is not an identity trait. Never use bare torso, shirtless appearance, exposed chest, underwear, swimwear, adultized wardrobe, logos, text, jewellery, hats, fashion styling, or source-specific wardrobe.' : null,
       generationSpec.repairDelta ? `Repair delta only: ${JSON.stringify(generationSpec.repairDelta)}` : null,
     ].filter(Boolean).join('\n'),
     visual_style: 'photorealistic, neutral studio, natural skin, tack sharp, no text',
-    negative_prompt: typeof generationSpec.negativeConstraints === 'string'
+    negative_prompt: [typeof generationSpec.negativeConstraints === 'string'
       ? generationSpec.negativeConstraints : generationSpec.negativeConstraints?.canonical,
+      minorWardrobe ? 'No bare torso, shirtless appearance, exposed chest, underwear, swimwear, adultized wardrobe, logos, text, jewellery, hats, fashion styling, or source-specific wardrobe.' : null].filter(Boolean).join(' '),
     size: PASSPORT_OUTPUT.size, quality: 'high',
   };
   const minimal = {

@@ -18,6 +18,16 @@ const REQUIRED_VIEWS = Object.freeze([
   Object.freeze({ panel: 'RIGHT', view: 'PROFILE_90', angleDegrees: 90 }),
 ]);
 
+function minorPassportWardrobe(avatar = {}) {
+  const identity = avatar.identity || avatar.identitySpec || {};
+  const minor = identity.permanentAttributes?.subjectAgeClass === 'MINOR' || /\bminor\b/i.test(String(identity.agePresentation || ''));
+  if (!minor) return null;
+  return Object.freeze({ required: true, type: 'PLAIN_NEUTRAL_AGE_APPROPRIATE_CREW_NECK_TOP',
+    coverage: 'SHOULDERS_AND_TORSO_FULLY_COVERED_IN_EVERY_PANEL', consistency: 'IDENTICAL_SIMPLE_STANDARDIZED_PRODUCTION_WARDROBE_ACROSS_ALL_VIEWS',
+    prohibited: Object.freeze(['LOGOS','TEXT','JEWELLERY','HATS','FASHION_STYLING','SOURCE_SPECIFIC_WARDROBE','BARE_TORSO','SHIRTLESS','EXPOSED_CHEST','UNDERWEAR','SWIMWEAR','ADULT_STYLING']),
+    explanation: 'Clothing is standardized production wardrobe and is not an identity trait.' });
+}
+
 function resolveProviderPlan(providerCatalog, preferred = {}) {
   let provider = String(preferred.provider || '').toLowerCase() || null;
   let model = preferred.model || null;
@@ -63,11 +73,12 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
     : Object.freeze({ status: 'UNKNOWN', knownPricePerCandidate: providerPlan.knownPricePerCandidate, knownTotalCost: null,
       knownSubtotalCost: 0, unknownElements: Object.freeze(['PROVIDER_PRICE_PER_CANDIDATE','TOTAL_COST']), currency: 'USD',
       inventedCosts: false, unknownIsZero: false });
+  const minorWardrobe = minorPassportWardrobe(avatar);
   const canonical = { schemaVersion: PASSPORT_SPEC_VERSION, workspaceId: avatar.workspaceId, brandId: sourceAssets[0].brandId,
     audienceVertical: avatar.vertical, avatarId: avatar.id, identityVersionId: identityVersion.id,
     identityLockVersionId: identityLock.id, sourceAssetIds: sourceAssets.map((item) => item.id), sourceViewpointSnapshot: viewpointSnapshot(sourceAssets), requiredViews: REQUIRED_VIEWS,
-    studioSpecification, cameraSpecification, identityConstraints: identityLock.permanentAttributes,
-    temporaryExclusions: identityLock.temporaryAttributes, uncertainFeatures: identityLock.uncertainAttributes,
+    studioSpecification: Object.freeze({ ...studioSpecification, ...(minorWardrobe ? { minorWardrobe } : {}) }), cameraSpecification, identityConstraints: identityLock.permanentAttributes,
+    temporaryExclusions: identityLock.temporaryAttributes, uncertainFeatures: identityLock.uncertainAttributes, minorWardrobe,
     negativeConstraints: negative.text, requestedCandidateCount: count, promptVersion, specVersion: PASSPORT_SPEC_VERSION,
     providerCapabilityRequirements: [CAPABILITIES.IMAGE_TO_IMAGE,CAPABILITIES.MULTI_VIEW_IDENTITY_REFERENCE],
     preferredProvider: providerPlan.provider, preferredModel: providerPlan.model, providerPlan, costPlan,
@@ -79,4 +90,4 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
     createdAt: new Date().toISOString(), providerCallsExecuted: 0 }) });
 }
 
-module.exports = { PASSPORT_PROMPT_VERSION, PASSPORT_SPEC_VERSION, REQUIRED_VIEWS, compilePassportGenerationSpec, resolveProviderPlan };
+module.exports = { PASSPORT_PROMPT_VERSION, PASSPORT_SPEC_VERSION, REQUIRED_VIEWS, compilePassportGenerationSpec, minorPassportWardrobe, resolveProviderPlan };

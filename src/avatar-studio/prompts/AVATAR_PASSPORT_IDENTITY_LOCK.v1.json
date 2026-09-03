@@ -2,5 +2,5 @@
   "id": "AVATAR_PASSPORT_IDENTITY_LOCK",
   "version": "1.0.0",
   "kind": "IDENTITY_CONSTRAINT_TEMPLATE",
-  "text": "Preserve only the explicitly approved PERMANENT Identity Lock features across all three panels: {{PERMANENT_IDENTITY}}. Treat these as TEMPORARY and exclude them unless separately required by the studio spec: {{TEMPORARY_ELEMENTS}}. Do not infer identity from UNCERTAIN features: {{UNCERTAIN_ELEMENTS}}. Preserve facial structure, skull proportions, jaw, chin, nose, eyes, eyebrows, mouth, ears, hairline, hair, facial hair, skin tone and texture, apparent age, approved scars, moles and natural asymmetry exactly as locked."
+  "text": "Preserve only the explicitly approved PERMANENT Identity Lock features across all three panels: {{PERMANENT_IDENTITY}}. Treat these as TEMPORARY source elements that are not identity traits and do not preserve them: {{TEMPORARY_ELEMENTS}}. This does not mean removing required standardized production clothing. Do not infer identity from UNCERTAIN features: {{UNCERTAIN_ELEMENTS}}. Preserve facial structure, skull proportions, jaw, chin, nose, eyes, eyebrows, mouth, ears, hairline, hair, facial hair, skin tone and texture, apparent age, approved scars, moles and natural asymmetry exactly as locked."
 }
