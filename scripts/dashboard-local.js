@@ -9,6 +9,7 @@ const { constants } = require('node:fs');
 const { Pool } = require('pg');
 const { discoverLocalDatabase, localStorageRoot } = require('./local-runtime');
 const { prepareDatabase } = require('./prepare-local-live-production');
+const { syncCanonicalBrands } = require('../src/brand-registry/sync-canonical-brands');
 
 function dashboardPorts(env = process.env) {
   const apiPort = Number(env.DASHBOARD_API_PORT || 3001);
@@ -78,10 +79,15 @@ async function main() {
   const webHost = process.env.DASHBOARD_WEB_HOST || '127.0.0.1';
   const db = new Pool({ connectionString: discovered.url, max: 2 });
   let readiness;
+  let brandRegistry;
   try {
     // Local operator startup owns additive/idempotent schema verification so a merged
     // recovery feature cannot silently depend on a migration the operator forgot to run.
     await prepareDatabase(db);
+    brandRegistry = await syncCanonicalBrands({
+      db,
+      workspaceId: process.env.CONTENT_FACTORY_WORKSPACE_ID || null,
+    });
     readiness = await validateDashboardDatabase(db);
   } finally { await db.end(); }
   try { await fs.access(storageRoot, constants.R_OK | constants.W_OK); }
@@ -96,6 +102,7 @@ async function main() {
   const childEnv = buildDashboardEnvironment(process.env, discovered, storageRoot, ports);
   console.log('LOCAL CONTENT FACTORY DASHBOARD READY');
   console.log(`Database: ${readiness.database} (${discovered.source})`);
+  console.log(`Canonical brands: ${brandRegistry.canonicalCount} · workspace ${brandRegistry.workspaceId}`);
   console.log(`Storage root: ${storageRoot}`);
   console.log(`Dashboard: http://${webHost}:${ports.webPort}`);
   console.log(`Control API: http://${host}:${ports.apiPort}`);
