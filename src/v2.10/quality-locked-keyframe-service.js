@@ -1,8 +1,48 @@
 'use strict';
 
-const { LockedKeyframeService } = require('./locked-keyframe-service');
+const { IMAGE_TYPES, LockedKeyframeService } = require('./locked-keyframe-service');
 const { buildKeyframeStagePlan, LockedKeyframeError, STAGES } = require('./locked-keyframe-contract');
 const { fingerprint } = require('./creative-contract');
+const { FfmpegReferenceGeometryNormalizer } = require('../v2.10.2/reference-geometry');
+
+function keyframeUploadResolution(env = process.env) {
+  const value = String(env.QUALITY_VIDEO_RESOLUTION || '720p').toLowerCase();
+  return ['480p', '720p', '1080p'].includes(value) ? value : '720p';
+}
+
+async function normalizeUploadedKeyframeArgs(args, {
+  normalizer = new FfmpegReferenceGeometryNormalizer(),
+  resolution = '720p',
+} = {}) {
+  if (!args?.contentBase64) return Object.freeze({ args, normalization: null });
+  const contentType = String(args.contentType || 'image/jpeg').split(';', 1)[0].trim().toLowerCase();
+  if (!IMAGE_TYPES.has(contentType)) return Object.freeze({ args, normalization: null });
+
+  const sourceBytes = Buffer.from(args.contentBase64, 'base64');
+  const normalized = await normalizer.normalize({
+    bytes: sourceBytes,
+    contentType,
+    expectedAspectRatio: '9:16',
+    resolution,
+  });
+
+  return Object.freeze({
+    args: Object.freeze({
+      ...args,
+      contentBase64: normalized.bytes.toString('base64'),
+      contentType: normalized.contentType,
+    }),
+    normalization: Object.freeze({
+      applied: normalized.normalizationApplied === true,
+      policy: normalized.policy,
+      version: normalized.normalizationVersion,
+      before: normalized.before,
+      after: normalized.after,
+      expectedAspectRatio: '9:16',
+      resolution,
+    }),
+  });
+}
 
 class QualityLockedKeyframeService extends LockedKeyframeService {
   async requireDirectorGate(id, brandId, requiredStages) {
@@ -34,7 +74,10 @@ class QualityLockedKeyframeService extends LockedKeyframeService {
       throw new LockedKeyframeError('SEMANTIC_STILL_EVALUATOR_NOT_CONFIGURED',
         'Semantic still evaluator must be configured before keyframe execution; no provider calls were made');
     }
-    return super.executeKeyframe(args);
+    const normalized = await normalizeUploadedKeyframeArgs(args, {
+      resolution: keyframeUploadResolution(this.env),
+    });
+    return super.executeKeyframe(normalized.args);
   }
 
   async approveKeyframe(args) {
@@ -85,4 +128,8 @@ class QualityLockedKeyframeService extends LockedKeyframeService {
   }
 }
 
-module.exports = { QualityLockedKeyframeService };
+module.exports = {
+  QualityLockedKeyframeService,
+  keyframeUploadResolution,
+  normalizeUploadedKeyframeArgs,
+};
