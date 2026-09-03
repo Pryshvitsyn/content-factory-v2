@@ -9,6 +9,7 @@ on:
       - 'scripts/prepare-impulseoff-sphere-pilot.js'
       - 'scripts/render-impulseoff-sphere-voice-response.js'
       - 'tests/impulseoff-sphere-pilot-test.js'
+      - 'tests/impulseoff-sphere-voice-reactive-ffmpeg-test.js'
       - '.github/workflows/impulseoff-sphere-pilot-ci.yml'
   push:
     branches: [feat/impulseoff-sphere-pilot]
@@ -35,6 +36,8 @@ jobs:
       - run: npm ci
       - name: Sphere pilot contract
         run: node tests/impulseoff-sphere-pilot-test.js
+      - name: Voice-reactive FFmpeg certification
+        run: node tests/impulseoff-sphere-voice-reactive-ffmpeg-test.js
       - name: Syntax checks
         run: |
           node --check src/v2.10/impulseoff-sphere-motion-pack.js
