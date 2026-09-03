@@ -1,0 +1,56 @@
+name: ImpulseOff Sphere Pilot CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/v2.10/impulseoff-sphere-motion-pack.js'
+      - 'src/v2.10/sphere-voice-reactive-renderer.js'
+      - 'scripts/prepare-impulseoff-sphere-pilot.js'
+      - 'scripts/render-impulseoff-sphere-voice-response.js'
+      - 'tests/impulseoff-sphere-pilot-test.js'
+      - '.github/workflows/impulseoff-sphere-pilot-ci.yml'
+  push:
+    branches: [feat/impulseoff-sphere-pilot]
+
+jobs:
+  sphere-pilot-contract:
+    runs-on: ubuntu-latest
+    env:
+      LIVE_PAID_GENERATION: 'false'
+      PAID_PROVIDER_CALLS: '0'
+      EXTERNAL_GENERATION_CALLS: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Sphere pilot contract
+        run: node tests/impulseoff-sphere-pilot-test.js
+      - name: Syntax checks
+        run: |
+          node --check src/v2.10/impulseoff-sphere-motion-pack.js
+          node --check src/v2.10/sphere-voice-reactive-renderer.js
+          node --check scripts/prepare-impulseoff-sphere-pilot.js
+          node --check scripts/render-impulseoff-sphere-voice-response.js
+      - name: Locked keyframe regression
+        run: npm run test:locked-keyframe
+      - name: QUALITY Script-First regression
+        run: node tests/quality-script-first-test.js
+      - name: Reference geometry regression
+        run: npm run test:v2.10.2
+      - name: Continuity regression
+        run: npm run test:v2.10.3
+      - name: Provider regression
+        run: npm run test:v2.8
+      - name: FFmpeg renderer regression
+        run: npm run test:v2.1:master-renderer
+      - name: Dashboard build
+        run: npm run dashboard:build
+      - name: Paid generation remains disabled
+        run: |
+          test "$LIVE_PAID_GENERATION" = "false"
+          test "$PAID_PROVIDER_CALLS" = "0"
+          test "$EXTERNAL_GENERATION_CALLS" = "0"
