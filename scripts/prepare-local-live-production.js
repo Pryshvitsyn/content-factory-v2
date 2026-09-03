@@ -79,6 +79,18 @@ async function ensureV21(db) {
   await applyMigration(db, COMPATIBILITY_MIGRATION);
 }
 
+function approvedLegacyCanonicalRename(row) {
+  if (!row || String(row.legacy_workspace_id) !== String(row.canonical_workspace_id)) return false;
+  const legacyName = String(row.legacy_name || '').trim().toLowerCase();
+  const canonicalName = String(row.canonical_name || '').trim().toLowerCase();
+  const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  const aliases = Array.isArray(metadata.aliases) ? metadata.aliases.map((value) => String(value).trim().toLowerCase()) : [];
+  return legacyName === 'attune'
+    && canonicalName === 'tune into her'
+    && String(metadata.canonicalContext || '').trim().toLowerCase() === 'tune into her'
+    && aliases.includes('attune');
+}
+
 async function ensureLegacyBrands(db) {
   if (!(await tableExists(db, 'public', 'brands'))) return { copied: 0, skipped: 'no public.brands table' };
   const columns = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='brands'`);
@@ -94,11 +106,14 @@ async function ensureLegacyBrands(db) {
     error.code = 'LEGACY_BRAND_SCOPE_INVALID';
     throw error;
   }
-  const conflict = await db.query(`
-    SELECT b.id FROM public.brands b JOIN v2_2.brands v ON v.id=b.id
-    WHERE v.workspace_id<>b.workspace_id OR v.name<>b.name LIMIT 1`);
-  if (conflict.rows[0]) {
-    const error = new Error(`Canonical brand ${conflict.rows[0].id} conflicts with persisted public.brands ownership`);
+  const conflicts = await db.query(`
+    SELECT b.id,b.workspace_id AS legacy_workspace_id,b.name AS legacy_name,
+      v.workspace_id AS canonical_workspace_id,v.name AS canonical_name,v.metadata
+    FROM public.brands b JOIN v2_2.brands v ON v.id=b.id
+    WHERE v.workspace_id IS DISTINCT FROM b.workspace_id OR v.name IS DISTINCT FROM b.name`);
+  const conflict = conflicts.rows.find((row) => !approvedLegacyCanonicalRename(row));
+  if (conflict) {
+    const error = new Error(`Canonical brand ${conflict.id} conflicts with persisted public.brands ownership`);
     error.code = 'LEGACY_BRAND_IDENTITY_CONFLICT';
     throw error;
   }
@@ -189,6 +204,7 @@ module.exports = {
   V292_MIGRATIONS,
   V210_MIGRATIONS,
   applyMigration,
+  approvedLegacyCanonicalRename,
   assertCompatibilityFoundation,
   discoverDatabaseUrl,
   ensureLegacyBrands,
