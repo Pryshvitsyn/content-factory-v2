@@ -13,7 +13,7 @@ const { createControlServer } = require('./http-server');
 const { describeProviders } = require('./provider-status');
 const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
-const { CreativeProductionService } = require('../../../src/v2.10/creative-production-service');
+const { QualityCreativeProductionService } = require('../../../src/v2.10/quality-creative-production-service');
 const { QualityScriptFirstPostgresRepository } = require('../../../src/v2.10/quality-script-first-postgres-repository');
 const { QualityScriptFirstService } = require('../../../src/v2.10/quality-script-first-service');
 const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
@@ -71,7 +71,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const resolvedStarter = creativeStarter || new V210IntegratedProductionStarter({
     db, storage, repository: v210Repository, env, logger: console, mediaInspector: audioInspector,
   });
-  const creativeService = new CreativeProductionService({ repository: v210Repository,
+  const creativeService = new QualityCreativeProductionService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
   const qualityDirectorService = new QualityScriptFirstService({ repository: v210Repository,
