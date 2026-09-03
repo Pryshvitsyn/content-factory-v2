@@ -1,0 +1,75 @@
+name: Canonical Brand Registry CI
+
+on:
+  pull_request:
+    branches: [main, codex/quality-script-first]
+  push:
+    branches: [codex/canonical-brand-registry]
+
+permissions:
+  contents: read
+
+env:
+  LIVE_PAID_GENERATION: "false"
+  PAID_PROVIDER_CALLS: "0"
+  EXTERNAL_GENERATION_CALLS: "0"
+
+jobs:
+  brand-registry-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Canonical registry contract
+        run: node tests/canonical-brand-registry-test.js
+      - name: Syntax check sync path
+        run: |
+          node --check src/brand-registry/canonical-brands.js
+          node --check src/brand-registry/sync-canonical-brands.js
+          node --check scripts/sync-canonical-brands.js
+          node --check scripts/dashboard-local.js
+      - name: Existing dashboard build
+        run: npm run dashboard:build
+      - name: Paid generation remains disabled
+        run: |
+          test "$LIVE_PAID_GENERATION" = "false"
+          test "$PAID_PROVIDER_CALLS" = "0"
+          test "$EXTERNAL_GENERATION_CALLS" = "0"
+
+  brand-registry-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: content_factory_brand_registry_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: content_factory_brand_registry_test
+      CONTENT_FACTORY_TEST_DATABASE: "1"
+      LIVE_PAID_GENERATION: "false"
+      PAID_PROVIDER_CALLS: "0"
+      EXTERNAL_GENERATION_CALLS: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Canonical registry PostgreSQL certification
+        run: node tests/canonical-brand-registry-postgres-test.js
