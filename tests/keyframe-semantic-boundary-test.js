@@ -2,10 +2,14 @@
 
 const assert = require('node:assert/strict');
 const creativeBrief = require('../fixtures/v2.10/attune-creative-2-draft.json');
+const { normalizeTier } = require('../src/v2.9/quality-contract');
 const { buildKeyframeStagePlan } = require('../src/v2.10/locked-keyframe-contract');
 const { LockedKeyframeService } = require('../src/v2.10/locked-keyframe-service');
 
 async function main() {
+  assert.equal(normalizeTier('QUALITY'), 'STANDARD',
+    'QUALITY is a workflow mode alias; opening-still semantic QA must resolve to STANDARD tier');
+
   const brandId = '6117e20a-cf33-42b2-a9e2-32df9653c3d1';
   const draftId = '10000000-0000-4000-8000-000000000001';
   const shotId = creativeBrief.storyboard[0].shotId;
@@ -107,7 +111,7 @@ async function main() {
   assert.equal(finish.boundaryState, 'MAY_HAVE_STARTED');
   assert.equal(finish.error.code, 'SEMANTIC_VISUAL_PROVIDER_ERROR');
 
-  console.log('Canonical 720x1280 keyframe dimensions pass geometry validation; semantic boundary is fenced before provider invocation.');
+  console.log('QUALITY workflow mode resolves to STANDARD semantic tier; canonical geometry and provider-boundary fencing pass.');
 }
 
 main().catch((error) => {
