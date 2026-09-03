@@ -1,6 +1,5 @@
 'use strict';
 
-const { HardenedQualityLockedKeyframeService: _Unused } = {};
 const { QualityLockedKeyframeService } = require('./quality-locked-keyframe-service');
 const { IMAGE_TYPES } = require('./locked-keyframe-service');
 const { FfmpegReferenceGeometryNormalizer } = require('../v2.10.2/reference-geometry');
