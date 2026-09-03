@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { IMAGE_TYPES, LockedKeyframeService } = require('./locked-keyframe-service');
 const { buildKeyframeStagePlan, LockedKeyframeError, STAGES } = require('./locked-keyframe-contract');
 const { fingerprint } = require('./creative-contract');
@@ -56,7 +57,13 @@ class QualityLockedKeyframeService extends LockedKeyframeService {
     const { id, brandId, shotId, keyframe = {} } = args;
     const scope = await this.scope(brandId);
     const draft = await this.draft(id, scope);
-    const selection = await this.resolveKeyframeSelection(scope, keyframe);
+    let selection = await this.resolveKeyframeSelection(scope, keyframe);
+    if (selection.sourceType === 'OPERATOR_UPLOAD') {
+      selection = Object.freeze({ ...selection, resolvedSettings: Object.freeze({
+        ...selection.resolvedSettings,
+        uploadPreflightNonce: crypto.randomUUID(),
+      }) });
+    }
     const workflow = await this.workflow({ draft, scope, shotId });
     const plan = buildKeyframeStagePlan({ draft, shotId, selection,
       semantic: { provider: this.env.SEMANTIC_VISUAL_PROVIDER, model: this.env.SEMANTIC_VISUAL_MODEL } });
