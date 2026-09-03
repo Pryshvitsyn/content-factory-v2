@@ -24,3 +24,11 @@ CREATE TABLE IF NOT EXISTS avatar_studio.motion_pilot_attempts (
  idempotency_key text NOT NULL UNIQUE, status text NOT NULL, may_have_spent boolean NOT NULL DEFAULT false,
  provider_request_id text, provenance jsonb NOT NULL DEFAULT '{}'::jsonb, created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE avatar_studio.motion_pilot_attempts ADD COLUMN IF NOT EXISTS provider_status text;
+ALTER TABLE avatar_studio.motion_pilot_attempts ADD COLUMN IF NOT EXISTS actual_known_cost numeric(14,6);
+ALTER TABLE avatar_studio.motion_pilot_attempts ADD COLUMN IF NOT EXISTS failure_classification text;
+ALTER TABLE avatar_studio.motion_pilot_attempts ADD COLUMN IF NOT EXISTS safe_error_message text;
+ALTER TABLE avatar_studio.motion_pilot_attempts ADD COLUMN IF NOT EXISTS result jsonb;
+CREATE TABLE IF NOT EXISTS avatar_studio.motion_pilot_results (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), execution_id uuid NOT NULL REFERENCES avatar_studio.motion_pilot_executions(id), attempt_id uuid NOT NULL UNIQUE REFERENCES avatar_studio.motion_pilot_attempts(id), intake_asset_id uuid NOT NULL REFERENCES avatar_studio.asset_intakes(id), artifact_id text NOT NULL, artifact_version integer NOT NULL, provider_request_id text, validation jsonb NOT NULL, provenance jsonb NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);

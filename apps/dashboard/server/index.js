@@ -120,7 +120,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     assetIntakeService: avatarAssetIntakeService, storage, env, actor });
   const l2Service = new AvatarL2Service({ repository:avatarRepository,providerCatalog,providerGateway:avatarProviderGateway,
     assetIntakeService:avatarAssetIntakeService,storage,env,actor });
-  const motionPilotService = new AvatarMotionPilotService({ repository: avatarRepository, providerCatalog, providerGateway: avatarProviderGateway, storage, env, actor });
+  const motionPilotService = new AvatarMotionPilotService({ repository: avatarRepository, providerCatalog, providerGateway: avatarProviderGateway, assetIntakeService: avatarAssetIntakeService, storage, mediaInspector: audioInspector, env, actor });
   const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
     providerCatalog, passportExecutionService, l2Service, motionPilotService, actor, env });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,

@@ -174,6 +174,17 @@ class AvatarAssetIntakeService {
     return Object.freeze({ asset: publicIntake(stored), artifact, gate0 });
   }
 
+  async ingestProviderVideoOutput({ avatar, brandId, bytes, filename, provider, model, attemptId, providerRequestId = null, provenance = {}, consentVerified = false } = {}) {
+    if (!Buffer.isBuffer(bytes) || !bytes.length) throw new AvatarStudioError(502,'PROVIDER_OUTPUT_INVALID','Provider returned no video bytes');
+    const media=await inspectMedia({bytes,filename,mimeType:'video/mp4',mediaInspector:this.mediaInspector});
+    if(media.kind!=='video'||!media.width||!media.height||!media.durationMs) throw new AvatarStudioError(502,'PROVIDER_OUTPUT_INVALID','Provider output is not a playable video');
+    const gate0=inspectAssetGateZero({media:{...media,filename},sourceType:'PROVIDER_OUTPUT',sourceLocator:`provider://${provider}/response`,provenance:{...provenance,source:'APPROVED_PROVIDER_EXECUTION',provider,model},subjectType:avatar.subjectType,consentVerified});
+    if(gate0.status!=='PASS') throw new AvatarStudioError(409,'SECURITY_REJECTED_OUTPUT','Provider video was rejected by Gate 0',{findings:gate0.findings});
+    const intakeId=crypto.randomUUID(); const artifact=await this.artifactService.createVersion({artifactId:`avatar-motion-pilot-${avatar.workspaceId}-${brandId}-${intakeId}`,type:'binary',content:bytes,stageId:'AVATAR_MOTION_PILOT_PROVIDER_OUTPUT',attemptId,idempotencyKey:`avatar-motion-pilot:${attemptId}`,provider,model,validationStatus:'validated_media'});
+    const stored=await this.repository.createIntake({id:intakeId,avatar,brandId,artifact,media:{...media,filename},sourceType:'PROVIDER_OUTPUT',sourceLocator:`provider://${provider}/${providerRequestId||attemptId}`,existingAssetId:null,gate0,rightsStatus:avatar.subjectType==='SYNTHETIC'?'NOT_REQUIRED':'VERIFIED',provenance:{...provenance,source:'APPROVED_PROVIDER_EXECUTION',provider,model,providerRequestId,attemptId,artifactService:'CONTENT_FACTORY_IMMUTABLE_ARTIFACT_V1'},actor:this.actor});
+    return Object.freeze({asset:publicIntake(stored),artifact,gate0});
+  }
+
   eligibility(intake, avatar, roles) {
     const failures = [];
     if (intake.effectiveGate0Status !== 'PASS') failures.push(intake.effectiveGate0Status === 'BLOCK' ? 'GATE0_BLOCKED' : 'GATE0_REVIEW_REQUIRED');
