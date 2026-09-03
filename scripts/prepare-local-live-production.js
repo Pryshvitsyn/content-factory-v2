@@ -44,6 +44,7 @@ const V210_MIGRATIONS = [
   'migrations/20260901_locked_keyframe_production.sql',
   'migrations/20260903_quality_script_first.sql',
   'migrations/20260903_locked_stage_retry_history.sql',
+  'migrations/20260903_avatar_studio_source_viewpoint_classification.sql',
 ];
 
 function discoverDatabaseUrl(env = process.env) {

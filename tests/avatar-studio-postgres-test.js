@@ -45,6 +45,7 @@ async function main() {
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_2_passport_lab_controlled_execution.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260903_avatar_studio_source_viewpoint_classification.sql'), 'utf8'));
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Avatar Studio disposable') ON CONFLICT(id) DO NOTHING`, [WORKSPACE_ID]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Attune Avatar Test','attune-avatar-test','ACTIVE')
       ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [BRAND_ID, WORKSPACE_ID]);

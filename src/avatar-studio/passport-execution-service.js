@@ -9,6 +9,7 @@ const { PASSPORT_CALLS_PER_CANDIDATE, PASSPORT_PROVIDER_STRATEGY,
   compilePassportProviderRequest } = require('./passport-provider-compiler');
 const { estimateOpenAIImagePlan } = require('../v2.9.2/pricing-registry');
 const { PASSPORT_OUTPUT } = require('./passport-contract');
+const { viewpointSnapshotMatches } = require('./source-viewpoint');
 
 const FAILURE_CLASSIFICATIONS = Object.freeze(['PROVIDER_CONFIGURATION','PROVIDER_AUTH','PROVIDER_CAPABILITY',
   'PROVIDER_TIMEOUT','PROVIDER_RATE_LIMIT','PROVIDER_REJECTED_INPUT','PROVIDER_OUTPUT_INVALID','ARTIFACT_INGEST_FAILED',
@@ -136,6 +137,8 @@ class PassportExecutionService {
         intakeAssetId: intake.id, artifactId: intake.artifactId, artifactVersion: intake.artifactVersion,
         contentHash: intake.contentHash, gate0Status: intake.effectiveGate0Status }));
     }
+    if (!viewpointSnapshotMatches(spec.provenance?.sourceViewpointSnapshot || [], sourceAssets)) throw new AvatarStudioError(409,
+      'PASSPORT_PLAN_STALE_SOURCE_VIEWPOINT', 'Human source viewpoint evidence changed; create a fresh immutable Passport plan before preflight');
     const plannedCost = spec.preferredModel === 'gpt-image-2'
       ? estimateOpenAIImagePlan({ model: spec.preferredModel, size: PASSPORT_OUTPUT.size, quality: 'high', count: candidateCount,
         referenceImageCount: sourceAssets.length }) : null;

@@ -50,7 +50,7 @@ function fileError(file, kind) {
 }
 
 export function sourceViewpoint(source) {
-  return source?.provenance?.identityViewpoint || source?.provenance?.viewpoint || 'UNKNOWN';
+  return source?.effectiveViewpoint || source?.viewpointClassifications?.[0]?.viewpoint || source?.provenance?.identityViewpoint || source?.provenance?.viewpoint || 'UNKNOWN';
 }
 
 export function identityCoverage(sources = []) {
@@ -256,6 +256,8 @@ export function ExistingIdentitySourceManager({ avatar, brandId, onSourcesChange
   const [photos,setPhotos] = useState([]); const [videoFile,setVideoFile] = useState(null); const [videoIntake,setVideoIntake] = useState(null);
   const [frames,setFrames] = useState([]); const [busy,setBusy] = useState(false); const [error,setError] = useState(null); const [message,setMessage] = useState('');
   const owner = avatar?.subjectType === 'SYNTHETIC' ? 'SYNTHETIC' : 'CONSENTED_SUBJECT';
+  const existingEligible = (avatar?.sources || []).filter((source) => source.sourceType === 'IMAGE' && source.gate0Status === 'PASS'
+    && source.roles?.some((role) => ['IDENTITY','PASSPORT_SOURCE'].includes(role)));
 
   function stagePhotos(fileList) {
     const files = [...(fileList || [])];
@@ -327,6 +329,7 @@ export function ExistingIdentitySourceManager({ avatar, brandId, onSourcesChange
   }
 
   return <><MinorIdentityRevisionPanel avatar={avatar} brandId={brandId} onUpdated={onSourcesChanged}/><section className="identity-source-manager">
+    <section className="identity-source-grid" aria-label="Human viewpoint classification"><header><strong>HUMAN CLASSIFICATION — NO AI INFERENCE</strong><p>Record an append-only viewpoint decision for an existing immutable source. Original source bytes and provenance are unchanged.</p></header>{existingEligible.map((source)=><ExistingSourceViewpoint key={source.id} source={source} avatarId={avatar.id} brandId={brandId} onSaved={onSourcesChanged}/>)}</section>
     <header><div><strong>ADD IDENTITY SOURCES</strong><p>Add evidence to {avatar.internalName}; this never creates another avatar, Identity version, or Identity Lock.</p></div><span>0 provider calls</span></header>
     {error ? <div className="error-panel"><strong>{error.code || 'SOURCE_INTAKE_FAILED'}</strong><p>{error.message}</p></div> : null}
     {message ? <p className="source-manager-message">{message}</p> : null}
@@ -338,4 +341,12 @@ export function ExistingIdentitySourceManager({ avatar, brandId, onSourcesChange
     {videoFile && !videoIntake ? <div className="reference-video-stage"><strong>{videoFile.name}</strong><p>Optional visual evidence only. Audio is ignored and never becomes VOICE_SOURCE.</p><button className="secondary" disabled={busy} onClick={intakeVideoAndExtract}>{busy?'PROCESSING…':'INTAKE VIDEO & EXTRACT LOCAL FRAMES'}</button></div> : null}
     {frames.length ? <div className="video-frame-grid">{frames.map((frame) => <article key={frame.id}><img src={frame.previewUrl} alt={`Reference frame ${frame.timestampMs}ms`} /><label><input type="checkbox" checked={frame.selected} onChange={() => setFrames((current) => current.map((entry) => entry.id===frame.id ? {...entry,selected:!entry.selected}:entry))} />Use frame · {(frame.timestampMs/1000).toFixed(1)}s</label><select aria-label="Video frame viewpoint" value={frame.viewpoint} onChange={(event) => setFrames((current) => current.map((entry) => entry.id===frame.id ? {...entry,viewpoint:event.target.value}:entry))}>{IDENTITY_VIEWPOINTS.map((view) => <option key={view}>{view}</option>)}</select></article>)}<button className="primary" disabled={busy || !frames.some((frame) => frame.selected)} onClick={attachSelectedFrames}>{busy?'ADDING…':'ATTACH SELECTED FRAMES'}</button></div> : null}
   </section></>;
+}
+
+function ExistingSourceViewpoint({ source, avatarId, brandId, onSaved }) {
+  const [value,setValue] = useState(sourceViewpoint(source)); const [busy,setBusy] = useState(false); const [error,setError] = useState(null);
+  async function save() { setBusy(true); setError(null); try { await api(`/api/avatar-studio/avatars/${avatarId}/source-viewpoints`, { method:'POST',body:JSON.stringify({ brandId,sourceId:source.id,value,humanApproval:true,
+    provenance:{ operatorSelected:true, automatedVisualInference:false } }) }); await onSaved?.(); } catch (cause) { setError(cause); } finally { setBusy(false); } }
+  const url = sourcePreviewUrl(source,brandId,avatarId);
+  return <article><>{url?<img src={url} alt="Existing identity source for human viewpoint classification"/>:null}</><strong>IMMUTABLE SOURCE · {source.id}</strong><small>Current effective viewpoint: {sourceViewpoint(source).replaceAll('_',' ')}</small><label>Human viewpoint<select aria-label={`Human viewpoint ${source.id}`} value={value} onChange={(event)=>setValue(event.target.value)}>{IDENTITY_VIEWPOINTS.map((item)=><option key={item}>{item}</option>)}</select></label><button className="secondary" disabled={busy} onClick={save}>{busy?'RECORDING…':'RECORD VIEWPOINT'}</button>{error?<small className="error-panel">{error.message}</small>:null}</article>;
 }

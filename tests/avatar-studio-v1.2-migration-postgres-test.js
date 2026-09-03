@@ -42,6 +42,7 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260903_avatar_studio_source_viewpoint_classification.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'),'utf8'));
     const after=Number((await db.query('SELECT count(*) AS count FROM avatar_studio.characters WHERE id=$1',[CHARACTER])).rows[0].count);
     assert.equal(before,1);assert.equal(after,1,'populated V1.1 avatar must survive upgrade and reapplication');

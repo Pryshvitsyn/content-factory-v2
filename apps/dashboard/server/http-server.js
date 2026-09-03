@@ -108,6 +108,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (segments[4] === 'sources') return json(response, 201, await avatarService.importSource(args));
         if (segments[4] === 'passports') return json(response, 201, await avatarService.registerPassport(args));
         if (segments[4] === 'identity-locks') return json(response, 201, await avatarService.createIdentityLock(args));
+        if (segments[4] === 'source-viewpoints') return json(response, 201, await avatarService.recordSourceViewpoint(args));
         if (segments[4] === 'passport-generation-plans') return json(response, 201, await avatarService.planPassportGeneration(args));
         if (segments[4] === 'passport-candidates') return json(response, 201, await avatarService.uploadPassportCandidate(args));
         if (segments[4] === 'body-builds') return json(response,201,await avatarService.createBodyBuild(args));

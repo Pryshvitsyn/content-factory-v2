@@ -8,6 +8,7 @@ const { AvatarStudioError, fingerprint } = require('./domain');
 const { CAPABILITIES } = require('../v2.8/capabilities');
 const { estimateOpenAIImagePlan } = require('../v2.9.2/pricing-registry');
 const { PASSPORT_OUTPUT } = require('./passport-contract');
+const { viewpointSnapshot } = require('./source-viewpoint');
 
 const PASSPORT_SPEC_VERSION = 'avatar-passport-generation-spec-v1';
 const PASSPORT_PROMPT_VERSION = [base,identityLockPrompt,negative,repair].map((item) => `${item.id}@${item.version}`).join('+');
@@ -64,7 +65,7 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
       inventedCosts: false, unknownIsZero: false });
   const canonical = { schemaVersion: PASSPORT_SPEC_VERSION, workspaceId: avatar.workspaceId, brandId: sourceAssets[0].brandId,
     audienceVertical: avatar.vertical, avatarId: avatar.id, identityVersionId: identityVersion.id,
-    identityLockVersionId: identityLock.id, sourceAssetIds: sourceAssets.map((item) => item.id), requiredViews: REQUIRED_VIEWS,
+    identityLockVersionId: identityLock.id, sourceAssetIds: sourceAssets.map((item) => item.id), sourceViewpointSnapshot: viewpointSnapshot(sourceAssets), requiredViews: REQUIRED_VIEWS,
     studioSpecification, cameraSpecification, identityConstraints: identityLock.permanentAttributes,
     temporaryExclusions: identityLock.temporaryAttributes, uncertainFeatures: identityLock.uncertainAttributes,
     negativeConstraints: negative.text, requestedCandidateCount: count, promptVersion, specVersion: PASSPORT_SPEC_VERSION,
@@ -74,7 +75,7 @@ function compilePassportGenerationSpec({ avatar, identityVersion, identityLock, 
     executionAuthorized: false, humanApprovalState: 'EXECUTION_APPROVAL_REQUIRED', originalGenerationSpecId,
     repairDelta: repairDelta || null };
   return Object.freeze({ ...canonical, planFingerprint: fingerprint(canonical), promptAssets: Object.freeze([base,identityLockPrompt,negative,
-    ...(repairDelta ? [repair] : [])]), provenance: Object.freeze({ source: 'AVATAR_STUDIO_PASSPORT_PLAN_ONLY', actor,
+    ...(repairDelta ? [repair] : [])]), provenance: Object.freeze({ source: 'AVATAR_STUDIO_PASSPORT_PLAN_ONLY', actor, sourceViewpointSnapshot: canonical.sourceViewpointSnapshot,
     createdAt: new Date().toISOString(), providerCallsExecuted: 0 }) });
 }
 

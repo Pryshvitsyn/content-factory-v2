@@ -60,6 +60,7 @@ async function main() {
     async revokeConsent(value) { calls.push(['revokeConsent', value]); return { event: { status: 'REVOKED' } }; },
     async useIntake(value) { calls.push(['useIntake', value]); return { paidProviderCalls: 0, externalGenerationCalls: 0 }; },
     async importSource(value) { calls.push(['source', value]); return { gate0: { status: 'PASS', externalCalls: 0 } }; },
+    async recordSourceViewpoint(value) { calls.push(['sourceViewpoint', value]); return { effectiveViewpoint: value.value, paidProviderCalls: 0, externalGenerationCalls: 0 }; },
     async registerPassport(value) { calls.push(['passport', value]); return { passport: { id: 'passport-1' } }; },
     async certifyPassport(value) { calls.push(['certify', value]); return { avatar: { currentLevel: 1 } }; },
     async addLevelAsset(value) { calls.push(['asset', value]); return { asset: {} }; },
@@ -108,6 +109,7 @@ async function main() {
     assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/l2-readiness?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1')).status,200);
     assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/l2-certification',{...executionScope,explicitConfirmation:true,humanApproval:true})).status,201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/sources', { brandId: 'brand-1' })).status, 201);
+    assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/source-viewpoints', { brandId: 'brand-1', sourceId: 'source-1', value: 'FRONTAL', humanApproval: true })).status, 201);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/gate0-reviews?brandId=brand-1')).status, 200);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/intakes?brandId=brand-1')).status, 200);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/existing-assets?brandId=brand-1')).status, 200);
@@ -134,6 +136,7 @@ async function main() {
     assert.equal(calls.find(([name]) => name === 'passportQa')[1].candidateId, 'candidate-1');
     assert.equal(calls.find(([name]) => name === 'passportCandidateCertify')[1].candidateId, 'candidate-1');
     assert.deepEqual(calls.find(([name]) => name === 'useIntake')[1].roles, ['IDENTITY']);
+    assert.equal(calls.find(([name]) => name === 'sourceViewpoint')[1].value, 'FRONTAL');
     assert.equal(calls.find(([name])=>name==='passportPreflight')[1].generationSpecId,'plan-1');
     assert.equal(calls.find(([name])=>name==='passportGenerate')[1].executionId,'execution-1');
     assert.equal(providerCalls, 2,'only explicit Passport and L2 Generate actions reach mocked execution boundaries');

@@ -111,8 +111,7 @@ class AvatarStudioPostgresRepository {
     const results = await Promise.all(tableQueries.map(([, sql]) => this.db.query(sql, [id])));
     const avatar = camel(base);
     tableQueries.forEach(([key], index) => { avatar[key] = results[index].rows.map(camel); });
-    for (const source of avatar.sources) source.roles = (await this.db.query(
-      'SELECT role FROM avatar_studio.source_asset_roles WHERE source_asset_id=$1 ORDER BY role',[source.id])).rows.map((item) => item.role);
+    for (const source of avatar.sources) await this.hydrateSource(source);
     avatar.vertical = avatar.verticalCode; avatar.subjectType = avatar.subjectType; avatar.identity = avatar.identitySpec;
     avatar.brandIds = avatar.brandPermissions.filter((item) => item.allowed).map((item) => item.brandId);
     const latestFaceEvent = avatar.consentEvents.find((item) => item.modality === 'FACE');
@@ -465,8 +464,7 @@ class AvatarStudioPostgresRepository {
   async sourceForIntake({ intakeId, avatarId, brandId }) {
     const row = (await this.db.query(`SELECT * FROM avatar_studio.source_assets
       WHERE intake_asset_id=$1 AND character_id=$2 AND brand_id=$3`, [intakeId,avatarId,brandId])).rows[0];
-    if (!row) return null; const result = camel(row);
-    result.roles = (await this.db.query('SELECT role FROM avatar_studio.source_asset_roles WHERE source_asset_id=$1 ORDER BY role',[row.id])).rows.map((item) => item.role);
+    if (!row) return null; const result = camel(row); await this.hydrateSource(result);
     return result;
   }
 
@@ -698,9 +696,23 @@ class AvatarStudioPostgresRepository {
 
   async source({ id, avatarId }) {
     const row = (await this.db.query('SELECT * FROM avatar_studio.source_assets WHERE id=$1 AND character_id=$2', [id, avatarId])).rows[0];
-    if (!row) return null; const result = camel(row);
-    result.roles = (await this.db.query('SELECT role FROM avatar_studio.source_asset_roles WHERE source_asset_id=$1 ORDER BY role', [id])).rows.map((item) => item.role);
+    if (!row) return null; const result = camel(row); await this.hydrateSource(result);
     return result;
+  }
+
+  async hydrateSource(source) {
+    source.roles = (await this.db.query('SELECT role FROM avatar_studio.source_asset_roles WHERE source_asset_id=$1 ORDER BY role',[source.id])).rows.map((item) => item.role);
+    source.viewpointClassifications = (await this.db.query(`SELECT id,viewpoint,human_approved,provenance,created_by,created_at
+      FROM avatar_studio.source_viewpoint_classifications WHERE source_asset_id=$1 ORDER BY created_at DESC,id DESC`, [source.id])).rows.map(camel);
+    const { effectiveViewpoint } = require('./source-viewpoint'); source.effectiveViewpoint = effectiveViewpoint(source);
+    return source;
+  }
+
+  async addSourceViewpointClassification({ avatar, source, viewpoint, provenance, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.source_viewpoint_classifications
+      (workspace_id,character_id,brand_id,source_asset_id,viewpoint,human_approved,provenance,created_by)
+      VALUES($1,$2,$3,$4,$5,true,$6,$7) RETURNING *`,
+    [avatar.workspaceId,avatar.id,source.brandId,source.id,viewpoint,provenance,actor])).rows[0]);
   }
 
   async storePlan({ avatar, plan, actor }) {

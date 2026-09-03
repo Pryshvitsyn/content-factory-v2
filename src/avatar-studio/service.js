@@ -10,6 +10,7 @@ const { validateAvatarContinuityReadiness } = require('../v2.10/continuity-contr
 const { compilePassportGenerationSpec } = require('./passport-plan-compiler');
 const { analyzePassportCandidate } = require('./passport-qa');
 const { buildSmokeReadiness } = require('./smoke-readiness');
+const { viewpoint } = require('./source-viewpoint');
 
 const PASSPORT_REJECTION_REASONS = Object.freeze(['PROFILE_DRIFT','NOSE_CHANGED','JAW_CHANGED','CHIN_CHANGED','AGE_CHANGED',
   'HAIR_CHANGED','HAIRLINE_CHANGED','FACE_CHANGED','ACCESSORY_CONTAMINATION','WARDROBE_CONTAMINATION','BACKGROUND_ERROR',
@@ -128,6 +129,19 @@ class AvatarStudioService {
       metadata: { ...(normalized.metadata || {}), artifactId: normalized.artifactId || null } });
     const registered = await this.repository.registerSource({ avatar, source: normalized, gate0, actor: this.actor });
     return Object.freeze({ source: registered, gate0 });
+  }
+
+  async recordSourceViewpoint({ avatarId, brandId, sourceId, value, humanApproval = false, provenance = {} } = {}) {
+    if (!humanApproval) throw new AvatarStudioError(409, 'HUMAN_APPROVAL_REQUIRED', 'Viewpoint classification requires an explicit human decision');
+    const avatar = await this.avatar({ id: avatarId, brandId });
+    const source = await this.repository.source({ id: sourceId, avatarId });
+    if (!source || source.brandId !== brandId || !(source.roles || []).some((role) => ['IDENTITY','PASSPORT_SOURCE'].includes(role))) {
+      throw new AvatarStudioError(404, 'IDENTITY_SOURCE_NOT_FOUND', 'An eligible identity or Passport source was not found in this scope');
+    }
+    let normalized; try { normalized = viewpoint(value); } catch (error) { throw new AvatarStudioError(400, error.code, error.message); }
+    const classification = await this.repository.addSourceViewpointClassification({ avatar, source, viewpoint: normalized,
+      provenance: { ...provenance, source: 'AVATAR_STUDIO_HUMAN_VIEWPOINT_CLASSIFICATION', automatedVisualInference: false }, actor: this.actor });
+    return Object.freeze({ classification, effectiveViewpoint: normalized, passportPlanningInvalidated: true, paidProviderCalls: 0, externalGenerationCalls: 0 });
   }
 
   async registerPassport({ avatarId, brandId, sourceId, panels, qa = {} } = {}) {
