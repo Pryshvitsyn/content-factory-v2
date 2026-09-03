@@ -68,7 +68,7 @@ const MODELS = Object.freeze([
       C.CHARACTER_EXPRESSION_REFERENCE,C.MOUTH_SHAPE_REFERENCE], supportStatus: 'SUPPORTED', lifecycleStatus: 'DEPRECATED',
     deprecated: true, replacementModelId: 'gpt-image-2', defaultForNewPlans: false, newPlanPriority: 0,
     profiles: { STANDARD: { resolution: '1024x1024', quality: 'standard' }, PREMIUM: { resolution: '1536x1024', quality: 'high' } },
-    constraints: { resolutions: ['1024x1024','1536x1024'], aspectRatios: ['1:1','3:2'] },
+    constraints: { resolutions: ['1024x1024','1536x1024'], aspectRatios: ['1:1','3:2','9:16'] },
     costStatus: 'UNKNOWN', relativeTier: 'STANDARD' },
   { provider: 'elevenlabs', vendor: 'elevenlabs', modelFamily: 'ELEVENLABS_TTS', providerModelId: 'eleven_v3', modelId: 'eleven_v3', displayName: 'Eleven v3', adapterFamily: 'elevenlabs-tts', capabilities: [C.SPEECH], supportStatus: 'SUPPORTED', profiles: profile(['STANDARD']), costStatus: 'VERIFIED' },
   { provider: 'moneyprinterturbo', vendor: 'moneyprinterturbo', modelId: 'v1.3.3', displayName: 'MoneyPrinterTurbo Fast', adapterFamily: 'mpt-fast', capabilities: [C.FAST_RENDER], profiles: profile(['ECONOMY']), costStatus: 'UNKNOWN' },

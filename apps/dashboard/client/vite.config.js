@@ -1,7 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { fileURLToPath } from 'node:url';
 
 const apiHost = process.env.DASHBOARD_API_HOST || '127.0.0.1';
 const apiPort = Number(process.env.DASHBOARD_API_PORT || 3001);
