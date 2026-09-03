@@ -8,6 +8,17 @@ const SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES = Object.freeze([
   'KEYFRAME_SIZE_INVALID',
 ]);
 
+function lockedStageConflict(message = 'This immutable stage preflight already has an active, failed, or ambiguous attempt') {
+  return Object.assign(new Error(message), { code: 'LOCKED_STAGE_ALREADY_ATTEMPTED', status: 409 });
+}
+
+function isSafeLocalLockedStageRetry(attempt, stage) {
+  return stage === 'KEYFRAME'
+    && attempt?.status === 'FAILED'
+    && attempt?.boundary_state === 'NOT_CROSSED'
+    && SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES.includes(attempt?.error?.code);
+}
+
 class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPostgresRepository {
   async recordQualityApproval(args) {
     if (args.decision === 'APPROVED') {
@@ -21,22 +32,54 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
     return super.recordQualityApproval(args);
   }
 
-  async claimLockedStage(args) {
+  async claimLockedStage({ workflowId, workspaceId, brandId, stage, preflightId }) {
+    const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
+    const ownsTransaction = client !== this.db;
     try {
-      return await super.claimLockedStage(args);
-    } catch (error) {
-      if (error?.code !== 'LOCKED_STAGE_ALREADY_ATTEMPTED') throw error;
-      const retried = await this.db.query(`UPDATE v2_10.locked_stage_attempts
-        SET status='RUNNING',boundary_state='NOT_CROSSED',provider_request_id=NULL,keyframe_id=NULL,
-          result='{}'::jsonb,error='{}'::jsonb,completed_at=NULL,started_at=now()
+      if (ownsTransaction) {
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`locked-stage:${workflowId}:${stage}`]);
+      }
+
+      const active = await client.query(`SELECT * FROM v2_10.locked_stage_attempts
+        WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4
+          AND status IN ('RUNNING','NEEDS_RECONCILIATION')
+        ORDER BY started_at DESC,id DESC LIMIT 1`,
+      [workflowId, workspaceId, brandId, stage]);
+      if (active.rows[0]) throw lockedStageConflict();
+
+      const latest = await client.query(`SELECT * FROM v2_10.locked_stage_attempts
         WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4 AND preflight_id=$5
-          AND status='FAILED' AND boundary_state='NOT_CROSSED'
-          AND coalesce(error->>'code','') = ANY($6::text[])
-        RETURNING *`,
-      [args.workflowId, args.workspaceId, args.brandId, args.stage, args.preflightId,
-        SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES]);
-      if (retried.rows[0]) return Object.freeze({ ...retried.rows[0], reused: false, safeLocalRetry: true });
+        ORDER BY started_at DESC,id DESC LIMIT 1`,
+      [workflowId, workspaceId, brandId, stage, preflightId]);
+      const prior = latest.rows[0] || null;
+
+      if (prior?.status === 'SUCCEEDED') {
+        if (ownsTransaction) await client.query('COMMIT');
+        return Object.freeze({ ...prior, reused: true });
+      }
+
+      const safeLocalRetry = isSafeLocalLockedStageRetry(prior, stage);
+      if (prior && !safeLocalRetry) throw lockedStageConflict();
+
+      const inserted = await client.query(`INSERT INTO v2_10.locked_stage_attempts
+        (workflow_id,workspace_id,brand_id,stage,preflight_id,status,boundary_state)
+        VALUES($1,$2,$3,$4,$5,'RUNNING','NOT_CROSSED') RETURNING *`,
+      [workflowId, workspaceId, brandId, stage, preflightId]);
+      if (!inserted.rows[0]) throw lockedStageConflict('Locked-stage attempt could not be claimed');
+
+      if (ownsTransaction) await client.query('COMMIT');
+      return Object.freeze({
+        ...inserted.rows[0],
+        reused: false,
+        safeLocalRetry,
+        retryOfAttemptId: safeLocalRetry ? prior.id : null,
+      });
+    } catch (error) {
+      if (ownsTransaction) await client.query('ROLLBACK').catch(() => {});
       throw error;
+    } finally {
+      if (ownsTransaction) client.release();
     }
   }
 
@@ -56,4 +99,8 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
   }
 }
 
-module.exports = { HardenedQualityScriptFirstPostgresRepository, SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES };
+module.exports = {
+  HardenedQualityScriptFirstPostgresRepository,
+  SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES,
+  isSafeLocalLockedStageRetry,
+};
