@@ -14,13 +14,13 @@ const { describeProviders } = require('./provider-status');
 const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
 const { QualityCreativeProductionService } = require('../../../src/v2.10/quality-creative-production-service');
-const { QualityScriptFirstPostgresRepository } = require('../../../src/v2.10/quality-script-first-postgres-repository');
+const { HardenedQualityScriptFirstPostgresRepository } = require('../../../src/v2.10/quality-script-first-repository');
 const { QualityScriptFirstService } = require('../../../src/v2.10/quality-script-first-service');
 const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
 const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 const { createKeyframeImageGateway, createSemanticStillEvaluator } = require('../../../src/v2.10/locked-keyframe-service');
-const { QualityLockedKeyframeService } = require('../../../src/v2.10/quality-locked-keyframe-service');
+const { HardenedQualityLockedKeyframeService } = require('../../../src/v2.10/quality-locked-keyframe-service-hardened');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -66,7 +66,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     repository, reviewService, commandService, qualityRecoveryService, storage, providers, providerCatalog, actor, env,
   });
   const audioInspector = new FfprobeMediaInspector();
-  const v210Repository = new QualityScriptFirstPostgresRepository({ db, storage });
+  const v210Repository = new HardenedQualityScriptFirstPostgresRepository({ db, storage });
   const resolvedPreviewProvider = previewProvider || createVoicePreviewGateway({ env });
   const resolvedStarter = creativeStarter || new V210IntegratedProductionStarter({
     db, storage, repository: v210Repository, env, logger: console, mediaInspector: audioInspector,
@@ -76,7 +76,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
   const qualityDirectorService = new QualityScriptFirstService({ repository: v210Repository,
     brandRepository: repository, actor });
-  const lockedKeyframeService = new QualityLockedKeyframeService({ repository: v210Repository,
+  const lockedKeyframeService = new HardenedQualityLockedKeyframeService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, starter: resolvedStarter, storage,
     imageInspector: audioInspector, actor, env,
     imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
