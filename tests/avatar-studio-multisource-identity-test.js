@@ -58,7 +58,7 @@ const tools = fs.readFileSync(path.resolve(__dirname,'../apps/dashboard/client/s
 const create = fs.readFileSync(path.resolve(__dirname,'../apps/dashboard/client/src/CreateAvatarMultiSource.jsx'),'utf8');
 assert(passport.includes('sourceAssetIds:sourceIds'),'Passport plan must preserve the exact selected multi-source set');
 assert(passport.includes('NO VERIFIED SOURCE VIEW AVAILABLE'),'Human comparison must expose missing angle evidence');
-assert(passport.includes('preserveHistoricalState=false'),'Passport Lab load contract must support suppressing historical plan hydration after source changes');
+assert(passport.includes('preserveHistoricalState=true'),'Passport Lab load contract must explicitly control historical plan hydration');
 assert(passport.includes('resetSources:true,preserveHistoricalState:false'),'Source/identity changes must require a fresh Passport plan instead of restoring a historical plan');
 assert(tools.includes('multiple accept="image/jpeg,image/png,image/webp"'),'Existing avatar must support multi-photo selection');
 assert(tools.includes('ADD REFERENCE VIDEO'),'Existing avatar must support optional visual reference video');
