@@ -78,8 +78,14 @@ function generationPrompt(transition = TRANSITIONS.IDLE_TO_TRIGGER) {
 
 function buildIdleToTriggerPilot({ referenceArtifact } = {}) {
   if (!referenceArtifact?.storageKey || !referenceArtifact?.contentHash) {
-    const error = new Error('A verified immutable IDLE sphere reference artifact is required before pilot generation');
+    const error = new Error('A verified immutable 9:16 IDLE sphere still artifact is required before pilot generation');
     error.code = 'SPHERE_MASTER_REFERENCE_REQUIRED';
+    throw error;
+  }
+  const contentType = referenceArtifact.contentType || 'image/jpeg';
+  if (!['image/jpeg','image/png','image/webp'].includes(contentType)) {
+    const error = new Error('Sphere pilot reference must be a prepared portrait still, not a raw source video');
+    error.code = 'SPHERE_MASTER_REFERENCE_IMAGE_REQUIRED';
     throw error;
   }
   return Object.freeze({
@@ -96,8 +102,8 @@ function buildIdleToTriggerPilot({ referenceArtifact } = {}) {
       capability: 'IMAGE_TO_VIDEO', profile: 'STANDARD', resolution: '720p', aspect_ratio: '9:16', duration: 5,
       audio: Object.freeze({ requested: false }),
       v210_reference: Object.freeze({
-        policy: 'UPLOADED_VIDEO_FRAME', capability: 'IMAGE_TO_VIDEO',
-        artifact: Object.freeze({ ...referenceArtifact, contentType: referenceArtifact.contentType || 'video/mp4' }),
+        policy: 'UPLOADED_REFERENCE', capability: 'IMAGE_TO_VIDEO',
+        artifact: Object.freeze({ ...referenceArtifact, contentType }),
       }),
       sphereIdentityLock: SPHERE_VISUAL_LOCK,
       expectedHistoricalFailureChecks: Object.freeze([
