@@ -19,6 +19,10 @@ function validateMediaProbe({ kind, probe, expectedDurationMs = null, durationTo
   if ((kind === 'video' || kind === 'image') && !probe.videoCodec) {
     throw new MediaValidationError('MEDIA_VIDEO_STREAM_MISSING', `${kind} asset has no readable video/image stream`, probe);
   }
+  if (kind === 'image' && (!Number.isInteger(probe.width) || probe.width <= 0
+    || !Number.isInteger(probe.height) || probe.height <= 0)) {
+    throw new MediaValidationError('MEDIA_DIMENSIONS_INVALID', 'Image asset has no positive decoded dimensions', probe);
+  }
   if ((kind === 'voice' || kind === 'audio') && !probe.hasAudio) {
     throw new MediaValidationError('MEDIA_AUDIO_STREAM_MISSING', `${kind} asset has no readable audio stream`, probe);
   }

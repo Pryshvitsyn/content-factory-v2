@@ -1,14 +1,23 @@
 'use strict';
 
 const OpenAI = require('openai');
+const { toFile } = require('openai');
 const { ProviderError, assertProviderResult } = require('./provider-contract');
+const { actualOpenAIImageCost } = require('../v2.9.2/pricing-registry');
 
-const DEFAULT_IMAGE_MODEL = 'gpt-image-1';
+const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
 const DEFAULT_SPEECH_MODEL = 'gpt-4o-mini-tts';
+const SUPPORTED_IMAGE_MODELS = new Set(['gpt-image-2','gpt-image-1']);
+const REFERENCE_IMAGE_CAPABILITIES = new Set(['multi-view-identity-reference','character-body-reference',
+  'character-expression-reference','mouth-shape-reference']);
 
 function parseAssetPrompt(prompt) {
   if (!prompt || typeof prompt !== 'string') throw new Error('Media prompt must be a non-empty string');
   try { return JSON.parse(prompt); } catch { return { description: prompt, generation_requirements: {} }; }
+}
+
+function responseRequestId(response) {
+  return response?._request_id || response?.request_id || response?.requestId || response?.id || null;
 }
 
 function createOpenAIMediaProvider({
@@ -18,24 +27,28 @@ function createOpenAIMediaProvider({
   speechModel = process.env.OPENAI_SPEECH_MODEL || DEFAULT_SPEECH_MODEL,
   defaultVoice = process.env.OPENAI_SPEECH_VOICE || 'alloy',
 } = {}) {
-  const openai = client || new OpenAI({ apiKey });
+  // Paid media execution has its own durable retry/approval boundary. The SDK must not
+  // silently turn one approved call into multiple provider attempts.
+  const openai = client || new OpenAI({ apiKey, maxRetries: 0 });
 
   return Object.freeze({
     provider: 'openai-media',
 
     modelFor({ capability } = {}) {
-      if (capability === 'image-generation') return imageModel;
+      if (capability === 'image-generation' || REFERENCE_IMAGE_CAPABILITIES.has(capability)) return imageModel;
       if (capability === 'speech-generation') return speechModel;
       return null;
     },
 
     supports({ capability, model } = {}) {
-      if (capability === 'image-generation') return !model || model === imageModel;
+      if (capability === 'image-generation' || REFERENCE_IMAGE_CAPABILITIES.has(capability)) {
+        return !model || model === imageModel || SUPPORTED_IMAGE_MODELS.has(model);
+      }
       if (capability === 'speech-generation') return !model || model === speechModel;
       return false;
     },
 
-    async generate({ capability, prompt, model, idempotencyKey, onProviderRequest = null } = {}) {
+    async generate({ capability, prompt, model, idempotencyKey, referenceImages = [], onProviderRequest = null } = {}) {
       const asset = parseAssetPrompt(prompt);
       const requirements = asset.generation_requirements || {};
       try {
@@ -49,14 +62,49 @@ function createOpenAIMediaProvider({
             quality: requirements.quality || 'high',
             n: 1,
           }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined);
-          const item = response?.data?.[0] || {};
-          if (onProviderRequest && response.id) await onProviderRequest({ requestId: response.id, status: 'succeeded', provider: 'openai-media', model: selectedModel });
+          const item = response?.data?.[0] || {}; const requestId = responseRequestId(response);
+          if (onProviderRequest && requestId) await onProviderRequest({ requestId, status: 'succeeded', provider: 'openai-media', model: selectedModel });
           const output = item.b64_json ? Buffer.from(item.b64_json, 'base64') : null;
           return assertProviderResult({
             provider: 'openai-media', model: selectedModel, capability,
             output, mediaUrl: item.url || null, contentType: 'image/png',
-            requestId: response.id || null, usage: response.usage || null,
-            provenance: { provider: 'openai-media', model: selectedModel },
+            requestId, usage: response.usage || null,
+            actualKnownCost: actualOpenAIImageCost({ model: selectedModel, usage: response.usage }),
+            provenance: { provider: 'openai-media', model: selectedModel, sdkAutomaticRetries: 0 },
+          });
+        }
+
+        if (REFERENCE_IMAGE_CAPABILITIES.has(capability)) {
+          if (!Array.isArray(referenceImages) || !referenceImages.length) {
+            throw new Error('Character reference generation requires at least one approved reference image');
+          }
+          const selectedModel = model || imageModel;
+          const images = await Promise.all(referenceImages.map((reference, index) => toFile(
+            reference.bytes,
+            reference.filename || `identity-reference-${index + 1}.png`,
+            { type: reference.contentType || 'image/png' },
+          )));
+          const response = await openai.images.edit({
+            model: selectedModel,
+            image: images,
+            prompt: [asset.description, requirements.prompt, requirements.visual_style,
+              requirements.negative_prompt && `Avoid: ${requirements.negative_prompt}`].filter(Boolean).join('\n'),
+            size: requirements.size || '1536x1024',
+            quality: requirements.quality || 'high',
+            n: 1,
+          }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined);
+          const item = response?.data?.[0] || {}; const requestId = responseRequestId(response);
+          if (onProviderRequest && requestId) await onProviderRequest({ requestId, status: 'succeeded',
+            provider: 'openai-media', model: selectedModel });
+          const output = item.b64_json ? Buffer.from(item.b64_json, 'base64') : null;
+          return assertProviderResult({
+            provider: 'openai-media', model: selectedModel, capability, output, mediaUrl: item.url || null,
+            contentType: 'image/png', requestId, usage: response.usage || null,
+            actualKnownCost: actualOpenAIImageCost({ model: selectedModel, usage: response.usage }),
+            provenance: { provider: 'openai-media', model: selectedModel, strategy: capability === 'multi-view-identity-reference'
+              ? 'ONE_EDIT_CALL_PER_THREE_VIEW_COMPOSITE' : 'ONE_EDIT_CALL_PER_REFERENCE_CANDIDATE',
+              referenceImageCount: referenceImages.length, inputFidelity: selectedModel === 'gpt-image-2'
+                ? 'AUTOMATIC_HIGH_FIDELITY' : 'PROVIDER_DEFAULT', sdkAutomaticRetries: 0 },
           });
         }
 
@@ -78,7 +126,8 @@ function createOpenAIMediaProvider({
             provider: 'openai-media', model: selectedModel, capability,
             output, contentType: 'audio/mpeg',
             requestId,
-            provenance: { provider: 'openai-media', model: selectedModel, voice: requirements.voice || defaultVoice },
+            provenance: { provider: 'openai-media', model: selectedModel, voice: requirements.voice || defaultVoice,
+              sdkAutomaticRetries: 0 },
           });
         }
 
@@ -93,4 +142,5 @@ function createOpenAIMediaProvider({
   });
 }
 
-module.exports = { createOpenAIMediaProvider, DEFAULT_IMAGE_MODEL, DEFAULT_SPEECH_MODEL, parseAssetPrompt };
+module.exports = { createOpenAIMediaProvider, DEFAULT_IMAGE_MODEL, DEFAULT_SPEECH_MODEL, SUPPORTED_IMAGE_MODELS, parseAssetPrompt,
+  responseRequestId };

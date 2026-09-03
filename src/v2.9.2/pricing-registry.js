@@ -3,6 +3,18 @@
 const PRICING_STATUSES = Object.freeze(['VERIFIED','PROMOTIONAL','STALE','UNKNOWN']);
 
 const PRICE_RECORDS = Object.freeze([
+  Object.freeze({ provider: 'openai', modelFamily: 'OPENAI_IMAGE', providerModelId: 'gpt-image-2', model: 'gpt-image-2',
+    component: 'IMAGE_TEXT_INPUT', profile: null, variant: null, resolution: null, currency: 'USD', unit: 'MILLION_TOKENS',
+    amountUsd: 5, formula: 'text_input_tokens * 5 / 1000000', status: 'VERIFIED', verifiedAt: '2026-09-01',
+    sourceType: 'OFFICIAL_PROVIDER_DOCUMENTATION', source: 'https://developers.openai.com/api/docs/guides/image-generation' }),
+  Object.freeze({ provider: 'openai', modelFamily: 'OPENAI_IMAGE', providerModelId: 'gpt-image-2', model: 'gpt-image-2',
+    component: 'IMAGE_REFERENCE_INPUT', profile: null, variant: null, resolution: null, currency: 'USD', unit: 'MILLION_TOKENS',
+    amountUsd: 8, formula: 'image_input_tokens * 8 / 1000000', status: 'VERIFIED', verifiedAt: '2026-09-01',
+    sourceType: 'OFFICIAL_PROVIDER_DOCUMENTATION', source: 'https://developers.openai.com/api/docs/guides/image-generation' }),
+  Object.freeze({ provider: 'openai', modelFamily: 'OPENAI_IMAGE', providerModelId: 'gpt-image-2', model: 'gpt-image-2',
+    component: 'IMAGE_OUTPUT', profile: null, variant: null, resolution: null, currency: 'USD', unit: 'MILLION_TOKENS',
+    amountUsd: 30, formula: 'image_output_tokens * 30 / 1000000', status: 'VERIFIED', verifiedAt: '2026-09-01',
+    sourceType: 'OFFICIAL_PROVIDER_DOCUMENTATION', source: 'https://developers.openai.com/api/docs/guides/image-generation' }),
   ...['480p','720p','1080p'].map((resolution, index) => Object.freeze({
     provider: 'replicate', modelFamily: 'WAN_3', providerModelId: 'alibaba/wan-3', model: 'alibaba/wan-3',
     component: 'VIDEO', profile: 'STANDARD', variant: null, resolution, currency: 'USD', unit: 'SECOND',
@@ -23,6 +35,47 @@ const PRICE_RECORDS = Object.freeze([
     amountUsd: 0.0001, formula: 'amountUsd * input characters', status: 'VERIFIED', verifiedAt: '2026-08-27',
     validUntil: null, sourceType: 'OFFICIAL_PROVIDER_PRICING', source: 'https://elevenlabs.io/pricing/api' }),
 ]);
+
+const GPT_IMAGE_2_OUTPUT_ESTIMATES = Object.freeze({
+  low: Object.freeze({ '1024x1024': 0.006, '1024x1536': 0.005, '1536x1024': 0.005 }),
+  medium: Object.freeze({ '1024x1024': 0.053, '1024x1536': 0.041, '1536x1024': 0.041 }),
+  high: Object.freeze({ '1024x1024': 0.211, '1024x1536': 0.165, '1536x1024': 0.165 }),
+});
+
+function imageTokenRates(model = 'gpt-image-2') {
+  const find = (component) => PRICE_RECORDS.find((item) => item.provider === 'openai' && item.model === model && item.component === component);
+  const text = find('IMAGE_TEXT_INPUT'), image = find('IMAGE_REFERENCE_INPUT'), output = find('IMAGE_OUTPUT');
+  if (!text || !image || !output) return null;
+  return Object.freeze({ version: 'openai-image-api-2026-09-01', currency: 'USD', perMillionTokens: Object.freeze({
+    textInput: text.amountUsd, imageInput: image.amountUsd, imageOutput: output.amountUsd }), verifiedAt: text.verifiedAt,
+    source: text.source });
+}
+
+function estimateOpenAIImagePlan({ model, size, quality, count = 1, referenceImageCount = 1 } = {}) {
+  const total = Number(count); const references = Number(referenceImageCount);
+  if (model !== 'gpt-image-2' || !Number.isInteger(total) || total < 1) return Object.freeze({ status: 'UNKNOWN',
+    knownTotalCost: null, knownSubtotalCost: 0, estimatedOutputCost: null, maximumEstimatedCost: null,
+    unknownElements: Object.freeze(['PROVIDER_TOKEN_RATES','TEXT_INPUT_TOKENS','IMAGE_INPUT_TOKENS','OUTPUT_TOKENS','TOTAL_COST']),
+    currency: 'USD', inventedCosts: false, unknownIsZero: false });
+  const normalizedQuality = String(quality || 'high').toLowerCase();
+  const outputPerCall = GPT_IMAGE_2_OUTPUT_ESTIMATES[normalizedQuality]?.[size] ?? null;
+  const outputSubtotal = outputPerCall == null ? 0 : Number((outputPerCall * total).toFixed(6));
+  return Object.freeze({ status: outputPerCall == null ? 'UNKNOWN' : 'PARTIAL', knownTotalCost: null,
+    knownSubtotalCost: 0, estimatedOutputCost: outputPerCall == null ? null : outputSubtotal,
+    estimatedOutputCostPerCall: outputPerCall, maximumEstimatedCost: null, tokenRates: imageTokenRates(model),
+    referenceImageCount: references, requestCount: total,
+    unknownElements: Object.freeze(['TEXT_INPUT_TOKENS','IMAGE_INPUT_TOKENS','TOTAL_COST']), currency: 'USD',
+    pricingVersion: 'openai-image-api-2026-09-01', outputEstimateSource: 'OFFICIAL_GPT_IMAGE_2_CALCULATOR_TABLE',
+    inventedCosts: false, unknownIsZero: false });
+}
+
+function actualOpenAIImageCost({ model, usage } = {}) {
+  const rates = imageTokenRates(model); const input = usage?.input_tokens_details || {};
+  const textTokens = Number(input.text_tokens), imageTokens = Number(input.image_tokens), outputTokens = Number(usage?.output_tokens);
+  if (!rates || ![textTokens,imageTokens,outputTokens].every(Number.isFinite)) return null;
+  return Number(((textTokens * rates.perMillionTokens.textInput + imageTokens * rates.perMillionTokens.imageInput
+    + outputTokens * rates.perMillionTokens.imageOutput) / 1_000_000).toFixed(6));
+}
 
 function currentStatus(record, now = new Date()) {
   if (!PRICING_STATUSES.includes(record?.status)) return 'UNKNOWN';
@@ -70,4 +123,5 @@ function estimateMediaStack({ video, voice = null, semantic = null, master = nul
     status: known ? (components.some((item) => item.status === 'PROMOTIONAL') ? 'PROMOTIONAL' : 'VERIFIED') : 'UNKNOWN' });
 }
 
-module.exports = { PRICING_STATUSES, PRICE_RECORDS, currentStatus, priceFor, estimateComponent, estimateMediaStack };
+module.exports = { PRICING_STATUSES, PRICE_RECORDS, GPT_IMAGE_2_OUTPUT_ESTIMATES, currentStatus, priceFor,
+  imageTokenRates, estimateOpenAIImagePlan, actualOpenAIImageCost, estimateComponent, estimateMediaStack };

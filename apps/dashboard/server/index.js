@@ -4,6 +4,7 @@ require('dotenv').config();
 const path = require('node:path');
 const { Pool } = require('pg');
 const { FilesystemStorageAdapter } = require('../../../src/storage/storage-adapter');
+const { ArtifactService } = require('../../../src/artifacts/artifact-service');
 const { ControlReviewService } = require('../../../src/v2.3/control-review-service');
 const { ProductionCommandError, ProductionCommandService } = require('../../../src/v2.7/production-command-service');
 const { QualityRecoveryService } = require('../../../src/v2.10.1/quality-recovery-service');
@@ -21,6 +22,13 @@ const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrat
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 const { createKeyframeImageGateway, createSemanticStillEvaluator } = require('../../../src/v2.10/locked-keyframe-service');
 const { HardenedQualityLockedKeyframeService } = require('../../../src/v2.10/quality-locked-keyframe-service-hardened');
+const { AvatarStudioPostgresRepository } = require('../../../src/avatar-studio/postgres-repository');
+const { AvatarStudioService } = require('../../../src/avatar-studio/service');
+const { AvatarAssetIntakeService } = require('../../../src/avatar-studio/asset-intake-service');
+const { SafeUrlImporter } = require('../../../src/avatar-studio/safe-url-import');
+const { PassportExecutionService } = require('../../../src/avatar-studio/passport-execution-service');
+const { AvatarL2Service } = require('../../../src/avatar-studio/l2-service');
+const { createDefaultProviderGateway } = require('../../../src/providers/default-provider-gateway');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -100,9 +108,23 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     imageInspector: audioInspector, actor, env,
     imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
     stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env: lockedKeyframeSemanticEnvironment(env) }) });
+  const avatarRepository = new AvatarStudioPostgresRepository({ db });
+  const avatarAssetIntakeService = new AvatarAssetIntakeService({ repository: avatarRepository,
+    artifactService: new ArtifactService({ storage }), storage, mediaInspector: audioInspector,
+    safeUrlImporter: new SafeUrlImporter(), actor });
+  const avatarProviderGateway = createDefaultProviderGateway({ openai: { apiKey: env.OPENAI_API_KEY },
+      replicate: { enabled: false }, routing: { fallbackOnError: false } });
+  const passportExecutionService = new PassportExecutionService({ repository: avatarRepository, providerCatalog,
+    providerGateway: avatarProviderGateway,
+    assetIntakeService: avatarAssetIntakeService, storage, env, actor });
+  const l2Service = new AvatarL2Service({ repository:avatarRepository,providerCatalog,providerGateway:avatarProviderGateway,
+    assetIntakeService:avatarAssetIntakeService,storage,env,actor });
+  const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
+    providerCatalog, passportExecutionService, l2Service, actor, env });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,
-    v210Repository, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider, lockedKeyframeService,
-    server: createControlServer({ service, creativeService, lockedKeyframeService, qualityDirectorService }) };
+    lockedKeyframeService, avatarService, avatarRepository, avatarAssetIntakeService, v210Repository,
+    creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
+    server: createControlServer({ service, creativeService, lockedKeyframeService, qualityDirectorService, avatarService }) };
 }
 
 if (require.main === module) {

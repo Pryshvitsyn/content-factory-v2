@@ -5,7 +5,8 @@ const { URL } = require('node:url');
 const { ControlError } = require('./control-service');
 const { continuationPreflight, continueRecoveredV210 } = require('./v210-quality-resume');
 
-const BODY_LIMIT = 1024 * 1024;
+const BODY_LIMIT = 16 * 1024;
+const ASSET_BODY_LIMIT = 36 * 1024 * 1024;
 
 function json(response, status, payload) {
   const body = JSON.stringify(payload);
@@ -15,7 +16,7 @@ function json(response, status, payload) {
 
 function safeErrorDetails(error) {
   const validation = error?.details?.validation || error?.details?.quality;
-  if (!validation) return undefined;
+  if (!validation) return error?.details || undefined;
   return { validation, providerExecutions: Number(error.details?.providerExecutions || 0) };
 }
 
@@ -33,12 +34,145 @@ async function readJson(request, limit = BODY_LIMIT) {
 }
 
 function createControlServer({ service, creativeService = null, lockedKeyframeService = null,
-  qualityDirectorService = null, logger = console } = {}) {
+  qualityDirectorService = null, avatarService = null, logger = console } = {}) {
   if (!service) throw new Error('service is required');
   return http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
       const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      if (avatarService && request.method === 'GET' && url.pathname === '/api/avatar-studio/verticals') {
+        return json(response, 200, await avatarService.verticals());
+      }
+      if (avatarService && request.method === 'GET' && url.pathname === '/api/avatar-studio/avatars') {
+        return json(response, 200, await avatarService.list({ brandId: url.searchParams.get('brandId'),
+          vertical: url.searchParams.get('vertical') }));
+      }
+      if (avatarService && request.method === 'GET' && url.pathname === '/api/avatar-studio/gate0-reviews') {
+        return json(response, 200, await avatarService.reviewQueue({ brandId: url.searchParams.get('brandId') }));
+      }
+      if (avatarService && request.method === 'POST' && url.pathname === '/api/avatar-studio/avatars') {
+        return json(response, 201, await avatarService.create(await readJson(request)));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments.length === 4) {
+        return json(response, 200, await avatarService.avatar({ id: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'smoke-readiness' && segments.length === 5) {
+        return json(response,200,await avatarService.smokeReadiness({avatarId:segments[3],...await readJson(request)}));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-lab' && segments.length === 5) {
+        return json(response, 200, await avatarService.passportLab({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'body-expressions-lab' && segments.length === 5) {
+        return json(response,200,await avatarService.bodyExpressionsLab({avatarId:segments[3],workspaceId:url.searchParams.get('workspaceId'),
+          brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'intakes' && segments.length === 5) {
+        return json(response, 200, await avatarService.listIntakes({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'existing-assets' && segments.length === 5) {
+        return json(response, 200, await avatarService.existingAssets({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'intakes' && segments.length === 5) {
+        return json(response, 201, await avatarService.intakeAsset({ avatarId: segments[3], ...await readJson(request, ASSET_BODY_LIMIT) }));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'intakes' && segments.length === 7) {
+        const args = { avatarId: segments[3], intakeId: segments[5], ...await readJson(request) };
+        if (segments[6] === 'review') return json(response, 201, await avatarService.reviewIntake(args));
+        if (segments[6] === 'consent-requests') return json(response, 201, await avatarService.requestConsent(args));
+        if (segments[6] === 'consents') return json(response, 201, await avatarService.grantConsent(args));
+        if (segments[6] === 'revoke-consent') return json(response, 201, await avatarService.revokeConsent(args));
+        if (segments[6] === 'use') return json(response, 201, await avatarService.useIntake(args));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'intakes' && segments[4] === 'content' && segments.length === 5) {
+        const content = await avatarService.intakeContent({ intakeId: segments[3], brandId: url.searchParams.get('brandId'),
+          avatarId: url.searchParams.get('avatarId') });
+        response.writeHead(200, { 'Content-Type': content.contentType, 'Content-Length': content.bytes.length,
+          'Content-Disposition': `inline; filename="${String(content.filename).replace(/["\\\r\n]/g, '_')}"`,
+          'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+        return response.end(content.bytes);
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments.length === 5) {
+        const body = await readJson(request);
+        const args = { avatarId: segments[3], ...body };
+        if (segments[4] === 'identity') return json(response, 201, await avatarService.updateIdentity(args));
+        if (segments[4] === 'sources') return json(response, 201, await avatarService.importSource(args));
+        if (segments[4] === 'passports') return json(response, 201, await avatarService.registerPassport(args));
+        if (segments[4] === 'identity-locks') return json(response, 201, await avatarService.createIdentityLock(args));
+        if (segments[4] === 'passport-generation-plans') return json(response, 201, await avatarService.planPassportGeneration(args));
+        if (segments[4] === 'passport-candidates') return json(response, 201, await avatarService.uploadPassportCandidate(args));
+        if (segments[4] === 'body-builds') return json(response,201,await avatarService.createBodyBuild(args));
+        if (segments[4] === 'l2-generation-plans') return json(response,201,await avatarService.planL2Reference(args));
+        if (segments[4] === 'l2-candidates') return json(response,201,await avatarService.uploadL2Candidate(args));
+        if (segments[4] === 'l2-certification') return json(response,201,await avatarService.certifyL2Pack(args));
+        if (segments[4] === 'level-assets') return json(response, 201, await avatarService.addLevelAsset(args));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-readiness' && segments.length === 5) {
+        return json(response,200,await avatarService.l2Readiness({avatarId:segments[3],workspaceId:url.searchParams.get('workspaceId'),
+          brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-candidates' && segments.length === 7) {
+        const args={avatarId:segments[3],candidateId:segments[5],...await readJson(request)};
+        if(segments[6]==='qa')return json(response,201,await avatarService.runL2Qa(args));
+        if(segments[6]==='review')return json(response,201,await avatarService.reviewL2Candidate(args));
+        if(segments[6]==='certify')return json(response,201,await avatarService.certifyL2Reference(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-generation-plans' && segments[6] === 'preflight' && segments.length === 7) {
+        return json(response,201,await avatarService.preflightL2Generation({avatarId:segments[3],generationSpecId:segments[5],...await readJson(request)}));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'l2-executions' && segments.length === 7) {
+        const args={avatarId:segments[3],executionId:segments[5],...await readJson(request)};
+        if(segments[6]==='approve')return json(response,201,await avatarService.approveL2Generation(args));
+        if(segments[6]==='generate')return json(response,202,await avatarService.generateL2Candidates(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-candidates' && segments.length === 7) {
+        const args = { avatarId: segments[3], candidateId: segments[5], ...await readJson(request) };
+        if (segments[6] === 'qa') return json(response, 201, await avatarService.runPassportQa(args));
+        if (segments[6] === 'review') return json(response, 201, await avatarService.reviewPassportCandidate(args));
+        if (segments[6] === 'certify') return json(response, 201, await avatarService.certifyPassportCandidate(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-generation-plans' && segments[6] === 'preflight'
+        && segments.length === 7) {
+        return json(response, 201, await avatarService.preflightPassportGeneration({ avatarId: segments[3],
+          generationSpecId: segments[5], ...await readJson(request) }));
+      }
+      if (avatarService && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-executions' && segments.length === 6
+        && request.method === 'GET') {
+        return json(response, 200, await avatarService.passportExecution({ id: segments[5], avatarId: segments[3],
+          workspaceId: url.searchParams.get('workspaceId'), brandId: url.searchParams.get('brandId'),
+          vertical: url.searchParams.get('vertical'), identityVersionId: url.searchParams.get('identityVersionId') }));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passport-executions' && segments.length === 7) {
+        const args = { avatarId: segments[3], executionId: segments[5], ...await readJson(request) };
+        if (segments[6] === 'approve') return json(response, 201, await avatarService.approvePassportGeneration(args));
+        if (segments[6] === 'generate') return json(response, 202, await avatarService.generatePassportCandidates(args));
+        if (segments[6] === 'cancel') return json(response, 201, await avatarService.cancelPassportExecution(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'passports' && segments[6] === 'certify' && segments.length === 7) {
+        return json(response, 201, await avatarService.certifyPassport({ avatarId: segments[3], passportId: segments[5],
+          ...await readJson(request) }));
+      }
+      if (avatarService && request.method === 'POST' && url.pathname === '/api/avatar-studio/test-content/plan') {
+        return json(response, 201, await avatarService.compileTestPlan(await readJson(request)));
+      }
       if (creativeService && request.method === 'GET' && url.pathname === '/api/v2.10/creative-drafts') {
         return json(response, 200, await creativeService.listDrafts({ brandId: url.searchParams.get('brandId'),
           limit: url.searchParams.get('limit') || 20 }));
@@ -199,4 +333,4 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
   });
 }
 
-module.exports = { createControlServer, readJson, safeErrorDetails, BODY_LIMIT };
+module.exports = { createControlServer, readJson, safeErrorDetails, ASSET_BODY_LIMIT, BODY_LIMIT };

@@ -1,0 +1,142 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { api } from './api';
+import { ExistingIdentitySourceManager, IdentityCoverage, sourcePreviewUrl, sourceViewpoint } from './IdentitySourceTools';
+
+function Badge({ value }) { return <span className={`avatar-badge avatar-${String(value || '').toLowerCase()}`}>{String(value || 'NOT STARTED').replaceAll('_',' ')}</span>; }
+function ErrorPanel({ error }) { return error ? <div className="error-panel"><strong>{error.code}</strong><p>{error.message}</p></div> : null; }
+function classified(text) { return Object.fromEntries(String(text || '').split(',').map((item) => item.trim()).filter(Boolean).map((item) => {
+  const [key,...rest] = item.split('='); return [key.trim(),rest.join('=').trim() || 'explicit operator classification']; })); }
+async function filePayload(file) { return new Promise((resolve,reject) => { const reader = new FileReader(); reader.onerror=reject;
+  reader.onload=() => resolve({ name:file.name,mimeType:file.type,contentBase64:String(reader.result).split(',')[1],capturedAt:new Date().toISOString() }); reader.readAsDataURL(file); }); }
+
+const REJECTION_REASONS = ['PROFILE_DRIFT','NOSE_CHANGED','JAW_CHANGED','CHIN_CHANGED','AGE_CHANGED','HAIR_CHANGED',
+  'HAIRLINE_CHANGED','FACE_CHANGED','ACCESSORY_CONTAMINATION','WARDROBE_CONTAMINATION','BACKGROUND_ERROR','LIGHTING_ERROR','IMAGE_QUALITY','OTHER'];
+const EXECUTED_STATUSES = new Set(['GENERATED','PARTIAL_SUCCESS','FAILED']);
+
+export function approvalDisplay(execution) {
+  if (!execution) return 'REQUIRED';
+  const recorded = execution.approvalRecorded || execution.approvalApprovedAt || execution.approval?.approvedAt;
+  if (!recorded) return 'REQUIRED';
+  return EXECUTED_STATUSES.has(execution.status) ? 'RECORDED · EXECUTED' : 'RECORDED';
+}
+
+export function AttemptDiagnostics({ attempt }) {
+  const gate0 = attempt?.responseMetadata?.gate0;
+  return <article className="passport-attempt-diagnostic">
+    <strong>Candidate {attempt.candidateOrdinal}</strong>
+    <span>Status: {attempt.latestStatus || 'UNKNOWN'}</span>
+    <span>Failure classification: {attempt.failureClassification || 'NONE'}</span>
+    <span>Safe error: {attempt.safeErrorMessage || 'None recorded'}</span>
+    <span>Gate 0 status: {gate0?.status || 'NOT APPLICABLE'}</span>
+    <span>Gate 0 findings: {(gate0?.findingCodes || []).join(', ') || 'NONE'}</span>
+    <span>May have spent: {attempt.mayHaveSpent ? 'YES' : 'NO'}</span>
+    <span>Provider request ID: {attempt.providerRequestId || 'UNAVAILABLE'}</span>
+  </article>;
+}
+
+function SourceEvidence({ sources, brandId, avatarId }) {
+  if (!sources.length) return <strong className="no-source-evidence">NO VERIFIED SOURCE VIEW AVAILABLE</strong>;
+  return <div className="comparison-evidence">{sources.map((source) => {
+    const url=sourcePreviewUrl(source,brandId,avatarId);
+    return <a href={url || '#'} target="_blank" rel="noreferrer" key={source.id}>{url?<img src={url} alt={`${sourceViewpoint(source)} source evidence`}/>:null}<small>{sourceViewpoint(source).replaceAll('_',' ')}</small></a>;
+  })}</div>;
+}
+
+function GuidedComparison({ candidate,onDone,sources,brandId,avatarId }) {
+  const frontal=sources.filter((source)=>sourceViewpoint(source)==='FRONTAL');
+  const threeQuarter=sources.filter((source)=>['THREE_QUARTER_LEFT','THREE_QUARTER_RIGHT'].includes(sourceViewpoint(source)));
+  const profile=sources.filter((source)=>['PROFILE_LEFT','PROFILE_RIGHT'].includes(sourceViewpoint(source)));
+  const [checks,setChecks] = useState({ frontal:false,threeQuarter:false,profile:false,allThree:false,confirmed:false });
+  const change = (key) => setChecks((current) => ({ ...current,[key]:!current[key] }));
+  const allComparable=checks.frontal&&checks.threeQuarter&&checks.profile;
+  return <section className="passport-comparison"><header><Badge value="HUMAN COMPARISON" /><h3>Candidate comparison · uncertainty means reject or add evidence</h3></header>
+    <p>Compare generated views against real, Gate 0 PASS source evidence. Missing angle evidence cannot be certified by assumption.</p>
+    <div className="passport-guided-grid"><article><strong>1 · FRONTAL</strong><p>Eyes, nose, jaw, age, hairline, skin and face proportions match the source identity.</p><SourceEvidence sources={frontal} brandId={brandId} avatarId={avatarId}/><label><input type="checkbox" disabled={!frontal.length} checked={checks.frontal} onChange={() => change('frontal')} />Clearly the source identity</label></article>
+      <article><strong>2 · 45°</strong><p>Nose, eye structure, cheek/jaw, age and face width still belong to the same person.</p><SourceEvidence sources={threeQuarter} brandId={brandId} avatarId={avatarId}/><label><input type="checkbox" disabled={!threeQuarter.length} checked={checks.threeQuarter} onChange={() => change('threeQuarter')} />Clearly the same person</label></article>
+      <article className="profile-critical"><strong>3 · PROFILE · CRITICAL</strong><p>Nose silhouette, forehead, lips, chin, jaw, ear, hairline and apparent age cannot be mistaken for another person.</p><SourceEvidence sources={profile} brandId={brandId} avatarId={avatarId}/><label><input type="checkbox" disabled={!profile.length} checked={checks.profile} onChange={() => change('profile')} />Profile cannot be mistaken for another human</label></article>
+      <article><strong>4 · ALL THREE</strong><p>No panel looks like another human. Natural asymmetry and apparent age are preserved.</p><label><input type="checkbox" disabled={!allComparable} checked={checks.allThree} onChange={() => change('allThree')} />All three are one identity</label></article></div>
+    <label className="passport-confirm"><input type="checkbox" disabled={!checks.allThree} checked={checks.confirmed} onChange={() => change('confirmed')} />I explicitly certify this exact immutable candidate and acknowledge its recorded QA warnings.</label>
+    <button className="primary" disabled={!Object.values(checks).every(Boolean)} onClick={() => onDone(checks)}>HUMAN-CERTIFY THIS PASSPORT</button>
+    <a className="secondary passport-full" href={candidate.previewUrl} target="_blank" rel="noreferrer">VIEW FULL RESOLUTION</a></section>;
+}
+
+function eligibleIdentityImages(value,brandId) {
+  return (value?.sources||[]).filter((source)=>source.gate0Status==='PASS'&&source.brandId===brandId&&source.sourceType==='IMAGE'
+    &&source.roles?.some((role)=>['IDENTITY','PASSPORT_SOURCE'].includes(role)));
+}
+
+export function PassportLab({ brands }) {
+  const [brandId,setBrandId]=useState(''); const [avatars,setAvatars]=useState([]); const [avatarId,setAvatarId]=useState('');
+  const [avatar,setAvatar]=useState(null); const [plan,setPlan]=useState(null); const [error,setError]=useState(null); const [busy,setBusy]=useState(false);
+  const [sourceIds,setSourceIds]=useState([]); const [candidateCount,setCandidateCount]=useState(4); const [compareId,setCompareId]=useState(null);
+  const [provider,setProvider]=useState('openai'); const [model,setModel]=useState('gpt-image-2'); const [catalogModels,setCatalogModels]=useState([]);
+  const [execution,setExecution]=useState(null); const [budget,setBudget]=useState('5.00'); const [executionCandidateCount,setExecutionCandidateCount]=useState(1);
+  const [readiness,setReadiness]=useState(null);
+  const [rejectReasons,setRejectReasons]=useState({}); const [repairDelta,setRepairDelta]=useState('');
+  const [lock,setLock]=useState({ permanent:'facialStructure=preserve, apparentAge=preserve, nose=preserve, jaw=preserve, hairline=preserve',
+    temporary:'hat=exclude, jacket=exclude, wardrobe=exclude, background=exclude, lighting=exclude',uncertain:'glasses=operator decision',notes:'' });
+  async function load(id=avatarId,{resetSources=false,preserveHistoricalState=true}={}) { if (!id || !brandId) return; const value=await api(`/api/avatar-studio/avatars/${id}/passport-lab?brandId=${encodeURIComponent(brandId)}`);
+    setAvatar(value);
+    if (preserveHistoricalState) {
+      const latest=value.passportGenerationSpecs?.[0]; if (latest) setPlan((current) => current?.id===latest.id?current:{ ...latest,id:latest.id,
+        paidProviderCalls:0,externalGenerationCalls:0 });
+      const latestExecution=value.passportExecutions?.[0]; if(latestExecution)setExecution((current)=>current?.executionId===latestExecution.id?current:{...latestExecution,executionId:latestExecution.id});
+    } else {
+      setPlan(null); setExecution(null); setReadiness(null);
+    }
+    const eligible=eligibleIdentityImages(value,brandId).map((source)=>source.id);
+    setSourceIds((current)=>resetSources||!current.length?eligible:current.filter((idValue)=>eligible.includes(idValue))); }
+  useEffect(()=>{ if(!brandId){setAvatars([]);return;} api(`/api/avatar-studio/avatars?brandId=${encodeURIComponent(brandId)}`).then(setAvatars).catch(setError); },[brandId]);
+  useEffect(()=>{api('/api/providers').then((items)=>setCatalogModels(items.find((item)=>item.id==='openai')?.models
+    ?.filter((item)=>item.capabilities?.includes('MULTI_VIEW_IDENTITY_REFERENCE'))||[])).catch(setError)},[]);
+  useEffect(()=>{ load().catch(setError); },[avatarId,brandId]);
+  const currentLock=useMemo(()=>avatar?.identityLocks?.find((item)=>item.identityVersionId===avatar.identityVersionId),[avatar]);
+  const selectedSources=useMemo(()=>eligibleIdentityImages(avatar,brandId).filter((source)=>sourceIds.includes(source.id)),[avatar,brandId,sourceIds]);
+  function invalidatePlan(){setPlan(null);setExecution(null);setReadiness(null);}
+  function toggleSource(sourceId){invalidatePlan();setSourceIds((current)=>current.includes(sourceId)?current.filter((id)=>id!==sourceId):[...current,sourceId]);}
+  async function sourcesChanged(){invalidatePlan();await load(avatarId,{resetSources:true,preserveHistoricalState:false});}
+  async function saveLock(event){event.preventDefault();setBusy(true);setError(null);try{await api(`/api/avatar-studio/avatars/${avatar.id}/identity-locks`,{method:'POST',body:JSON.stringify({brandId,
+    permanent:classified(lock.permanent),temporary:classified(lock.temporary),uncertain:classified(lock.uncertain),notes:lock.notes,humanApproval:true,
+    provenance:{source:'PASSPORT_LAB_CLASSIFICATION_UI'}})});await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function createPlan({repair=false}={}){setBusy(true);setError(null);try{const result=await api(`/api/avatar-studio/avatars/${avatar.id}/passport-generation-plans`,{method:'POST',body:JSON.stringify({brandId,
+    sourceAssetIds:sourceIds,requestedCandidateCount:Number(candidateCount),preferredProvider:provider||null,preferredModel:model||null,originalGenerationSpecId:repair?plan?.id:null,
+    repairDelta:repair?{operatorInstruction:repairDelta}:null})});setPlan(result);await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  function executionScope(){return{workspaceId:avatar.workspaceId,brandId,vertical:avatar.vertical,identityVersionId:avatar.identityVersionId};}
+  async function preflight(){setBusy(true);setError(null);try{const result=await api(`/api/avatar-studio/avatars/${avatar.id}/passport-generation-plans/${plan.id}/preflight`,{method:'POST',body:JSON.stringify({...executionScope(),maximumAllowedCost:Number(budget),executionCandidateCount:Number(executionCandidateCount)})});setExecution(result);await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function approveExecution(){setBusy(true);setError(null);try{const result=await api(`/api/avatar-studio/avatars/${avatar.id}/passport-executions/${execution.executionId}/approve`,{method:'POST',body:JSON.stringify({...executionScope(),explicitConfirmation:true,unknownCostAcknowledged:['UNKNOWN','PARTIAL'].includes(execution.costPlan?.status)})});setExecution({...execution,...result,status:'APPROVED'});}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function checkReadiness(){setBusy(true);setError(null);try{setReadiness(await api(`/api/avatar-studio/avatars/${avatar.id}/smoke-readiness`,{method:'POST',body:JSON.stringify({
+    ...executionScope(),brandId,kind:'PASSPORT',sourceAssetId:sourceIds[0],generationSpecId:plan?.id,executionId:execution?.executionId})}))}catch(cause){setError(cause)}finally{setBusy(false)}}
+  async function generate(){setBusy(true);setError(null);try{const result=await api(`/api/avatar-studio/avatars/${avatar.id}/passport-executions/${execution.executionId}/generate`,{method:'POST',body:JSON.stringify(executionScope())});setExecution({...execution,...result});await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function inspectExecution(){setBusy(true);setError(null);try{const query=new URLSearchParams(executionScope());const result=await api(`/api/avatar-studio/avatars/${avatar.id}/passport-executions/${execution.executionId}?${query}`);setExecution({...execution,...result,executionId:result.id});}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function cancelExecution(){setBusy(true);setError(null);try{const result=await api(`/api/avatar-studio/avatars/${avatar.id}/passport-executions/${execution.executionId}/cancel`,{method:'POST',body:JSON.stringify(executionScope())});setExecution({...execution,...result});await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function upload(file){setBusy(true);setError(null);try{const intake=await api(`/api/avatar-studio/avatars/${avatar.id}/intakes`,{method:'POST',body:JSON.stringify({brandId,sourceType:'UPLOAD',
+    file:await filePayload(file),provenance:{owner:avatar.subjectType==='SYNTHETIC'?'SYNTHETIC':'CONSENTED_SUBJECT',source:'PASSPORT_LAB_MANUAL_UPLOAD'}})});
+    if(intake.asset.effectiveGate0Status!=='PASS') throw {code:'PASSPORT_CANDIDATE_GATE0_REVIEW',message:'Candidate is in Gate 0 REVIEW/BLOCK. Resolve it in the global review queue before use.'};
+    await api(`/api/avatar-studio/avatars/${avatar.id}/intakes/${intake.asset.id}/use`,{method:'POST',body:JSON.stringify({brandId,roles:['PASSPORT_CANDIDATE']})});
+    await api(`/api/avatar-studio/avatars/${avatar.id}/passport-candidates`,{method:'POST',body:JSON.stringify({brandId,generationSpecId:plan.id,intakeId:intake.asset.id})});await load();
+  }catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function qa(candidate,profileDrift=false){setBusy(true);setError(null);try{await api(`/api/avatar-studio/avatars/${avatar.id}/passport-candidates/${candidate.id}/qa`,{method:'POST',body:JSON.stringify({brandId,profileDrift,
+    observations:profileDrift?{PROFILE_IDENTITY:'FAIL'}:{},evidence:{source:'LOCAL_PANEL_GEOMETRY_PLUS_HUMAN_REVIEW'}})});await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function review(candidate,action){setBusy(true);setError(null);try{await api(`/api/avatar-studio/avatars/${avatar.id}/passport-candidates/${candidate.id}/review`,{method:'POST',body:JSON.stringify({brandId,action,
+    rejectionReason:action==='REJECT'?(rejectReasons[candidate.id]||'OTHER'):null,humanNote:`Passport Lab ${action}`,humanApproval:true})});await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  async function certify(candidate,guidedReview){setBusy(true);setError(null);try{await api(`/api/avatar-studio/avatars/${avatar.id}/passport-candidates/${candidate.id}/certify`,{method:'POST',body:JSON.stringify({brandId,
+    guidedReview,warningsAcknowledged:candidate.qaWarnings||[],explicitConfirmation:true,humanApproval:true})});setCompareId(null);await load();}catch(cause){setError(cause);}finally{setBusy(false);}}
+  const candidates=avatar?.passportCandidates||[];
+  const identitySources=(avatar?.sources||[]).filter((source)=>source.roles?.some((role)=>['IDENTITY','PASSPORT_SOURCE'].includes(role)));
+  return <section className="passport-lab"><section className="panel passport-lab-selector"><label>Passport brand scope<select aria-label="Passport brand scope" value={brandId} onChange={(e)=>{setBrandId(e.target.value);setAvatarId('');setAvatar(null);setSourceIds([]);}}><option value="">Choose brand</option>{brands.map((brand)=><option value={brand.id} key={brand.id}>{brand.name}</option>)}</select></label><label>Avatar<select aria-label="Passport avatar" value={avatarId} onChange={(e)=>{setAvatarId(e.target.value);setSourceIds([]);}}><option value="">Choose L0 avatar</option>{avatars.map((item)=><option value={item.id} key={item.id}>{item.internalName} · L{item.currentLevel}</option>)}</select></label></section><ErrorPanel error={error}/>
+    {avatar?<><header className="passport-lab-head"><div><span className="eyebrow">STRICT L0 → L1 HUMAN BOUNDARY</span><h2>{avatar.internalName} · Passport Lab</h2></div><div><Badge value={`L${avatar.currentLevel} ${avatar.currentLevelName}`}/><strong>{avatar.currentLevel===0?'CERTIFIED PASSPORT REQUIRED':'PASSPORT COMPLETE · NEXT L2 BODY + EXPRESSIONS'}</strong></div></header>
+      <section className="panel"><h3>SOURCE IDENTITY</h3><p>Identity version {avatar.version} · {avatar.identityVersionId}. Photos selected below are the exact source set fingerprinted into the next immutable Passport plan.</p>
+        <div className="passport-source-grid">{identitySources.map((source)=>{const image=source.sourceType==='IMAGE';const url=sourcePreviewUrl(source,brandId,avatar.id);return <article className={`passport-source-card ${image?'':'video-source'}`} key={source.id}>{url&&image?<img className="passport-source-thumb" src={url} alt={`${sourceViewpoint(source)} identity source`}/>:null}<label>{image?<input type="checkbox" checked={sourceIds.includes(source.id)} disabled={source.gate0Status!=='PASS'} onChange={()=>toggleSource(source.id)}/>:null}<strong>{image?'Passport source':'Supporting video evidence'}</strong></label><span>{sourceViewpoint(source).replaceAll('_',' ')}</span><small>{source.provenance?.originalFilename||source.artifactId} · {source.artifactId} v{source.artifactVersion}</small><small>Gate 0: {source.gate0Status} · {source.roles.join(' + ')}</small>{!image?<small>Not sent directly to the image provider. Select extracted image frames instead.</small>:null}</article>})}</div>
+        <IdentityCoverage sources={selectedSources}/>
+        <ExistingIdentitySourceManager avatar={avatar} brandId={brandId} onSourcesChanged={sourcesChanged}/>
+      </section>
+      {!currentLock?<form className="panel avatar-form identity-lock" onSubmit={saveLock}><h3>IDENTITY LOCK · VERSIONED &amp; IMMUTABLE</h3><p>Move features by editing the three explicit classifications. Temporary source elements never become identity.</p><label>PERMANENT<textarea aria-label="Identity Lock permanent" value={lock.permanent} onChange={(e)=>setLock({...lock,permanent:e.target.value})}/></label><label>TEMPORARY / NON-IDENTITY<textarea aria-label="Identity Lock temporary" value={lock.temporary} onChange={(e)=>setLock({...lock,temporary:e.target.value})}/></label><label>UNCERTAIN · HUMAN DECISION<textarea aria-label="Identity Lock uncertain" value={lock.uncertain} onChange={(e)=>setLock({...lock,uncertain:e.target.value})}/></label><label>Classification notes<textarea aria-label="Identity Lock notes" value={lock.notes} onChange={(e)=>setLock({...lock,notes:e.target.value})}/></label><button className="primary" disabled={busy}>SAVE IMMUTABLE IDENTITY LOCK</button></form>
+      :<section className="panel identity-lock-summary"><h3>IDENTITY LOCK v{currentLock.version}</h3><div><article><strong>PERMANENT</strong><p>{Object.keys(currentLock.permanentAttributes||{}).join(' · ')}</p></article><article><strong>TEMPORARY</strong><p>{Object.keys(currentLock.temporaryAttributes||{}).join(' · ')||'None'}</p></article><article><strong>UNCERTAIN</strong><p>{Object.keys(currentLock.uncertainAttributes||{}).join(' · ')||'None'}</p></article></div></section>}
+      {currentLock?<section className="panel passport-plan"><h3>PASSPORT GENERATION PLAN</h3><div className="passport-plan-inputs"><label>Requested candidates<input aria-label="Requested passport candidates" type="number" min="3" max="12" value={candidateCount} onChange={(e)=>setCandidateCount(e.target.value)}/></label><label>Preferred provider<select aria-label="Preferred passport provider" value={provider} onChange={(e)=>{setProvider(e.target.value);setModel(e.target.value?'gpt-image-2':'');invalidatePlan();}}><option value="openai">OpenAI · catalog capability</option></select></label><label>Preferred model<select aria-label="Preferred passport model" value={model} disabled={!provider} onChange={(e)=>{setModel(e.target.value);invalidatePlan();}}>{catalogModels.length?catalogModels.map((item)=><option key={item.modelId} value={item.modelId} disabled={!item.selectable}>{item.modelId} · {item.lifecycleStatus||item.supportStatus}{item.replacementModelId?` → ${item.replacementModelId}`:''}</option>):<option value="gpt-image-2">gpt-image-2 · CURRENT</option>}</select></label></div><button className="primary" disabled={busy||!sourceIds.length} onClick={()=>createPlan()}>PLAN PASSPORT GENERATION</button>{plan?<div className="passport-plan-proof"><Badge value="PLAN ONLY"/><span>Source references: {sourceIds.length}</span><span>Provider: {plan.preferredProvider||'UNSELECTED'}</span><span>Model: {plan.preferredModel||'UNSELECTED'}</span><span>Model status: {plan.providerPlan?.modelStatus||catalogModels.find((x)=>x.modelId===plan.preferredModel)?.lifecycleStatus||'UNKNOWN'}</span><span>Capability: MULTI_VIEW_IDENTITY_REFERENCE</span><span>Cost status: {plan.costPlan?.status||'UNKNOWN'}</span><span>Calls per candidate: 1</span><span>Planned future calls: {plan.plannedExternalCallCount??candidateCount}</span><span>Estimated output cost: {plan.costPlan?.estimatedOutputCost??'UNKNOWN'}</span><span>Total cost: {plan.costPlan?.knownTotalCost??'UNKNOWN'}</span><span>Composite reliability: QA + human certification required; multiple references do not guarantee identity preservation.</span><span>Paid calls executed: {plan.paidProviderCalls??0}</span><span>External generation calls executed: {plan.externalGenerationCalls??0}</span><span>Execution authorized: false</span><span>Prompt: {plan.promptVersion}</span></div>:null}</section>:null}
+      {plan?<section className="panel passport-execution"><h3>COST PREFLIGHT · APPROVAL · EXECUTION</h3><p>Plan ≠ approval ≠ generation ≠ certification. Provider outputs remain untrusted until Gate 0 and media validation pass.</p><div className="passport-plan-inputs"><label>Execution candidates<input aria-label="Execution candidates" type="number" min="1" max={plan.requestedCandidateCount||candidateCount} value={executionCandidateCount} onChange={(e)=>setExecutionCandidateCount(e.target.value)}/></label><label>MAXIMUM_ALLOWED_COST · USD<input aria-label="Maximum allowed cost" type="number" min="0" step="0.01" value={budget} onChange={(e)=>setBudget(e.target.value)}/></label></div><div className="candidate-actions"><button disabled={busy||!plan.preferredProvider||!plan.preferredModel} onClick={preflight}>RUN FRESH COST PREFLIGHT</button><button disabled={busy||execution?.status!=='AWAITING_APPROVAL'} onClick={approveExecution}>APPROVE EXECUTION</button><button onClick={checkReadiness} disabled={busy}>ZERO-CALL READINESS CHECK</button><button className="primary" disabled={busy||execution?.status!=='APPROVED'} onClick={generate}>GENERATE PASSPORT CANDIDATES</button><button disabled={busy||!['AWAITING_APPROVAL','APPROVED'].includes(execution?.status)} onClick={cancelExecution}>CANCEL BEFORE EXECUTION</button>{execution?<button disabled={busy} onClick={inspectExecution}>VIEW ATTEMPT / FAILURE</button>:null}{execution?.status==='PARTIAL_SUCCESS'?<button onClick={()=>setExecutionCandidateCount(1)}>PLAN ONE MORE · NEW APPROVAL</button>:null}</div>{readiness?<div className="passport-plan-proof"><Badge value={readiness.ready?'READY':'BLOCKED'}/>{Object.entries(readiness.checks).map(([key,value])=><span key={key}>{key}: {value}</span>)}<span>Provider calls: 0 · external calls: 0</span></div>:null}{execution?<div className="passport-plan-proof"><Badge value={execution.status}/><span>Provider: {execution.provider}</span><span>Model: {execution.model}</span><span>Model status: {catalogModels.find((x)=>x.modelId===execution.model)?.lifecycleStatus||'HISTORICAL'}</span><span>Capability: {execution.capability||'MULTI_VIEW_IDENTITY_REFERENCE'}</span><span>Cost status: {execution.costPlan?.status||'UNKNOWN'}</span><span>Candidates: {execution.candidateCount}</span><span>Calls per candidate: {execution.callsPerCandidate||1}</span><span>Total calls: {execution.totalPlannedCalls||execution.callsPlanned}</span><span>Estimated output cost: {execution.costPlan?.estimatedOutputCost??'UNKNOWN'}</span><span>Known total: {execution.costPlan?.knownTotalCost??'UNKNOWN'}</span><span>Unknown: {(execution.costPlan?.unknownElements||[]).join(', ')||'NONE'}</span><span>Approved maximum: {execution.maximumAllowedCost??budget} USD</span><span>Calls executed: {execution.callsExecuted??execution.attempts?.length??0}</span><span>Success: {execution.successCount??execution.results?.length??0}</span><span>Failures: {execution.failureCount??execution.attempts?.filter((item)=>item.latestStatus==='FAILED').length??0}</span><span>Approval: {approvalDisplay(execution)}</span>{execution.attempts?.map((attempt)=><AttemptDiagnostics key={attempt.id} attempt={attempt}/>)}</div>:null}</section>:null}
+      {plan?<section className="panel passport-upload"><h3>MANUAL CANDIDATE INGESTION</h3><p>Upload one horizontal three-panel composite. It passes immutable Asset Intake and global Gate 0 before registration.</p><label className="drop-zone"><strong>UPLOAD PASSPORT CANDIDATE</strong><input aria-label="Upload passport candidate" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e)=>e.target.files[0]&&upload(e.target.files[0])}/></label></section>:null}
+      <section className="passport-candidate-grid">{candidates.map((candidate,index)=><article className={candidate.certificationState==='CERTIFIED'?'certified':''} key={candidate.id}><header><strong>Candidate {String.fromCharCode(65+index)}</strong><Badge value={candidate.humanReviewState}/></header><img src={candidate.previewUrl} alt={`Passport candidate ${String.fromCharCode(65+index)}`}/><dl><dt>QA</dt><dd><Badge value={candidate.qaStatus||'NOT RUN'}/></dd><dt>Same person</dt><dd>{candidate.samePersonConfidence??'HUMAN REVIEW REQUIRED'}</dd><dt>Provider</dt><dd>{candidate.provider} · {candidate.model}</dd><dt>Prompt/spec</dt><dd>{candidate.promptVersion} · {candidate.specVersion}</dd><dt>Cost</dt><dd>{candidate.costStatus==='KNOWN'?candidate.knownCost:'UNKNOWN'}</dd><dt>Created</dt><dd>{candidate.createdAt}</dd></dl><p>{(candidate.qaBlockingFailures||[]).join(' · ')||(candidate.qaWarnings||[]).join(' · ')}</p><div className="candidate-actions"><a href={candidate.previewUrl} target="_blank" rel="noreferrer">VIEW FULL RESOLUTION</a><button onClick={()=>qa(candidate)}>RUN QA</button><button onClick={()=>qa(candidate,true)}>FLAG PROFILE DRIFT</button><button disabled={!candidate.qaSnapshotId||candidate.qaStatus==='REJECT'} onClick={()=>review(candidate,'KEEP')}>KEEP</button><select aria-label={`Rejection reason ${index+1}`} value={rejectReasons[candidate.id]||'PROFILE_DRIFT'} onChange={(e)=>setRejectReasons({...rejectReasons,[candidate.id]:e.target.value})}>{REJECTION_REASONS.map((reason)=><option key={reason}>{reason}</option>)}</select><button onClick={()=>review(candidate,'REJECT')}>REJECT</button><button disabled={!candidate.qaSnapshotId||candidate.qaStatus==='REJECT'} onClick={()=>setCompareId(candidate.id)}>COMPARE</button></div></article>)}</section>
+      {compareId?<GuidedComparison candidate={candidates.find((item)=>item.id===compareId)} sources={selectedSources} brandId={brandId} avatarId={avatar.id} onDone={(checks)=>certify(candidates.find((item)=>item.id===compareId),checks)}/>:null}
+      {plan?<section className="panel passport-repair"><h3>GENERATE MORE / PLAN REPAIR</h3><textarea aria-label="Passport repair delta" value={repairDelta} onChange={(e)=>setRepairDelta(e.target.value)} placeholder="Preserve original nose silhouette; restore jaw proportions; remove temporary hat…"/><button className="secondary" disabled={!repairDelta||busy} onClick={()=>createPlan({repair:true})}>PLAN MORE · PRESERVE LINEAGE · ZERO CALLS</button></section>:null}
+    </>:null}</section>;
+}

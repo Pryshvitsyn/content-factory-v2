@@ -113,8 +113,19 @@ class ProviderCatalog {
     .map((model) => Object.freeze({ ...clone(model), modelFamily: model.modelFamily || null,
       providerModelId: model.providerModelId || model.modelId, supportStatus: model.supportStatus || 'SUPPORTED',
       configurationStatus: credentialConfigured(this.providers.find((item) => item.id === model.provider), this.env) ? 'CONFIGURED' : 'NOT_CONFIGURED',
-      selectable: (model.supportStatus || 'SUPPORTED') === 'SUPPORTED'
+      selectable: (model.supportStatus || 'SUPPORTED') === 'SUPPORTED' && model.deprecated !== true
         && (model.experimental !== true || this.env.V28_ALLOW_EXPERIMENTAL_MODELS === 'true') })); }
+  preferredModel({ provider = null, capability, profile = null } = {}) {
+    const normalizedCapability = normalizeCapability(capability);
+    const providerIds = provider ? [String(provider).toLowerCase()] : [...new Set(this.providers.map((item) => item.id))];
+    const candidates = providerIds.flatMap((providerId) => this.listModels(providerId))
+      .filter((model) => model.selectable !== false && model.defaultForNewPlans !== false && model.deprecated !== true)
+      .filter((model) => model.capabilities.includes(normalizedCapability))
+      .filter((model) => !profile || Boolean(model.profiles?.[String(profile).toUpperCase()]))
+      .sort((a,b) => Number(b.newPlanPriority || 0) - Number(a.newPlanPriority || 0)
+        || String(a.provider).localeCompare(String(b.provider)) || String(a.modelId).localeCompare(String(b.modelId)));
+    return candidates[0] ? Object.freeze({ ...clone(candidates[0]) }) : null;
+  }
   listProfiles(provider, modelId) {
     const model = this.listModels(provider).find((item) => item.modelId === modelId);
     if (!model) return [];
@@ -177,6 +188,8 @@ class ProviderCatalog {
         ...(durationSeconds ? { durationSeconds } : {}), ...(aspectRatio ? { aspectRatio } : {}) }),
       costStatus: modelDefinition.costStatus || 'UNKNOWN', relativeTier: modelDefinition.relativeTier || profileName,
       supportStatus: modelDefinition.supportStatus || 'SUPPORTED', configurationStatus: 'CONFIGURED',
+      lifecycleStatus: modelDefinition.lifecycleStatus || 'CURRENT', deprecated: modelDefinition.deprecated === true,
+      replacementModelId: modelDefinition.replacementModelId || null,
       capabilities: Object.freeze([...(modelDefinition.capabilities || [])]),
       capabilityMetadata: Object.freeze({ nativeAudio: modelDefinition.capabilities.includes('NATIVE_AUDIO'),
         nativeDialogue: modelDefinition.capabilities.includes('NATIVE_DIALOGUE'),
