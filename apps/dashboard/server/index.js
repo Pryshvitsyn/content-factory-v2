@@ -40,15 +40,21 @@ function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryServ
   return commandService;
 }
 
+function usableSemanticModel(value) {
+  const model = String(value || '').trim();
+  return model && !/^your[_-]/i.test(model) && !/placeholder/i.test(model) ? model : null;
+}
+
 function lockedKeyframeSemanticEnvironment(env = process.env) {
   if (!env.OPENAI_API_KEY) return env;
   return {
     ...env,
-    SEMANTIC_VISUAL_ENABLED: env.SEMANTIC_VISUAL_ENABLED || 'true',
-    SEMANTIC_VISUAL_PROVIDER: env.SEMANTIC_VISUAL_PROVIDER || 'openai',
-    SEMANTIC_VISUAL_MODEL: env.SEMANTIC_VISUAL_MODEL || 'gpt-5.6-luna',
-    // This authorization is scoped to the locked-keyframe service. Its execute endpoint requires
-    // explicit confirmation before any evaluator call, so the global production runtime remains closed.
+    // Locked-keyframe execution already requires an explicit per-stage operator confirmation.
+    // Force semantic evaluation on only inside this scoped runtime, even if the broad/global
+    // semantic feature flag is false in .env.
+    SEMANTIC_VISUAL_ENABLED: 'true',
+    SEMANTIC_VISUAL_PROVIDER: 'openai',
+    SEMANTIC_VISUAL_MODEL: usableSemanticModel(env.SEMANTIC_VISUAL_MODEL) || 'gpt-5.6-luna',
     LIVE_PAID_VISUAL_EVALUATION: 'true',
   };
 }
@@ -109,4 +115,5 @@ if (require.main === module) {
   process.on('SIGTERM', shutdown);
 }
 
-module.exports = { createDashboardRuntime, lockedKeyframeSemanticEnvironment, wireQualityRecoveryShotRegeneration };
+module.exports = { createDashboardRuntime, lockedKeyframeSemanticEnvironment, usableSemanticModel,
+  wireQualityRecoveryShotRegeneration };
