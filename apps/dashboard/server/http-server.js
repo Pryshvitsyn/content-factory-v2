@@ -33,7 +33,7 @@ async function readJson(request, limit = BODY_LIMIT) {
 }
 
 function createControlServer({ service, creativeService = null, lockedKeyframeService = null,
-  qualityDirectorService = null, logger = console } = {}) {
+  lockedKeyframeStateService = null, qualityDirectorService = null, logger = console } = {}) {
   if (!service) throw new Error('service is required');
   return http.createServer(async (request, response) => {
     try {
@@ -50,6 +50,12 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
       if (qualityDirectorService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments[4] === 'quality-director' && segments.length === 5) {
         return json(response, 200, await qualityDirectorService.state({ id: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (lockedKeyframeStateService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
+        && segments[2] === 'creative-drafts' && segments[4] === 'locked-keyframe' && segments[5] === 'state'
+        && segments.length === 6) {
+        return json(response, 200, await lockedKeyframeStateService.state({ draftId: segments[3],
+          brandId: url.searchParams.get('brandId') }));
       }
       if (creativeService && request.method === 'POST' && url.pathname === '/api/v2.10/creative-drafts') {
         return json(response, 201, await creativeService.createDraft(await readJson(request)));
