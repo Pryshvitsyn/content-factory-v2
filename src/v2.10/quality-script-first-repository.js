@@ -2,6 +2,12 @@
 
 const { QualityScriptFirstPostgresRepository } = require('./quality-script-first-postgres-repository');
 
+const SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES = Object.freeze([
+  'KEYFRAME_GEOMETRY_MISMATCH',
+  'KEYFRAME_TYPE_UNSUPPORTED',
+  'KEYFRAME_SIZE_INVALID',
+]);
+
 class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPostgresRepository {
   async recordQualityApproval(args) {
     if (args.decision === 'APPROVED') {
@@ -13,6 +19,25 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
       if (existing.rows[0]) return existing.rows[0];
     }
     return super.recordQualityApproval(args);
+  }
+
+  async claimLockedStage(args) {
+    try {
+      return await super.claimLockedStage(args);
+    } catch (error) {
+      if (error?.code !== 'LOCKED_STAGE_ALREADY_ATTEMPTED') throw error;
+      const retried = await this.db.query(`UPDATE v2_10.locked_stage_attempts
+        SET status='RUNNING',boundary_state='NOT_CROSSED',provider_request_id=NULL,keyframe_id=NULL,
+          result='{}'::jsonb,error='{}'::jsonb,completed_at=NULL,started_at=now()
+        WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4 AND preflight_id=$5
+          AND status='FAILED' AND boundary_state='NOT_CROSSED'
+          AND coalesce(error->>'code','') = ANY($6::text[])
+        RETURNING *`,
+      [args.workflowId, args.workspaceId, args.brandId, args.stage, args.preflightId,
+        SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES]);
+      if (retried.rows[0]) return Object.freeze({ ...retried.rows[0], reused: false, safeLocalRetry: true });
+      throw error;
+    }
   }
 
   async getLockedWorkflow({ draftId, workspaceId, brandId, shotId = null, canonicalIntentFingerprint = null }) {
@@ -31,4 +56,4 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
   }
 }
 
-module.exports = { HardenedQualityScriptFirstPostgresRepository };
+module.exports = { HardenedQualityScriptFirstPostgresRepository, SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES };
