@@ -148,8 +148,20 @@ class AvatarStudioPostgresRepository {
     avatar.expressionCandidates = await this.listL2Candidates({ family:'EXPRESSION',avatarId:id,brandId });
     avatar.mouthCalibrationCandidates = await this.listL2Candidates({ family:'MOUTH',avatarId:id,brandId });
     avatar.passportExecutions = await this.listPassportExecutions({ avatarId: id, brandId });
+    avatar.motionPilotPlans = await this.listMotionPilotPlans({ avatarId: id, brandId });
     return avatar;
   }
+
+  async listMotionPilotPlans({avatarId,brandId}) { return (await this.db.query('SELECT * FROM avatar_studio.motion_pilot_plans WHERE character_id=$1 AND brand_id=$2 ORDER BY created_at DESC,id DESC',[avatarId,brandId])).rows.map(camel); }
+  async storeMotionPilotPlan({avatar,plan,actor}) { const inserted=await this.db.query(`INSERT INTO avatar_studio.motion_pilot_plans
+    (workspace_id,brand_id,vertical_code,character_id,identity_version_id,identity_lock_version_id,passport_certification_event_id,certified_chest_up_certification_id,certified_chest_up_candidate_id,certified_chest_up_intake_id,specification,plan_fingerprint,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(workspace_id,plan_fingerprint) DO NOTHING RETURNING *`,[avatar.workspaceId,plan.brandId,avatar.vertical,avatar.id,plan.identityVersionId,plan.identityLockVersionId,plan.passportCertificationEventId,plan.certifiedChestUpCertificationId,plan.certifiedChestUpCandidateId,plan.certifiedChestUpIntakeId,plan,plan.planFingerprint,actor]);
+    return camel(inserted.rows[0]||(await this.db.query('SELECT * FROM avatar_studio.motion_pilot_plans WHERE workspace_id=$1 AND plan_fingerprint=$2',[avatar.workspaceId,plan.planFingerprint])).rows[0]); }
+  async motionPilotPlan({avatarId,brandId,identityVersionId}) { const row=(await this.db.query('SELECT * FROM avatar_studio.motion_pilot_plans WHERE character_id=$1 AND brand_id=$2 AND identity_version_id=$3 ORDER BY created_at DESC,id DESC LIMIT 1',[avatarId,brandId,identityVersionId])).rows[0]; if(!row)return null;const value=camel(row);return value.specification?{...value.specification,id:value.id}:value; }
+  async createMotionPilotExecution({plan,snapshot,preflightFingerprint,actor}) { return camel((await this.db.query(`INSERT INTO avatar_studio.motion_pilot_executions(workspace_id,brand_id,vertical_code,character_id,identity_version_id,motion_pilot_plan_id,provider,model,capability,cost_plan,maximum_allowed_cost,preflight_snapshot,preflight_fingerprint,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,[plan.workspaceId,plan.brandId,plan.vertical,plan.avatarId,plan.identityVersionId,plan.id,plan.route.provider,plan.route.model,plan.route.capability,plan.costPlan,snapshot.maximumAllowedCost,snapshot,preflightFingerprint,actor])).rows[0]); }
+  async motionPilotExecution({id,workspaceId,brandId,vertical,avatarId,identityVersionId}) { const row=(await this.db.query(`SELECT e.*,a.id AS approval_id FROM avatar_studio.motion_pilot_executions e LEFT JOIN avatar_studio.motion_pilot_execution_approvals a ON a.execution_id=e.id WHERE e.id=$1 AND e.workspace_id=$2 AND e.brand_id=$3 AND e.vertical_code=$4 AND e.character_id=$5 AND e.identity_version_id=$6`,[id,workspaceId,brandId,vertical,avatarId,identityVersionId])).rows[0];if(!row)return null;const out=camel(row);out.approval=out.approvalId?{id:out.approvalId}:null;out.attempts=(await this.db.query('SELECT * FROM avatar_studio.motion_pilot_attempts WHERE execution_id=$1',[id])).rows.map(camel);return out; }
+  async approveMotionPilotExecution({execution,actor}) { return camel((await this.db.query('INSERT INTO avatar_studio.motion_pilot_execution_approvals(execution_id,preflight_fingerprint,approved_by) VALUES($1,$2,$3) RETURNING *',[execution.id,execution.preflightFingerprint,actor])).rows[0]); }
 
   async saveLevelState({ avatarId, workspaceId, state }) {
     await this.db.query(`UPDATE avatar_studio.level_states SET current_level=$3,level_name=$4,completed_requirements=$5,

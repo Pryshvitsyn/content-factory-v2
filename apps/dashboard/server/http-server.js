@@ -115,7 +115,18 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (segments[4] === 'l2-generation-plans') return json(response,201,await avatarService.planL2Reference(args));
         if (segments[4] === 'l2-candidates') return json(response,201,await avatarService.uploadL2Candidate(args));
         if (segments[4] === 'l2-certification') return json(response,201,await avatarService.certifyL2Pack(args));
+        if (segments[4] === 'motion-pilot-plans') return json(response,201,await avatarService.planMotionPilot(args));
         if (segments[4] === 'level-assets') return json(response, 201, await avatarService.addLevelAsset(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'motion-pilot-plans' && segments[6] === 'preflight' && segments.length === 7) {
+        return json(response,201,await avatarService.preflightMotionPilot({avatarId:segments[3],...await readJson(request)}));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'motion-pilot-executions' && segments.length === 7) {
+        const args={avatarId:segments[3],executionId:segments[5],...await readJson(request)};
+        if(segments[6]==='approve')return json(response,201,await avatarService.approveMotionPilot(args));
+        if(segments[6]==='generate')return json(response,202,await avatarService.generateMotionPilot(args));
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'l2-readiness' && segments.length === 5) {

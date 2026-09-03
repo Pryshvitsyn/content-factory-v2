@@ -23,11 +23,11 @@ function approval(value) {
 }
 
 class AvatarStudioService {
-  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null,
+  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null, motionPilotService = null,
     actor = 'local-operator', env = process.env } = {}) {
     if (!repository) throw new Error('AvatarStudioService requires repository');
     this.repository = repository; this.assetIntakeService = assetIntakeService; this.providerCatalog = providerCatalog;
-    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.actor = actor; this.env = env;
+    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.motionPilotService = motionPilotService; this.actor = actor; this.env = env;
   }
 
   async verticals() { return this.repository.verticals(); }
@@ -232,6 +232,11 @@ class AvatarStudioService {
   async preflightL2Generation(input={}) { return this.requireL2().preflight(input); }
   async approveL2Generation(input={}) { return this.requireL2().approve(input); }
   async generateL2Candidates(input={}) { return this.requireL2().generate(input); }
+  requireMotionPilot() { if (!this.motionPilotService) throw new AvatarStudioError(503,'MOTION_PILOT_SERVICE_UNAVAILABLE','Avatar Motion Pilot is not configured'); return this.motionPilotService; }
+  async planMotionPilot(input={}) { return this.requireMotionPilot().plan(input); }
+  async preflightMotionPilot(input={}) { return this.requireMotionPilot().preflight(input); }
+  async approveMotionPilot(input={}) { return this.requireMotionPilot().approve(input); }
+  async generateMotionPilot(input={}) { return this.requireMotionPilot().generate(input); }
 
   async planPassportGeneration({ avatarId, brandId, sourceAssetIds, requestedCandidateCount = 4,
     preferredProvider = null, preferredModel = null, originalGenerationSpecId = null, repairDelta = null } = {}) {
