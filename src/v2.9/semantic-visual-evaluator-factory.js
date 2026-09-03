@@ -39,12 +39,13 @@ function createSemanticVisualEvaluatorAdapter({ env = process.env, fetchImpl = g
     reason: `Semantic visual evaluator configuration is invalid: ${errors.join(', ')}.`, errors,
     status: 'INVALID_CONFIGURATION' });
   const authorized = env.LIVE_PAID_VISUAL_EVALUATION === 'true';
-  if (!authorized) return unavailable({ provider, model,
-    reasonCode: REASON_CODES.SEMANTIC_VISUAL_PAID_GATE_REQUIRED,
-    reason: 'Semantic visual QA is configured, but LIVE_PAID_VISUAL_EVALUATION is not enabled.',
-    errors: ['LIVE_PAID_VISUAL_EVALUATION_FALSE'], status: 'PAID_GATE_CLOSED' });
-  return new OpenAISemanticVisualEvaluatorAdapter({ apiKey: env.OPENAI_API_KEY, model,
-    paidExecutionAuthorized: true, fetchImpl, timeoutMs: timeout.value, maxRetries: retries.value, sleep });
+  const adapter = new OpenAISemanticVisualEvaluatorAdapter({ apiKey: env.OPENAI_API_KEY, model,
+    paidExecutionAuthorized: authorized, fetchImpl, timeoutMs: timeout.value, maxRetries: retries.value, sleep });
+  if (!authorized) {
+    adapter.reasonCode = REASON_CODES.SEMANTIC_VISUAL_PAID_GATE_REQUIRED;
+    adapter.reason = 'Semantic visual QA is configured, but LIVE_PAID_VISUAL_EVALUATION is not enabled.';
+  }
+  return adapter;
 }
 
 module.exports = { createSemanticVisualEvaluatorAdapter, integerSetting };
