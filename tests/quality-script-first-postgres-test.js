@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { Pool } = require('pg');
-const { QualityScriptFirstPostgresRepository } = require('../src/v2.10/quality-script-first-postgres-repository');
+const { HardenedQualityScriptFirstPostgresRepository } = require('../src/v2.10/quality-script-first-repository');
 const { buildScriptScaffold, buildStoryboardScaffold, validateScript, validateStoryboard } = require('../src/v2.10/quality-script-first-contract');
 const { canonicalCreativeBrief, fingerprint } = require('../src/v2.10/creative-contract');
 
@@ -43,27 +43,34 @@ async function main() {
   try {
     await db.query('DROP SCHEMA IF EXISTS v2_10 CASCADE; DROP SCHEMA IF EXISTS v2_2 CASCADE; DROP SCHEMA IF EXISTS v2_1 CASCADE; DROP TABLE IF EXISTS public.workspaces CASCADE');
     await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE workspaces(id uuid PRIMARY KEY,name text NOT NULL); CREATE SCHEMA v2_2; CREATE TABLE v2_2.brands(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES workspaces(id),name text NOT NULL); CREATE SCHEMA v2_1; CREATE TABLE v2_1.productions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),workspace_id uuid NOT NULL REFERENCES workspaces(id),brand_id uuid NOT NULL REFERENCES v2_2.brands(id))');
-    await db.query("INSERT INTO workspaces VALUES($1,'one'); INSERT INTO v2_2.brands VALUES($2,$1,'brand')", [W1, B1]);
+    await db.query("INSERT INTO workspaces VALUES($1,'one')", [W1]);
+    await db.query("INSERT INTO v2_2.brands VALUES($1,$2,'brand')", [B1, W1]);
     await apply('migrations/20260829_v2_10_creative_production.sql');
     await apply('migrations/20260829_v2_10_completion.sql');
     await apply('migrations/20260901_locked_keyframe_production.sql');
     await apply('migrations/20260903_quality_script_first.sql');
 
-    const repository = new QualityScriptFirstPostgresRepository({ db });
+    const repository = new HardenedQualityScriptFirstPostgresRepository({ db });
     const brief = creativeBrief();
     const draft = await repository.createDraft({ workspaceId: W1, brandId: B1, brief,
       validation: { status: 'PASS' }, actor: 'operator' });
 
     const script = buildScriptScaffold(brief);
     const scriptValidation = validateScript(script, brief);
+    assert.equal(scriptValidation.status, 'PASS');
     const scriptRow = await repository.saveQualityScriptRevision({ draftId: draft.id, workspaceId: W1, brandId: B1,
       script, validation: scriptValidation, actor: 'operator' });
-    await repository.recordQualityApproval({ draftId: draft.id, workspaceId: W1, brandId: B1, stage: 'SCRIPT',
+    const scriptApproval = await repository.recordQualityApproval({ draftId: draft.id, workspaceId: W1, brandId: B1, stage: 'SCRIPT',
       subjectType: 'SCRIPT_REVISION', subjectId: scriptRow.id, subjectFingerprint: scriptRow.fingerprint,
       decision: 'APPROVED', actor: 'operator' });
+    const duplicateScriptApproval = await repository.recordQualityApproval({ draftId: draft.id, workspaceId: W1, brandId: B1, stage: 'SCRIPT',
+      subjectType: 'SCRIPT_REVISION', subjectId: scriptRow.id, subjectFingerprint: scriptRow.fingerprint,
+      decision: 'APPROVED', actor: 'operator' });
+    assert.equal(duplicateScriptApproval.id, scriptApproval.id, 'exact repeated approval is idempotent');
 
     const storyboard = buildStoryboardScaffold(brief, script);
     const storyboardValidation = validateStoryboard(storyboard, brief, script);
+    assert.equal(storyboardValidation.status, 'PASS');
     const storyboardRow = await repository.saveQualityStoryboardRevision({ draftId: draft.id, workspaceId: W1, brandId: B1,
       scriptRevisionId: scriptRow.id, storyboard, validation: storyboardValidation, actor: 'operator' });
     await repository.recordQualityApproval({ draftId: draft.id, workspaceId: W1, brandId: B1, stage: 'STORYBOARD',
@@ -79,6 +86,8 @@ async function main() {
     const workflow2 = await repository.ensureLockedWorkflow({ draftId: draft.id, workspaceId: W1, brandId: B1,
       shotId: 'shot-1', assetId: 'video-1', canonicalIntentFingerprint: 'intent-two', actor: 'operator' });
     assert.notEqual(workflow1.id, workflow2.id, 'new approved creative intent receives a new immutable locked workflow');
+    assert.equal((await repository.getLockedWorkflow({ draftId: draft.id, workspaceId: W1, brandId: B1,
+      canonicalIntentFingerprint: 'intent-two' })).id, workflow2.id, 'workflow resolution can target exact creative intent');
 
     await repository.recordQualityApproval({ draftId: draft.id, workspaceId: W1, brandId: B1, stage: 'LOOK',
       subjectType: 'KEYFRAME', subjectId: workflow2.id, subjectFingerprint: fingerprint({ look: workflow2.id }),
@@ -105,7 +114,8 @@ async function main() {
     const continuationBeforeApproval = await repository.markLockedContinuationStarted({ draftId: draft.id, workspaceId: W1, brandId: B1,
       productionId: workflow2.production_id });
     assert.equal(continuationBeforeApproval, null, 'continuation cannot start while pilot waits for human review');
-    const unchanged = await repository.getLockedWorkflow({ draftId: draft.id, workspaceId: W1, brandId: B1, shotId: 'shot-1' });
+    const unchanged = await repository.getLockedWorkflow({ draftId: draft.id, workspaceId: W1, brandId: B1,
+      canonicalIntentFingerprint: 'intent-two' });
     assert.equal(unchanged.state, 'FIRST_VIDEO_REVIEW');
 
     const pilotAttempt = await repository.getLatestLockedStageAttempt({ workflowId: workflow2.id, workspaceId: W1, brandId: B1, stage: 'FIRST_VIDEO' });
