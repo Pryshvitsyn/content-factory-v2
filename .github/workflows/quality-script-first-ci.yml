@@ -1,0 +1,106 @@
+name: QUALITY Script-First Director CI
+
+on:
+  pull_request:
+  push:
+    branches: [codex/quality-script-first]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-script-first-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LIVE_PAID_GENERATION: "false"
+  PAID_PROVIDER_CALLS: "0"
+  EXTERNAL_GENERATION_CALLS: "0"
+
+jobs:
+  director-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Syntax check new QUALITY modules
+        run: |
+          node --check src/v2.10/quality-script-first-contract.js
+          node --check src/v2.10/quality-script-first-service.js
+          node --check src/v2.10/quality-script-first-service-hardened.js
+          node --check src/v2.10/quality-script-first-postgres-repository.js
+          node --check src/v2.10/quality-script-first-repository.js
+          node --check src/v2.10/quality-creative-production-service.js
+          node --check src/v2.10/quality-locked-keyframe-service.js
+          node --check src/v2.10/quality-locked-keyframe-service-hardened.js
+          node --check apps/dashboard/server/http-server.js
+          node --check apps/dashboard/server/index.js
+      - name: Script-first director contract
+        run: node tests/quality-script-first-test.js
+      - name: Locked keyframe regression
+        run: npm run test:locked-keyframe
+      - name: V2.10 creative production regression
+        run: npm run test:v2.10
+      - name: Recovery and continuity regressions
+        run: |
+          npm run test:v2.10.1
+          npm run test:v2.10.2
+          npm run test:v2.10.3
+          npm run test:v2.10.4.1
+      - name: Universal media/provider regression
+        run: |
+          npm run test:v2.9.2
+          npm run test:v2.8
+      - name: Real FFmpeg renderer regression
+        run: node tests/v2.1-ffmpeg-master-renderer-test.js
+      - name: Dashboard production build
+        run: npm run dashboard:build
+      - name: Paid generation remains disabled
+        run: |
+          test "$LIVE_PAID_GENERATION" = "false"
+          test "$PAID_PROVIDER_CALLS" = "0"
+          test "$EXTERNAL_GENERATION_CALLS" = "0"
+
+  director-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: content_factory_quality_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: content_factory_quality_test
+      CONTENT_FACTORY_TEST_DATABASE: "1"
+      LIVE_PAID_GENERATION: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: QUALITY script-first PostgreSQL certification
+        run: node tests/quality-script-first-postgres-test.js
+      - name: Locked-keyframe PostgreSQL regression on isolated DB
+        run: |
+          createdb --maintenance-db=postgres locked_keyframe_quality_regression
+          PGDATABASE=locked_keyframe_quality_regression CONTENT_FACTORY_TEST_DATABASE=1 npm run test:locked-keyframe:postgres
