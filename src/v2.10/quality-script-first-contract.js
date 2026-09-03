@@ -162,6 +162,8 @@ function canonicalShotContract(raw = {}, index = 0, legacy = {}) {
     transitionToNext: TRANSITION_POLICIES.includes(transitionToNext) ? transitionToNext : 'SAME_SCENE',
     generationPrompt: text(raw.generationPrompt) || null,
     negativeGuidance: list(raw.negativeGuidance?.length ? raw.negativeGuidance : legacy.negativeGuidance),
+    visualSource: raw.visualSource?.type === 'REGISTERED_RENDERER' && text(raw.visualSource.rendererId)
+      ? freeze({ type: 'REGISTERED_RENDERER', rendererId: text(raw.visualSource.rendererId), fromState: text(raw.visualSource.fromState).toUpperCase() || null, toState: text(raw.visualSource.toState).toUpperCase() || null }) : null,
   });
 }
 

@@ -33,7 +33,7 @@ async function readJson(request, limit = BODY_LIMIT) {
 }
 
 function createControlServer({ service, creativeService = null, lockedKeyframeService = null,
-  qualityDirectorService = null, logger = console } = {}) {
+  qualityDirectorService = null, creativeIngestionService = null, logger = console } = {}) {
   if (!service) throw new Error('service is required');
   return http.createServer(async (request, response) => {
     try {
@@ -42,6 +42,9 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
       if (creativeService && request.method === 'GET' && url.pathname === '/api/v2.10/creative-drafts') {
         return json(response, 200, await creativeService.listDrafts({ brandId: url.searchParams.get('brandId'),
           limit: url.searchParams.get('limit') || 20 }));
+      }
+      if (creativeIngestionService && request.method === 'POST' && url.pathname === '/api/v2.10/creative-ingestions') {
+        return json(response, 201, await creativeIngestionService.ingest(await readJson(request)));
       }
       if (creativeService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments.length === 4) {
@@ -72,9 +75,11 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         const action = segments[5];
         const args = { id: segments[3], ...await readJson(request) };
         if (action === 'script-generate') return json(response, 200, await qualityDirectorService.generateScript(args));
+        if (action === 'script-generate-ai') return json(response, 200, await qualityDirectorService.generateScriptWithAi(args));
         if (action === 'script-save') return json(response, 201, await qualityDirectorService.saveScript(args));
         if (action === 'script-approve') return json(response, 200, await qualityDirectorService.approveScript(args));
         if (action === 'storyboard-generate') return json(response, 200, await qualityDirectorService.generateStoryboard(args));
+        if (action === 'storyboard-direct-ai') return json(response, 200, await qualityDirectorService.directStoryboardWithAi(args));
         if (action === 'storyboard-save') return json(response, 201, await qualityDirectorService.saveStoryboard(args));
         if (action === 'storyboard-approve') return json(response, 200, await qualityDirectorService.approveStoryboard(args));
         if (action === 'pilot-approve') return json(response, 200, await qualityDirectorService.approvePilot(args));

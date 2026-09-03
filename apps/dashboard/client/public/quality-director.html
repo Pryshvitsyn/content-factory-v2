@@ -28,14 +28,14 @@
       <label>CREATIVE CONCEPT<textarea id="sConcept"></textarea></label><label>VISUAL STYLE<textarea id="sStyle"></textarea></label>
     </div>
     <label style="margin-top:12px">TIMELINE · JSON (timed beats)<textarea id="sTimeline" style="min-height:180px"></textarea></label>
-    <div class="actions"><button class="secondary" id="generateScript">GENERATE SCAFFOLD · 0 CALLS</button><button class="secondary" id="saveScript">SAVE SCRIPT REVISION</button><button id="approveScript">APPROVE SCRIPT</button></div>
+    <div class="actions"><button class="secondary" id="generateScript">GENERATE SCAFFOLD · 0 CALLS</button><button class="secondary" id="generateScriptAi">GENERATE WITH AI</button><button class="secondary" id="saveScript">SAVE SCRIPT REVISION</button><button id="approveScript">APPROVE SCRIPT</button></div>
   </section>
 
   <section class="panel" id="storyboardPanel">
     <h2>4 · SHOT PLAN / STORYBOARD <span id="storyboardBadge" class="badge">BLOCKED</span></h2>
     <div class="small">Every shot is START STATE → ACTION → INTENDED END STATE. SAME_SCENE never forces identical composition.</div>
     <div id="shots"></div>
-    <div class="actions"><button class="secondary" id="generateStoryboard">GENERATE SHOT PLAN · 0 CALLS</button><button class="secondary" id="saveStoryboard">SAVE STORYBOARD REVISION</button><button id="approveStoryboard">APPROVE STORYBOARD</button></div>
+    <div class="actions"><button class="secondary" id="generateStoryboard">GENERATE SHOT PLAN · 0 CALLS</button><button class="secondary" id="directStoryboardAi">DIRECT STORYBOARD WITH AI</button><button class="secondary" id="saveStoryboard">SAVE STORYBOARD REVISION</button><button id="approveStoryboard">APPROVE STORYBOARD</button></div>
   </section>
 
   <section class="panel">
@@ -62,9 +62,11 @@ async function loadState(){if(!draftId)return;state=await api(`/api/v2.10/creati
 async function loadDrafts(){const rows=await api(`/api/v2.10/creative-drafts?brandId=${encodeURIComponent(brandId)}`);$('draft').innerHTML='<option value="">Choose draft</option>'+rows.map(r=>`<option value="${r.id}">${esc(r.creative_brief?.title||r.id)} · ${esc(r.status||'DRAFT')} · r${r.revision||1}</option>`).join('')}
 $('brand').addEventListener('change',async e=>{brandId=e.target.value;draftId='';state=null;renderProgress();if(brandId){await loadDrafts();msg('Choose the creative draft to direct. External calls: 0.')}});$('draft').addEventListener('change',async e=>{draftId=e.target.value;if(draftId)await loadState()});
 $('generateScript').onclick=async()=>{try{const r=await post('script-generate');fillScript(r.script);msg('Editable script scaffold generated. External calls: 0. Review every field before saving.')}catch(e){msg(e.message)}};
+$('generateScriptAi').onclick=async()=>{try{const r=await post('script-generate-ai');const best=r.candidates.find(x=>x.id===r.recommendedWinner)||r.candidates[0];fillScript(best.script);msg(`AI produced 3 editable script options; selected ${best.id} for editing. Critic recommendation: ${r.recommendedWinner||'none'}. Human approval remains required.`)}catch(e){msg(e.message)}};
 $('saveScript').onclick=async()=>{try{const r=await post('script-save',{script:collectScript()});fillScript(r.script.content);await loadState();msg(`Script revision ${r.script.revision} saved. Approval required. External calls: 0.`)}catch(e){msg(e.message)}};
 $('approveScript').onclick=async()=>{if(!confirm('APPROVE THIS EXACT SCRIPT REVISION? Downstream creative truth will depend on it.'))return;try{const r=await post('script-approve',{confirmation:true});await loadState();msg(`Script r${r.revision.revision} approved. External calls: 0.`)}catch(e){msg(e.message)}};
 $('generateStoryboard').onclick=async()=>{try{const r=await post('storyboard-generate');storyboard=r.storyboard;renderShots();msg('Editable shot plan generated. Check START → ACTION → END and every transition. External calls: 0.')}catch(e){msg(e.message)}};
+$('directStoryboardAi').onclick=async()=>{try{const r=await post('storyboard-direct-ai');storyboard=r.storyboard;renderShots();msg(`AI storyboard directed. Critic: ${r.criticEvaluation?.recommendation||'review findings before saving'}. Human approval remains required.`)}catch(e){msg(e.message)}};
 $('saveStoryboard').onclick=async()=>{try{const r=await post('storyboard-save',{storyboard:collectStoryboard()});storyboard=r.storyboard.content;renderShots();await loadState();msg(`Storyboard revision ${r.storyboard.revision} saved. Approval required. External calls: 0.`)}catch(e){msg(e.message)}};
 $('approveStoryboard').onclick=async()=>{if(!confirm('APPROVE THIS EXACT STORYBOARD? Changing it later invalidates Look, Pilot and paid preflight.'))return;try{const r=await post('storyboard-approve',{confirmation:true});await loadState();msg(`Storyboard r${r.revision.revision} approved. VISUAL LOCK is now allowed. External calls: 0.`)}catch(e){msg(e.message)}};
 $('approvePilot').onclick=async()=>{if(!state?.workflow?.id||!confirm('APPROVE LOOK & MOTION FOR THIS EXACT PILOT? Only then may remaining production continue.'))return;try{await post('pilot-approve',{workflowId:state.workflow.id,confirmation:true});await loadState();msg('Pilot human-approved. Remaining production is still not automatically started; run a fresh continuation preflight.')}catch(e){msg(e.message)}};

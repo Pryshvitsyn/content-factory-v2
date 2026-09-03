@@ -11,6 +11,7 @@ const {
   validateScript,
   validateStoryboard,
 } = require('./quality-script-first-contract');
+const { ConfiguredDirectorGateway, provenance } = require('./creative-director-gateways');
 
 function publicRevision(row) {
   if (!row) return null;
@@ -27,11 +28,13 @@ function publicRevision(row) {
 }
 
 class QualityScriptFirstService {
-  constructor({ repository, brandRepository, actor = 'local-operator' } = {}) {
+  constructor({ repository, brandRepository, actor = 'local-operator', directorGateway = null, rendererRegistry = null } = {}) {
     if (!repository || !brandRepository) throw new Error('quality script-first repository and brandRepository are required');
     this.repository = repository;
     this.brandRepository = brandRepository;
     this.actor = actor;
+    this.directorGateway = directorGateway || new ConfiguredDirectorGateway();
+    this.rendererRegistry = rendererRegistry;
   }
 
   async scope(brandId) {
@@ -61,6 +64,20 @@ class QualityScriptFirstService {
     const validation = validateScript(script, draft.creative_brief);
     return Object.freeze({ script, validation, externalCalls: 0, editableScaffold: true,
       nextRequiredAction: 'EDIT_AND_SAVE_SCRIPT' });
+  }
+
+  async generateScriptWithAi({ id, brandId, constraints = {} }) {
+    const scope = await this.scope(brandId); const draft = await this.draft(id, scope);
+    const input = { brief: canonicalCreativeBrief(draft.creative_brief), constraints, requestedShotCount: draft.creative_brief.storyboard?.length || null };
+    const inputFingerprint = fingerprint(input);
+    const result = await this.directorGateway.call('SCRIPT_WRITER', input);
+    const candidates = (Array.isArray(result?.candidates) ? result.candidates : []).slice(0, 3).map((candidate, index) => ({ id: candidate.id || `option-${index + 1}`, script: canonicalScript(candidate.script || candidate, draft.creative_brief), validation: validateScript(candidate.script || candidate, draft.creative_brief) }));
+    if (candidates.length !== 3) throw new QualityDirectorError('AI_SCRIPT_CANDIDATES_INVALID', 'AI writer must return exactly three script candidates');
+    const evaluationResult = await this.directorGateway.call('SCRIPT_CRITIC', { input, candidates: candidates.map((candidate) => ({ id: candidate.id, script: candidate.script })) });
+    const evaluations = evaluationResult?.evaluations || {};
+    return Object.freeze({ candidates: candidates.map((candidate) => Object.freeze({ ...candidate, criticEvaluation: evaluations[candidate.id] || null,
+      provenance: provenance({ role: 'SCRIPT_WRITER', route: this.directorGateway.route, inputFingerprint, ...scope, actor: this.actor, candidateId: candidate.id, evaluation: evaluations[candidate.id] || null }) })),
+      recommendedWinner: evaluationResult?.recommendedWinner || null, externalCalls: 2, paidProviderCalls: 0, humanApprovalRequired: true });
   }
 
   async saveScript({ id, brandId, script: raw }) {
@@ -106,6 +123,16 @@ class QualityScriptFirstService {
     const validation = validateStoryboard(storyboard, draft.creative_brief, script);
     return Object.freeze({ storyboard, validation, externalCalls: 0, editableScaffold: true,
       nextRequiredAction: 'EDIT_AND_SAVE_STORYBOARD' });
+  }
+
+  async directStoryboardWithAi({ id, brandId, constraints = {} }) {
+    const scope = await this.scope(brandId); const draft = await this.draft(id, scope); const state = await this.repository.getQualityDirectorState({ draftId: id, ...scope });
+    assertApprovedGate(state, ['SCRIPT']); const input = { brief: canonicalCreativeBrief(draft.creative_brief), script: state.script.revision.content, constraints };
+    const inputFingerprint = fingerprint(input); const result = await this.directorGateway.call('STORYBOARD_DIRECTOR', input);
+    const storyboard = canonicalStoryboard(result?.storyboard || result, draft.creative_brief, state.script.revision.content);
+    const validation = validateStoryboard(storyboard, draft.creative_brief, state.script.revision.content);
+    const critique = await this.directorGateway.call('STORYBOARD_CRITIC', { input, storyboard });
+    return Object.freeze({ storyboard, validation, criticEvaluation: critique, provenance: provenance({ role: 'STORYBOARD_DIRECTOR', route: this.directorGateway.route, inputFingerprint, ...scope, actor: this.actor, evaluation: critique }), externalCalls: 2, paidProviderCalls: 0, humanApprovalRequired: true });
   }
 
   async saveStoryboard({ id, brandId, storyboard: raw }) {
