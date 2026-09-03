@@ -67,7 +67,12 @@ async function main() {
     providerCatalog: {},
     starter: {},
     storage: {},
-    imageInspector: { async inspect() { order.push('inspect'); return { width: 720, height: 1280 }; } },
+    imageInspector: {
+      async inspect() {
+        order.push('inspect');
+        return { width: 720, height: 1280, aspectRatio: 0.5625, orientation: 'PORTRAIT' };
+      },
+    },
     stillEvaluator: {
       configured: true,
       async evaluate() {
