@@ -15,7 +15,7 @@ async function resolveWorkspace(db, explicitWorkspaceId = null) {
       `Workspace '${explicitWorkspaceId}' does not exist`);
     return exact.rows[0].id;
   }
-  const result = await db.query('SELECT id FROM workspaces ORDER BY created_at NULLS LAST,id LIMIT 2');
+  const result = await db.query('SELECT id FROM workspaces ORDER BY id LIMIT 2');
   if (!result.rows.length) throw new CanonicalBrandRegistryError('CANONICAL_BRAND_WORKSPACE_MISSING',
     'No Content Factory workspace exists');
   if (result.rows.length > 1) throw new CanonicalBrandRegistryError('CANONICAL_BRAND_WORKSPACE_REQUIRED',
