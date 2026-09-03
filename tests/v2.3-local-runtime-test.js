@@ -65,7 +65,9 @@ async function main() {
     database: 'n8n', productions: false, brands: false, reviews: false,
     locked_workflows: false, locked_attempts: false, quality_scripts: false,
     quality_storyboards: false, quality_approvals: false,
-  }] }) }), (error) => error.code === 'LOCAL_DASHBOARD_SCHEMA_MISSING' && /content_os/.test(error.message));
+  }] }) }), (error) => error.code === 'LOCAL_DASHBOARD_SCHEMA_MISSING'
+    && /v2_10\.quality_script_revisions/.test(error.message)
+    && /startup applies required additive migrations automatically/.test(error.message));
 
   const dashboardEnv = buildDashboardEnvironment({}, discovered, '/tmp/content-factory-storage', { apiPort: 3101, webPort: 3100 });
   assert.equal(dashboardEnv.DATABASE_URL, discovered.url);
