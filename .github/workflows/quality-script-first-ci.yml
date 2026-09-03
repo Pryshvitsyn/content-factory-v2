@@ -46,6 +46,8 @@ jobs:
           node --check apps/dashboard/server/index.js
       - name: Script-first director contract
         run: node tests/quality-script-first-test.js
+      - name: Safe local locked-stage retry contract
+        run: node tests/locked-stage-local-failure-retry-test.js
       - name: Locked keyframe regression
         run: npm run test:locked-keyframe
       - name: V2.10 creative production regression
