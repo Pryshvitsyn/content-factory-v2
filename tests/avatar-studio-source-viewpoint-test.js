@@ -16,5 +16,9 @@ const latest = { ...source, viewpointClassifications: [profile,frontal] };
 assert.equal(effectiveViewpoint(latest), 'PROFILE_LEFT', 'later append-only classification wins');
 const before = viewpointSnapshot([revised]);
 assert.equal(viewpointSnapshotMatches(before,[revised]), true);
+assert.equal(viewpointSnapshotMatches([{ viewpoint:'FRONTAL',sourceAssetId:'source-a',classificationId:'persisted-but-not-semantic' }],[revised]), true,
+  'persisted JSON property order and classification row IDs cannot make a fresh plan stale');
+assert.equal(viewpointSnapshotMatches(before,[revised]), true, 'repeated freshness checks stay fresh without source changes');
 assert.equal(viewpointSnapshotMatches(before,[latest]), false, 'classification change invalidates Passport planning snapshot');
+assert.equal(viewpointSnapshotMatches(before,[{ ...revised,id:'source-b' }]), false, 'source-set changes invalidate the snapshot');
 console.log('Avatar Studio human source viewpoint classification tests passed; provider calls = 0.');

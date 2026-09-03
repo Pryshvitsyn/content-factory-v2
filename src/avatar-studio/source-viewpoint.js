@@ -8,10 +8,14 @@ function viewpoint(value) {
   return normalized;
 }
 function effectiveViewpoint(source = {}) { return viewpoint(source.viewpointClassifications?.[0]?.viewpoint || source.provenance?.identityViewpoint || source.provenance?.viewpoint || 'UNKNOWN'); }
-function viewpointSnapshot(sources = []) { return Object.freeze(sources.map((source) => Object.freeze({ sourceAssetId: source.id, viewpoint: effectiveViewpoint(source), classificationId: source.viewpointClassifications?.[0]?.id || null }))); }
+function canonicalSnapshot(entries = []) {
+  return Object.freeze(entries.map((entry) => Object.freeze({ sourceAssetId: String(entry.sourceAssetId || entry.id || ''),
+    viewpoint: viewpoint(entry.viewpoint || effectiveViewpoint(entry)) })).sort((left,right) => left.sourceAssetId.localeCompare(right.sourceAssetId)));
+}
+function viewpointSnapshot(sources = []) { return canonicalSnapshot(sources.map((source) => ({ sourceAssetId: source.id, viewpoint: effectiveViewpoint(source) }))); }
 function viewpointSnapshotMatches(snapshot, sources) {
   if (!snapshot?.length) return sources.every((source) => !(source.viewpointClassifications || []).length);
-  return JSON.stringify(snapshot) === JSON.stringify(viewpointSnapshot(sources));
+  return JSON.stringify(canonicalSnapshot(snapshot)) === JSON.stringify(viewpointSnapshot(sources));
 }
 
-module.exports = { IDENTITY_VIEWPOINTS, effectiveViewpoint, viewpoint, viewpointSnapshot, viewpointSnapshotMatches };
+module.exports = { IDENTITY_VIEWPOINTS, canonicalSnapshot, effectiveViewpoint, viewpoint, viewpointSnapshot, viewpointSnapshotMatches };
