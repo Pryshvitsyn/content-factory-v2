@@ -37,6 +37,10 @@ jobs:
         run: npm run test:v2.10
       - name: QUALITY script-first director contract
         run: node tests/quality-script-first-test.js
+      - name: Locked-stage append-only safe retry contract
+        run: node tests/locked-stage-local-failure-retry-test.js
+      - name: QUALITY runtime readiness contract
+        run: node tests/quality-runtime-readiness-test.js
       - name: V2.10.1 quality evidence reconciliation and paid asset recovery
         run: npm run test:v2.10.1
       - name: V2.10.2 reference geometry and bounded source recovery
@@ -116,3 +120,7 @@ jobs:
         run: |
           createdb --maintenance-db=postgres quality_script_first_test
           PGDATABASE=quality_script_first_test CONTENT_FACTORY_TEST_DATABASE=1 node tests/quality-script-first-postgres-test.js
+      - name: Locked-stage append-only retry PostgreSQL certification
+        run: |
+          createdb --maintenance-db=postgres locked_stage_retry_history_v210
+          PGDATABASE=locked_stage_retry_history_v210 CONTENT_FACTORY_TEST_DATABASE=1 node tests/locked-stage-retry-history-postgres-test.js
