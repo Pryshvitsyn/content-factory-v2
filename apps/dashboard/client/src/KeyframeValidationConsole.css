@@ -1,0 +1,104 @@
+.keyframe-validation-console {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 16px;
+  background: rgba(0,0,0,.22);
+}
+
+.keyframe-validation-console[data-status="FAIL"],
+.keyframe-validation-console[data-status="WARN"] {
+  border-color: rgba(255,255,255,.24);
+}
+
+.keyframe-validation-console__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.keyframe-validation-console__head > div {
+  display: grid;
+  gap: 5px;
+}
+
+.keyframe-validation-console__head span,
+.keyframe-validation-console__head small,
+.keyframe-validation-console__meta {
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  opacity: .68;
+}
+
+.keyframe-validation-console__head strong {
+  font-size: 14px;
+  letter-spacing: .04em;
+}
+
+.keyframe-validation-console__block {
+  margin: 12px 0 0;
+  max-width: 780px;
+  line-height: 1.45;
+}
+
+.keyframe-validation-console__checks {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.keyframe-validation-console__checks article {
+  padding: 11px 12px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+}
+
+.keyframe-validation-console__checks article strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  letter-spacing: .04em;
+}
+
+.keyframe-validation-console__checks article p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.keyframe-validation-console__checks article[data-status="PASS"] {
+  opacity: .72;
+}
+
+.keyframe-validation-console__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-top: 14px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.keyframe-validation-console--fallback {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  width: min(540px, calc(100vw - 40px));
+  max-height: 65vh;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .keyframe-validation-console__head {
+    display: grid;
+  }
+
+  .keyframe-validation-console--fallback {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+  }
+}
