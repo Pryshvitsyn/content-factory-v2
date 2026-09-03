@@ -45,8 +45,16 @@ function normalizeKeyframeSelection(raw = {}) {
   if (!KEYFRAME_SOURCE_TYPES.includes(sourceType)) {
     throw new LockedKeyframeError('KEYFRAME_SOURCE_REQUIRED', 'Select AI_GENERATED or OPERATOR_UPLOAD for the keyframe');
   }
-  if (sourceType === 'OPERATOR_UPLOAD') return freeze({ sourceType, provider: 'operator-upload', model: 'uploaded-image',
-    profile: 'UPLOAD', capability: CAPABILITIES.TEXT_TO_IMAGE, resolvedSettings: {} });
+  if (sourceType === 'OPERATOR_UPLOAD') {
+    const rawNonce = raw.uploadPreflightNonce || raw.resolvedSettings?.uploadPreflightNonce || null;
+    const uploadPreflightNonce = rawNonce == null ? null : String(rawNonce).trim();
+    if (uploadPreflightNonce && !/^[a-zA-Z0-9-]{8,128}$/.test(uploadPreflightNonce)) {
+      throw new LockedKeyframeError('KEYFRAME_UPLOAD_PREFLIGHT_ID_INVALID', 'Operator-upload preflight identity is invalid');
+    }
+    return freeze({ sourceType, provider: 'operator-upload', model: 'uploaded-image',
+      profile: 'UPLOAD', capability: CAPABILITIES.TEXT_TO_IMAGE,
+      resolvedSettings: uploadPreflightNonce ? { uploadPreflightNonce } : {} });
+  }
   return freeze({ sourceType, provider: required(raw.provider, 'KEYFRAME_PROVIDER_REQUIRED', 'Keyframe provider is required'),
     model: required(raw.model, 'KEYFRAME_MODEL_REQUIRED', 'Keyframe model is required'),
     profile: String(required(raw.profile, 'KEYFRAME_PROFILE_REQUIRED', 'Keyframe profile is required')).toUpperCase(),
