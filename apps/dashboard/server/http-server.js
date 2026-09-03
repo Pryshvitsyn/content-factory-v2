@@ -32,7 +32,8 @@ async function readJson(request, limit = BODY_LIMIT) {
   catch { throw new ControlError(400, 'INVALID_JSON', 'Request body must be valid JSON'); }
 }
 
-function createControlServer({ service, creativeService = null, lockedKeyframeService = null, logger = console } = {}) {
+function createControlServer({ service, creativeService = null, lockedKeyframeService = null,
+  qualityDirectorService = null, logger = console } = {}) {
   if (!service) throw new Error('service is required');
   return http.createServer(async (request, response) => {
     try {
@@ -45,6 +46,10 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
       if (creativeService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments.length === 4) {
         return json(response, 200, await creativeService.getDraft({ id: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (qualityDirectorService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
+        && segments[2] === 'creative-drafts' && segments[4] === 'quality-director' && segments.length === 5) {
+        return json(response, 200, await qualityDirectorService.state({ id: segments[3], brandId: url.searchParams.get('brandId') }));
       }
       if (creativeService && request.method === 'POST' && url.pathname === '/api/v2.10/creative-drafts') {
         return json(response, 201, await creativeService.createDraft(await readJson(request)));
@@ -61,6 +66,19 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (segments[4] === 'voice-approve') return json(response, 200, await creativeService.approveVoice(args));
         if (segments[4] === 'voice-upload') return json(response, 201, await creativeService.uploadVoice(args));
         if (segments[4] === 'start') return json(response, 202, await creativeService.start(args));
+      }
+      if (qualityDirectorService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'v2.10'
+        && segments[2] === 'creative-drafts' && segments[4] === 'quality-director' && segments.length === 6) {
+        const action = segments[5];
+        const args = { id: segments[3], ...await readJson(request) };
+        if (action === 'script-generate') return json(response, 200, await qualityDirectorService.generateScript(args));
+        if (action === 'script-save') return json(response, 201, await qualityDirectorService.saveScript(args));
+        if (action === 'script-approve') return json(response, 200, await qualityDirectorService.approveScript(args));
+        if (action === 'storyboard-generate') return json(response, 200, await qualityDirectorService.generateStoryboard(args));
+        if (action === 'storyboard-save') return json(response, 201, await qualityDirectorService.saveStoryboard(args));
+        if (action === 'storyboard-approve') return json(response, 200, await qualityDirectorService.approveStoryboard(args));
+        if (action === 'pilot-approve') return json(response, 200, await qualityDirectorService.approvePilot(args));
+        if (action === 'pilot-reject') return json(response, 200, await qualityDirectorService.rejectPilot(args));
       }
       if (lockedKeyframeService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments[4] === 'locked-keyframe' && segments.length === 6) {
