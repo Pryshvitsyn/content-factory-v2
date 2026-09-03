@@ -1,6 +1,7 @@
 'use strict';
 
 const { LockedKeyframeService } = require('./locked-keyframe-service');
+const { buildKeyframeStagePlan, LockedKeyframeError, STAGES } = require('./locked-keyframe-contract');
 const { fingerprint } = require('./creative-contract');
 
 class QualityLockedKeyframeService extends LockedKeyframeService {
@@ -12,11 +13,27 @@ class QualityLockedKeyframeService extends LockedKeyframeService {
 
   async preflightKeyframe(args) {
     await this.requireDirectorGate(args.id, args.brandId, ['SCRIPT', 'STORYBOARD']);
-    return super.preflightKeyframe(args);
+    const { id, brandId, shotId, keyframe = {} } = args;
+    const scope = await this.scope(brandId);
+    const draft = await this.draft(id, scope);
+    const selection = await this.resolveKeyframeSelection(scope, keyframe);
+    const workflow = await this.workflow({ draft, scope, shotId });
+    const plan = buildKeyframeStagePlan({ draft, shotId, selection,
+      semantic: { provider: this.env.SEMANTIC_VISUAL_PROVIDER, model: this.env.SEMANTIC_VISUAL_MODEL } });
+    const stored = await this.repository.saveLockedStagePreflight({ workflowId: workflow.id, ...scope,
+      stage: STAGES.KEYFRAME, draftRevision: draft.revision, plan, actor: this.actor });
+    return Object.freeze({ ...plan, preflightId: stored.id, productionId: workflow.production_id,
+      executionReadiness: this.stillEvaluator?.configured === true ? 'READY' : 'BLOCKED_SEMANTIC_EVALUATOR_NOT_CONFIGURED',
+      semanticEvaluatorConfigured: this.stillEvaluator?.configured === true,
+      providerCallsMade: 0 });
   }
 
   async executeKeyframe(args) {
     await this.requireDirectorGate(args.id, args.brandId, ['SCRIPT', 'STORYBOARD']);
+    if (!this.stillEvaluator || this.stillEvaluator.configured === false) {
+      throw new LockedKeyframeError('SEMANTIC_STILL_EVALUATOR_NOT_CONFIGURED',
+        'Semantic still evaluator must be configured before keyframe execution; no provider calls were made');
+    }
     return super.executeKeyframe(args);
   }
 
