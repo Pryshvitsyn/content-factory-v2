@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const {
   keyframeUploadResolution,
   normalizeUploadedKeyframeArgs,
-} = require('../src/v2.10/quality-locked-keyframe-service-hardened');
+} = require('../src/v2.10/quality-locked-keyframe-service');
 
 async function main() {
   assert.equal(keyframeUploadResolution({ QUALITY_VIDEO_RESOLUTION: '1080p' }), '1080p');
@@ -33,7 +33,7 @@ async function main() {
   const sourceArgs = Object.freeze({
     id: 'draft-1',
     contentBase64: Buffer.from('square-source').toString('base64'),
-    contentType: 'image/png',
+    contentType: 'image/png; charset=binary',
   });
   const normalized = await normalizeUploadedKeyframeArgs(sourceArgs, {
     normalizer: fakeNormalizer,
@@ -65,7 +65,7 @@ async function main() {
   assert.equal(unsupported.normalization, null);
   assert.equal(unsupported.args.contentType, 'application/pdf');
 
-  console.log('Uploaded keyframe automatic 9:16 normalization contract passed.');
+  console.log('Uploaded keyframe automatic 9:16 normalization contract passed at QUALITY engine level.');
 }
 
 main().catch((error) => {
