@@ -9,11 +9,27 @@ ALTER TABLE v2_10.locked_stage_attempts
 CREATE INDEX IF NOT EXISTS locked_stage_attempt_history
   ON v2_10.locked_stage_attempts(workflow_id, stage, preflight_id, started_at DESC, id DESC);
 
--- The existing partial unique index remains authoritative: at most one RUNNING or
--- NEEDS_RECONCILIATION attempt can exist for a workflow/stage at a time.
-CREATE UNIQUE INDEX IF NOT EXISTS locked_stage_one_active_attempt
+-- Keep one authoritative active attempt for every workflow/stage. The sole exclusion
+-- is the historical opening-keyframe bug that marked the provider boundary before
+-- local tier validation. `Unsupported quality tier QUALITY` is thrown by normalizeTier
+-- before OpenAI request construction, so a row with no provider_request_id is proven
+-- pre-request evidence even though the old runtime labeled it NEEDS_RECONCILIATION.
+-- The immutable row remains untouched; a corrected retry is appended beside it.
+DROP INDEX IF EXISTS v2_10.locked_stage_one_active_attempt;
+DROP INDEX IF EXISTS v2_10.locked_stage_one_running_attempt;
+CREATE UNIQUE INDEX locked_stage_one_active_attempt
   ON v2_10.locked_stage_attempts(workflow_id, stage)
-  WHERE status IN ('RUNNING','NEEDS_RECONCILIATION');
+  WHERE status = 'RUNNING'
+     OR (
+       status = 'NEEDS_RECONCILIATION'
+       AND NOT (
+         stage = 'KEYFRAME'
+         AND boundary_state = 'MAY_HAVE_STARTED'
+         AND provider_request_id IS NULL
+         AND error->>'code' = 'KEYFRAME_STAGE_FAILED'
+         AND error->>'message' = 'Unsupported quality tier QUALITY'
+       )
+     );
 
 COMMIT;
 
