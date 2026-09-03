@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { Pool } = require('pg');
 const { syncCanonicalBrands, resolveWorkspace } = require('../src/brand-registry/sync-canonical-brands');
+const { ensureLegacyBrands } = require('../scripts/prepare-local-live-production');
 
 const W1 = '51000000-0000-4000-8000-000000000001';
 const W2 = '51000000-0000-4000-8000-000000000002';
@@ -22,9 +23,10 @@ const db = new Pool(process.env.DATABASE_URL ? { connectionString: process.env.D
     password: process.env.PGPASSWORD || 'postgres', database: process.env.PGDATABASE });
 
 async function createSchema() {
-  await db.query('DROP SCHEMA IF EXISTS v2_2 CASCADE; DROP TABLE IF EXISTS public.workspaces CASCADE');
+  await db.query('DROP SCHEMA IF EXISTS v2_2 CASCADE; DROP TABLE IF EXISTS public.brands CASCADE; DROP TABLE IF EXISTS public.workspaces CASCADE');
   await db.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
   await db.query('CREATE TABLE workspaces(id uuid PRIMARY KEY,name text NOT NULL)');
+  await db.query('CREATE TABLE public.brands(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,name text NOT NULL)');
   await db.query(`CREATE SCHEMA v2_2; CREATE TABLE v2_2.brands(
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -40,6 +42,7 @@ async function main() {
   try {
     await createSchema();
     await db.query("INSERT INTO workspaces(id,name) VALUES($1,'primary')", [W1]);
+    await db.query("INSERT INTO public.brands(id,workspace_id,name) VALUES($1,$2,'Attune')", [ATTUNE_ID, W1]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status,mission,positioning,metadata)
       VALUES($1,$2,'Attune','attune','ACTIVE','preserve mission','preserve positioning',$3::jsonb)`,
     [ATTUNE_ID, W1, JSON.stringify({ historical: true })]);
@@ -61,6 +64,14 @@ async function main() {
     assert.equal(tune.metadata.migratedFromLegacyAlias, 'Attune');
     assert.deepEqual(tune.metadata.aliases, ['Attune']);
 
+    const restartCompatibility = await ensureLegacyBrands(db);
+    assert.equal(restartCompatibility.copied, 0,
+      'local startup accepts the approved Attune → Tune Into Her canonical rename when id/workspace ownership is unchanged');
+
+    await db.query("UPDATE public.brands SET name='Unapproved Rename' WHERE id=$1", [ATTUNE_ID]);
+    await assert.rejects(() => ensureLegacyBrands(db), (error) => error.code === 'LEGACY_BRAND_IDENTITY_CONFLICT');
+    await db.query("UPDATE public.brands SET name='Attune' WHERE id=$1", [ATTUNE_ID]);
+
     const second = await syncCanonicalBrands({ db });
     assert.equal(second.canonicalCount, 8);
     const afterSecond = await db.query('SELECT count(*)::int AS count FROM v2_2.brands WHERE workspace_id=$1', [W1]);
@@ -73,9 +84,9 @@ async function main() {
     const secondWorkspaceCount = await db.query('SELECT count(*)::int AS count FROM v2_2.brands WHERE workspace_id=$1', [W2]);
     assert.equal(secondWorkspaceCount.rows[0].count, 8);
 
-    console.log('Canonical brand registry PostgreSQL migration, legacy identity preservation and idempotency: PASS');
+    console.log('Canonical brand registry PostgreSQL migration, legacy alias restart safety and idempotency: PASS');
   } finally {
-    await db.query('DROP SCHEMA IF EXISTS v2_2 CASCADE; DROP TABLE IF EXISTS public.workspaces CASCADE').catch(() => {});
+    await db.query('DROP SCHEMA IF EXISTS v2_2 CASCADE; DROP TABLE IF EXISTS public.brands CASCADE; DROP TABLE IF EXISTS public.workspaces CASCADE').catch(() => {});
     await db.end();
   }
 }
