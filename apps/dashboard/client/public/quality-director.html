@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Content Factory · QUALITY Director</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;background:#0b0d11;color:#f2f4f7}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#172033 0,transparent 32%),#0b0d11;color:#f2f4f7}main{width:min(1180px,calc(100% - 32px));margin:0 auto;padding:28px 0 80px}a{color:#a9c7ff}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:24px}.eyebrow{font-size:12px;letter-spacing:.16em;color:#8ba6d7}.top h1{font-size:36px;margin:6px 0 8px}.note{color:#9ea8b7;max-width:780px;line-height:1.5}.panel{background:rgba(19,23,31,.92);border:1px solid #2a3140;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 18px 50px rgba(0,0,0,.2)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.progress{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:18px 0}.step{border:1px solid #30394a;border-radius:12px;padding:10px;font-size:12px;color:#9ba7ba}.step b{display:block;color:#fff;margin-bottom:4px}.step.ok{border-color:#456f5e;background:#13231e}.step.wait{border-color:#655c38;background:#282413}.step.block{border-color:#6d3f45;background:#29171a}label{display:block;font-size:12px;letter-spacing:.06em;color:#9aa6b7}input,select,textarea{width:100%;margin-top:6px;border:1px solid #30394a;background:#0e1117;color:#f5f7fa;border-radius:10px;padding:10px 11px;font:inherit}textarea{min-height:88px;resize:vertical}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}button{border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;background:#e8edf7;color:#101217}button.secondary{background:#242b38;color:#edf1f7;border:1px solid #343e50}button.danger{background:#4a2027;color:#ffd9de}button:disabled{opacity:.42;cursor:not-allowed}.status{font-size:13px;padding:10px 12px;border-radius:10px;background:#10141b;border:1px solid #2c3544;margin:12px 0;white-space:pre-wrap}.shot{border-top:1px solid #2b3341;padding-top:18px;margin-top:18px}.shot:first-child{border-top:0;padding-top:0;margin-top:0}.shot h3{margin:0 0 12px}.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#202733;color:#cbd4e2;font-size:11px;margin-left:6px}.small{font-size:12px;color:#8f9bac}.hidden{display:none}@media(max-width:800px){.grid,.grid3,.progress{grid-template-columns:1fr}.top{flex-direction:column}.top h1{font-size:30px}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="top"><div><div class="eyebrow">QUALITY · DIRECT → LOCK → GENERATE</div><h1>Script Director</h1><div class="note">Approve the complete story before any QUALITY image/video generation. This page makes zero media-generation calls.</div></div><a href="/">← Main Dashboard</a></div>
+
+  <section class="panel">
+    <div class="grid"><label>BRAND<select id="brand"><option value="">Choose brand</option></select></label><label>CREATIVE DRAFT<select id="draft"><option value="">Choose draft</option></select></label></div>
+    <div id="progress" class="progress"></div>
+    <div id="message" class="status">Choose a brand and draft. External calls: 0.</div>
+  </section>
+
+  <section class="panel" id="scriptPanel">
+    <h2>3 · SCRIPT <span id="scriptBadge" class="badge">NOT READY</span></h2>
+    <div class="grid">
+      <label>OBJECTIVE<textarea id="sObjective"></textarea></label><label>TARGET AUDIENCE<textarea id="sAudience"></textarea></label>
+      <label>HOOK<textarea id="sHook"></textarea></label><label>CORE MESSAGE<textarea id="sCore"></textarea></label>
+      <label>CTA<textarea id="sCta"></textarea></label><label>TONE<textarea id="sTone"></textarea></label>
+      <label>CREATIVE CONCEPT<textarea id="sConcept"></textarea></label><label>VISUAL STYLE<textarea id="sStyle"></textarea></label>
+    </div>
+    <label style="margin-top:12px">TIMELINE · JSON (timed beats)<textarea id="sTimeline" style="min-height:180px"></textarea></label>
+    <div class="actions"><button class="secondary" id="generateScript">GENERATE SCAFFOLD · 0 CALLS</button><button class="secondary" id="saveScript">SAVE SCRIPT REVISION</button><button id="approveScript">APPROVE SCRIPT</button></div>
+  </section>
+
+  <section class="panel" id="storyboardPanel">
+    <h2>4 · SHOT PLAN / STORYBOARD <span id="storyboardBadge" class="badge">BLOCKED</span></h2>
+    <div class="small">Every shot is START STATE → ACTION → INTENDED END STATE. SAME_SCENE never forces identical composition.</div>
+    <div id="shots"></div>
+    <div class="actions"><button class="secondary" id="generateStoryboard">GENERATE SHOT PLAN · 0 CALLS</button><button class="secondary" id="saveStoryboard">SAVE STORYBOARD REVISION</button><button id="approveStoryboard">APPROVE STORYBOARD</button></div>
+  </section>
+
+  <section class="panel">
+    <h2>5 · LOOK / 6 · PILOT</h2>
+    <div class="grid3"><div><div class="small">LOOK</div><strong id="lookState">BLOCKED</strong></div><div><div class="small">PILOT ENGINE</div><strong id="pilotEngineState">NOT STARTED</strong></div><div><div class="small">PILOT HUMAN APPROVAL</div><strong id="pilotHumanState">BLOCKED</strong></div></div>
+    <p class="note">After Storyboard approval, return to Creative Production to create/approve the immutable opening keyframe and generate exactly one pilot video. If semantic QA passes, production stops here for your decision.</p>
+    <div class="actions"><a href="/"><button class="secondary" type="button">OPEN CREATIVE PRODUCTION</button></a><button id="approvePilot" disabled>APPROVE LOOK & MOTION</button><button id="rejectPilot" class="danger" disabled>REJECT PILOT</button></div>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id);let brandId='',draftId='',state=null,script=null,storyboard=null;
+async function api(path,options={}){const r=await fetch(path,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const body=await r.json().catch(()=>({}));if(!r.ok){const e=body.error||body;throw new Error(`${e.code||'ERROR'}: ${e.message||r.statusText}`)}return body}
+function msg(value){$('message').textContent=value}
+function post(action,payload={}){if(!draftId||!brandId)throw new Error('Choose brand and draft first');return api(`/api/v2.10/creative-drafts/${encodeURIComponent(draftId)}/quality-director/${action}`,{method:'POST',body:JSON.stringify({brandId,...payload})})}
+function approved(x){return x?.approved===true}
+function renderProgress(){const items=[['BRAND',!!brandId],['IDEA',!!draftId],['SCRIPT',approved(state?.script)],['STORYBOARD',approved(state?.storyboard)],['LOOK',approved(state?.look)],['PILOT',approved(state?.pilot)]];$('progress').innerHTML=items.map(([name,ok],i)=>`<div class="step ${ok?'ok':i<2?'wait':'block'}"><b>${name}</b>${ok?'APPROVED / READY':'WAITING'}</div>`).join('');$('scriptBadge').textContent=approved(state?.script)?'APPROVED':state?.script?.revision?'SAVED · APPROVAL REQUIRED':'NOT READY';$('storyboardBadge').textContent=approved(state?.storyboard)?'APPROVED':approved(state?.script)?(state?.storyboard?.revision?'SAVED · APPROVAL REQUIRED':'READY TO DIRECT'):'BLOCKED';$('lookState').textContent=approved(state?.look)?'APPROVED':approved(state?.storyboard)?'READY FOR KEYFRAME':'BLOCKED';$('pilotEngineState').textContent=state?.workflow?.state||'NOT STARTED';$('pilotHumanState').textContent=approved(state?.pilot)?'APPROVED':state?.workflow?.state==='FIRST_VIDEO_REVIEW'?'REVIEW REQUIRED':'BLOCKED';const review=state?.workflow?.state==='FIRST_VIDEO_REVIEW';$('approvePilot').disabled=!review;$('rejectPilot').disabled=!review}
+function fillScript(value){script=value||{};$('sObjective').value=script.objective||'';$('sAudience').value=script.targetAudience||'';$('sHook').value=script.hook||'';$('sCore').value=script.coreMessage||'';$('sCta').value=script.cta||'';$('sTone').value=script.tone||'';$('sConcept').value=script.creativeConcept||'';$('sStyle').value=script.visualStyle||'';$('sTimeline').value=JSON.stringify(script.timeline||[],null,2)}
+function collectScript(){let timeline=[];try{timeline=JSON.parse($('sTimeline').value||'[]')}catch{throw new Error('Timeline must be valid JSON')}return {...(script||{}),objective:$('sObjective').value,targetAudience:$('sAudience').value,hook:$('sHook').value,coreMessage:$('sCore').value,cta:$('sCta').value,tone:$('sTone').value,creativeConcept:$('sConcept').value,visualStyle:$('sStyle').value,timeline}}
+const transitionOptions=['CONTINUOUS','SAME_SCENE','MATCH_CUT','NEW_SCENE','CHARACTER_ONLY'];
+function renderShots(){const shots=storyboard?.shots||[];$('shots').innerHTML=shots.map((shot,i)=>`<article class="shot" data-index="${i}"><h3>SHOT ${i+1} · ${shot.shotId||''}</h3><div class="grid"><label>PURPOSE<textarea data-f="purpose">${esc(shot.purpose)}</textarea></label><label>SUBJECT<textarea data-f="subject">${esc(shot.subject)}</textarea></label><label>START STATE<textarea data-f="startState">${esc(shot.startState)}</textarea></label><label>ACTION<textarea data-f="action">${esc(shot.action)}</textarea></label><label>INTENDED END STATE<textarea data-f="intendedEndState">${esc(shot.intendedEndState)}</textarea></label><label>ENVIRONMENT<textarea data-f="environment">${esc(shot.environment)}</textarea></label><label>CAMERA FRAMING<textarea data-c="framing">${esc(shot.camera?.framing)}</textarea></label><label>CAMERA MOVEMENT<textarea data-c="movement">${esc(shot.camera?.movement)}</textarea></label><label>CAMERA COMPOSITION<textarea data-c="composition">${esc(shot.camera?.composition)}</textarea></label><label>LIGHTING<textarea data-f="lighting">${esc(shot.lighting)}</textarea></label><label>FROM PREVIOUS<select data-f="transitionFromPrevious">${transitionOptions.map(v=>`<option ${v===shot.transitionFromPrevious?'selected':''}>${v}</option>`).join('')}</select></label><label>TO NEXT<select data-f="transitionToNext">${transitionOptions.map(v=>`<option ${v===shot.transitionToNext?'selected':''}>${v}</option>`).join('')}</select></label><label>MUST KEEP · one per line<textarea data-list="mustKeep">${esc((shot.mustKeep||[]).join('\n'))}</textarea></label><label>MAY CHANGE · one per line<textarea data-list="mayChange">${esc((shot.mayChange||[]).join('\n'))}</textarea></label></div></article>`).join('')}
+function esc(v){return String(v||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
+function collectStoryboard(){const next=structuredClone(storyboard||{shots:[]});[...document.querySelectorAll('.shot')].forEach((el,i)=>{const shot=next.shots[i];el.querySelectorAll('[data-f]').forEach(x=>shot[x.dataset.f]=x.value);shot.camera=shot.camera||{};el.querySelectorAll('[data-c]').forEach(x=>shot.camera[x.dataset.c]=x.value);el.querySelectorAll('[data-list]').forEach(x=>shot[x.dataset.list]=x.value.split('\n').map(v=>v.trim()).filter(Boolean))});return next}
+async function loadState(){if(!draftId)return;state=await api(`/api/v2.10/creative-drafts/${encodeURIComponent(draftId)}/quality-director?brandId=${encodeURIComponent(brandId)}`);if(state.script?.revision?.content)fillScript(state.script.revision.content);if(state.storyboard?.revision?.content){storyboard=state.storyboard.revision.content;renderShots()}renderProgress();msg(`Durable state loaded. External calls: 0.`)}
+async function loadDrafts(){const rows=await api(`/api/v2.10/creative-drafts?brandId=${encodeURIComponent(brandId)}`);$('draft').innerHTML='<option value="">Choose draft</option>'+rows.map(r=>`<option value="${r.id}">${esc(r.creative_brief?.title||r.id)} · ${esc(r.status||'DRAFT')} · r${r.revision||1}</option>`).join('')}
+$('brand').addEventListener('change',async e=>{brandId=e.target.value;draftId='';state=null;renderProgress();if(brandId){await loadDrafts();msg('Choose the creative draft to direct. External calls: 0.')}});$('draft').addEventListener('change',async e=>{draftId=e.target.value;if(draftId)await loadState()});
+$('generateScript').onclick=async()=>{try{const r=await post('script-generate');fillScript(r.script);msg('Editable script scaffold generated. External calls: 0. Review every field before saving.')}catch(e){msg(e.message)}};
+$('saveScript').onclick=async()=>{try{const r=await post('script-save',{script:collectScript()});fillScript(r.script.content);await loadState();msg(`Script revision ${r.script.revision} saved. Approval required. External calls: 0.`)}catch(e){msg(e.message)}};
+$('approveScript').onclick=async()=>{if(!confirm('APPROVE THIS EXACT SCRIPT REVISION? Downstream creative truth will depend on it.'))return;try{const r=await post('script-approve',{confirmation:true});await loadState();msg(`Script r${r.revision.revision} approved. External calls: 0.`)}catch(e){msg(e.message)}};
+$('generateStoryboard').onclick=async()=>{try{const r=await post('storyboard-generate');storyboard=r.storyboard;renderShots();msg('Editable shot plan generated. Check START → ACTION → END and every transition. External calls: 0.')}catch(e){msg(e.message)}};
+$('saveStoryboard').onclick=async()=>{try{const r=await post('storyboard-save',{storyboard:collectStoryboard()});storyboard=r.storyboard.content;renderShots();await loadState();msg(`Storyboard revision ${r.storyboard.revision} saved. Approval required. External calls: 0.`)}catch(e){msg(e.message)}};
+$('approveStoryboard').onclick=async()=>{if(!confirm('APPROVE THIS EXACT STORYBOARD? Changing it later invalidates Look, Pilot and paid preflight.'))return;try{const r=await post('storyboard-approve',{confirmation:true});await loadState();msg(`Storyboard r${r.revision.revision} approved. VISUAL LOCK is now allowed. External calls: 0.`)}catch(e){msg(e.message)}};
+$('approvePilot').onclick=async()=>{if(!state?.workflow?.id||!confirm('APPROVE LOOK & MOTION FOR THIS EXACT PILOT? Only then may remaining production continue.'))return;try{await post('pilot-approve',{workflowId:state.workflow.id,confirmation:true});await loadState();msg('Pilot human-approved. Remaining production is still not automatically started; run a fresh continuation preflight.')}catch(e){msg(e.message)}};
+$('rejectPilot').onclick=async()=>{if(!state?.workflow?.id||!confirm('REJECT THIS PILOT? The remaining video will stay blocked.'))return;try{await post('pilot-reject',{workflowId:state.workflow.id,confirmation:true,reason:'Operator rejected look or motion'});await loadState();msg('Pilot rejected. Remaining production remains blocked.')}catch(e){msg(e.message)}};
+(async()=>{try{const brands=await api('/api/brands');$('brand').innerHTML='<option value="">Choose brand</option>'+brands.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('');renderProgress()}catch(e){msg(e.message)}})();
+</script>
+</body>
+</html>
