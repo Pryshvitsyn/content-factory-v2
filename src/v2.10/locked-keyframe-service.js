@@ -185,6 +185,10 @@ class LockedKeyframeService {
         height: probe.height, providerRequestId: generated.requestId, provenance: { ...generated.provenance,
           usage: generated.usage || null, externalContentIsUntrustedData: true }, actor: this.actor });
       const { brief, shot } = resolveShot(draft.creative_brief, shotId);
+      if (!boundary) {
+        await this.repository.markLockedStageBoundary({ attemptId: attempt.id });
+        boundary = true;
+      }
       const rawEvaluation = await this.stillEvaluator.evaluate({ bytes: generated.bytes,
         contentType: generated.contentType, probe, creativePlan: { schemaVersion: 2,
           operatorBriefAuthoritative: true, shots: [{ ...shot, generationPrompt: plan.prompt }], continuity: brief.continuity },
