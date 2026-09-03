@@ -21,8 +21,8 @@ function describeProviders(env = process.env) {
   const semanticEnabled = env.SEMANTIC_VISUAL_ENABLED === 'true';
   const semanticProvider = String(env.SEMANTIC_VISUAL_PROVIDER || '').toLowerCase();
   const semanticModel = env.SEMANTIC_VISUAL_MODEL || null;
-  const semanticConfigured = semanticEnabled && semanticProvider === 'openai' && Boolean(semanticModel) && openai
-    && env.LIVE_PAID_VISUAL_EVALUATION === 'true';
+  const semanticConfigured = semanticEnabled && semanticProvider === 'openai' && Boolean(semanticModel) && openai;
+  const semanticPaidAuthorized = semanticConfigured && env.LIVE_PAID_VISUAL_EVALUATION === 'true';
   return [
     { mode: 'FAST', capability: 'FAST RENDERER', provider: 'MoneyPrinterTurbo', model: env.MPT_VERSION || 'v1.3.3',
       enabled: env.MPT_ENABLED === 'true', configured: mptConfigured, availability: status(mptConfigured),
@@ -46,8 +46,9 @@ function describeProviders(env = process.env) {
     { mode: 'QUALITY', capability: 'SEMANTIC VISUAL QA', provider: semanticProvider === 'openai' ? 'OpenAI' : 'Unavailable',
       model: semanticModel, enabled: semanticEnabled, configured: semanticConfigured,
       availability: status(semanticConfigured), route: 'independent-critic', secretExposed: false,
-      configurationStatus: !semanticEnabled ? 'DISABLED' : semanticConfigured ? 'CONFIGURED'
-        : env.LIVE_PAID_VISUAL_EVALUATION !== 'true' ? 'PAID_GATE_CLOSED' : 'INVALID_CONFIGURATION' },
+      paidExecutionAuthorized: semanticPaidAuthorized,
+      configurationStatus: !semanticEnabled ? 'DISABLED' : !semanticConfigured ? 'INVALID_CONFIGURATION'
+        : semanticPaidAuthorized ? 'CONFIGURED' : 'PAID_GATE_CLOSED' },
   ];
 }
 
