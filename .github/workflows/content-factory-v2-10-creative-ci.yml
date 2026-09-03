@@ -49,6 +49,8 @@ jobs:
         run: npm run test:locked-keyframe
       - name: Locked-keyframe zero-call preflight without semantic configuration
         run: node tests/locked-keyframe-zero-call-preflight-test.js
+      - name: Locked-keyframe stage-scoped semantic authorization
+        run: node tests/keyframe-stage-scoped-semantic-auth-test.js
       - name: V2.10.1 exact-identity recovered continuation
         run: node tests/v2.10.1-v210-resume-identity-test.js
       - name: Real LiveProductionService collision guard
