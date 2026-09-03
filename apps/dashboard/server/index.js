@@ -20,6 +20,7 @@ const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integr
 const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
 const { createKeyframeImageGateway, createSemanticStillEvaluator } = require('../../../src/v2.10/locked-keyframe-service');
+const { LockedKeyframeStateService } = require('../../../src/v2.10/locked-keyframe-state-service');
 const { HardenedQualityLockedKeyframeService } = require('../../../src/v2.10/quality-locked-keyframe-service-hardened');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
@@ -100,9 +101,12 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     imageInspector: audioInspector, actor, env,
     imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
     stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env: lockedKeyframeSemanticEnvironment(env) }) });
+  const lockedKeyframeStateService = new LockedKeyframeStateService({ db, brandRepository: repository });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,
     v210Repository, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider, lockedKeyframeService,
-    server: createControlServer({ service, creativeService, lockedKeyframeService, qualityDirectorService }) };
+    lockedKeyframeStateService,
+    server: createControlServer({ service, creativeService, lockedKeyframeService, lockedKeyframeStateService,
+      qualityDirectorService }) };
 }
 
 if (require.main === module) {
