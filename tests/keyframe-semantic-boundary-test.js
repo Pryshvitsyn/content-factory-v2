@@ -70,7 +70,10 @@ async function main() {
     imageInspector: {
       async inspect() {
         order.push('inspect');
-        return { width: 720, height: 1280, aspectRatio: 0.5625, orientation: 'PORTRAIT' };
+        // Real FfprobeMediaInspector contract supplies decoded dimensions. The service
+        // must derive canonical aspect geometry itself rather than requiring a synthetic
+        // precomputed aspectRatio property from callers.
+        return { width: 720, height: 1280 };
       },
     },
     stillEvaluator: {
@@ -104,7 +107,7 @@ async function main() {
   assert.equal(finish.boundaryState, 'MAY_HAVE_STARTED');
   assert.equal(finish.error.code, 'SEMANTIC_VISUAL_PROVIDER_ERROR');
 
-  console.log('Operator-upload semantic still evaluation is fenced before provider invocation; ambiguous failures require reconciliation.');
+  console.log('Canonical 720x1280 keyframe dimensions pass geometry validation; semantic boundary is fenced before provider invocation.');
 }
 
 main().catch((error) => {
