@@ -15,7 +15,7 @@ const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
 const { QualityCreativeProductionService } = require('../../../src/v2.10/quality-creative-production-service');
 const { HardenedQualityScriptFirstPostgresRepository } = require('../../../src/v2.10/quality-script-first-repository');
-const { QualityScriptFirstService } = require('../../../src/v2.10/quality-script-first-service');
+const { HardenedQualityScriptFirstService } = require('../../../src/v2.10/quality-script-first-service-hardened');
 const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
 const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
@@ -74,7 +74,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const creativeService = new QualityCreativeProductionService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
-  const qualityDirectorService = new QualityScriptFirstService({ repository: v210Repository,
+  const qualityDirectorService = new HardenedQualityScriptFirstService({ repository: v210Repository,
     brandRepository: repository, actor });
   const lockedKeyframeService = new HardenedQualityLockedKeyframeService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, starter: resolvedStarter, storage,
