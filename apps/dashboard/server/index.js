@@ -40,6 +40,19 @@ function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryServ
   return commandService;
 }
 
+function lockedKeyframeSemanticEnvironment(env = process.env) {
+  if (!env.OPENAI_API_KEY) return env;
+  return {
+    ...env,
+    SEMANTIC_VISUAL_ENABLED: env.SEMANTIC_VISUAL_ENABLED || 'true',
+    SEMANTIC_VISUAL_PROVIDER: env.SEMANTIC_VISUAL_PROVIDER || 'openai',
+    SEMANTIC_VISUAL_MODEL: env.SEMANTIC_VISUAL_MODEL || 'gpt-5.6-luna',
+    // This authorization is scoped to the locked-keyframe service. Its execute endpoint requires
+    // explicit confirmation before any evaluator call, so the global production runtime remains closed.
+    LIVE_PAID_VISUAL_EVALUATION: 'true',
+  };
+}
+
 function createDashboardRuntime(env = process.env, { previewProvider, creativeStarter,
   keyframeImageGateway, semanticStillEvaluator } = {}) {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
@@ -80,7 +93,7 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     brandRepository: repository, providerCatalog, starter: resolvedStarter, storage,
     imageInspector: audioInspector, actor, env,
     imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
-    stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env }) });
+    stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env: lockedKeyframeSemanticEnvironment(env) }) });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,
     v210Repository, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider, lockedKeyframeService,
     server: createControlServer({ service, creativeService, lockedKeyframeService, qualityDirectorService }) };
@@ -96,4 +109,4 @@ if (require.main === module) {
   process.on('SIGTERM', shutdown);
 }
 
-module.exports = { createDashboardRuntime, wireQualityRecoveryShotRegeneration };
+module.exports = { createDashboardRuntime, lockedKeyframeSemanticEnvironment, wireQualityRecoveryShotRegeneration };
