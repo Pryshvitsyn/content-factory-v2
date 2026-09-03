@@ -13,13 +13,14 @@ const { createControlServer } = require('./http-server');
 const { describeProviders } = require('./provider-status');
 const { installSemanticRetryState } = require('./semantic-retry-state');
 const { ProviderCatalog, PostgresProviderCatalogRepository } = require('../../../src/v2.8/provider-catalog');
-const { CreativeProductionService } = require('../../../src/v2.10/creative-production-service');
-const { V210PostgresRepository } = require('../../../src/v2.10/postgres-repository');
+const { QualityCreativeProductionService } = require('../../../src/v2.10/quality-creative-production-service');
+const { HardenedQualityScriptFirstPostgresRepository } = require('../../../src/v2.10/quality-script-first-repository');
+const { HardenedQualityScriptFirstService } = require('../../../src/v2.10/quality-script-first-service-hardened');
 const { createVoicePreviewGateway } = require('../../../src/v2.10/runtime-integration');
 const { V210IntegratedProductionStarter } = require('../../../src/v2.10/integrated-starter');
 const { FfprobeMediaInspector } = require('../../../src/v2.5/media-validator');
-const { LockedKeyframeService, createKeyframeImageGateway,
-  createSemanticStillEvaluator } = require('../../../src/v2.10/locked-keyframe-service');
+const { createKeyframeImageGateway, createSemanticStillEvaluator } = require('../../../src/v2.10/locked-keyframe-service');
+const { HardenedQualityLockedKeyframeService } = require('../../../src/v2.10/quality-locked-keyframe-service-hardened');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -65,22 +66,24 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     repository, reviewService, commandService, qualityRecoveryService, storage, providers, providerCatalog, actor, env,
   });
   const audioInspector = new FfprobeMediaInspector();
-  const v210Repository = new V210PostgresRepository({ db, storage });
+  const v210Repository = new HardenedQualityScriptFirstPostgresRepository({ db, storage });
   const resolvedPreviewProvider = previewProvider || createVoicePreviewGateway({ env });
   const resolvedStarter = creativeStarter || new V210IntegratedProductionStarter({
     db, storage, repository: v210Repository, env, logger: console, mediaInspector: audioInspector,
   });
-  const creativeService = new CreativeProductionService({ repository: v210Repository,
+  const creativeService = new QualityCreativeProductionService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
     previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
-  const lockedKeyframeService = new LockedKeyframeService({ repository: v210Repository,
+  const qualityDirectorService = new HardenedQualityScriptFirstService({ repository: v210Repository,
+    brandRepository: repository, actor });
+  const lockedKeyframeService = new HardenedQualityLockedKeyframeService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, starter: resolvedStarter, storage,
     imageInspector: audioInspector, actor, env,
     imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
     stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env }) });
-  return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, v210Repository,
-    creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider, lockedKeyframeService,
-    server: createControlServer({ service, creativeService, lockedKeyframeService }) };
+  return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,
+    v210Repository, creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider, lockedKeyframeService,
+    server: createControlServer({ service, creativeService, lockedKeyframeService, qualityDirectorService }) };
 }
 
 if (require.main === module) {
