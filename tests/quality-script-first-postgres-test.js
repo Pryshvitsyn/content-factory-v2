@@ -102,8 +102,9 @@ async function main() {
     const review = await repository.recordFirstVideoResult({ workflowId: workflow2.id, workspaceId: W1, brandId: B1,
       accepted: true, result: { accepted: true } });
     assert.equal(review.state, 'FIRST_VIDEO_REVIEW', 'semantic PASS must stop for human pilot approval');
-    await assert.rejects(() => repository.markLockedContinuationStarted({ draftId: draft.id, workspaceId: W1, brandId: B1,
-      productionId: workflow2.production_id }), (error) => error === null || true);
+    const continuationBeforeApproval = await repository.markLockedContinuationStarted({ draftId: draft.id, workspaceId: W1, brandId: B1,
+      productionId: workflow2.production_id });
+    assert.equal(continuationBeforeApproval, null, 'continuation cannot start while pilot waits for human review');
     const unchanged = await repository.getLockedWorkflow({ draftId: draft.id, workspaceId: W1, brandId: B1, shotId: 'shot-1' });
     assert.equal(unchanged.state, 'FIRST_VIDEO_REVIEW');
 
