@@ -48,11 +48,26 @@ async function validateDashboardDatabase(db) {
     SELECT current_database() AS database,
       to_regclass('v2_1.productions') IS NOT NULL AS productions,
       to_regclass('v2_2.brands') IS NOT NULL AS brands,
-      to_regclass('v2_3.master_review_items') IS NOT NULL AS reviews`);
+      to_regclass('v2_3.master_review_items') IS NOT NULL AS reviews,
+      to_regclass('v2_10.locked_keyframe_workflows') IS NOT NULL AS locked_workflows,
+      to_regclass('v2_10.locked_stage_attempts') IS NOT NULL AS locked_attempts,
+      to_regclass('v2_10.quality_script_revisions') IS NOT NULL AS quality_scripts,
+      to_regclass('v2_10.quality_storyboard_revisions') IS NOT NULL AS quality_storyboards,
+      to_regclass('v2_10.quality_stage_approval_events') IS NOT NULL AS quality_approvals`);
   const state = result.rows[0];
-  if (!state || !state.productions || !state.brands || !state.reviews) {
-    const missing = ['productions','brands','reviews'].filter((name) => !state?.[name]);
-    const error = new Error(`Database '${state?.database || 'unknown'}' is not the prepared Content Factory database (missing: ${missing.join(', ')}). Set CONTENT_FACTORY_DATABASE=content_os or a correct DATABASE_URL, then run the $0 local preparation command.`);
+  const required = [
+    ['productions', 'v2_1.productions'],
+    ['brands', 'v2_2.brands'],
+    ['reviews', 'v2_3.master_review_items'],
+    ['locked_workflows', 'v2_10.locked_keyframe_workflows'],
+    ['locked_attempts', 'v2_10.locked_stage_attempts'],
+    ['quality_scripts', 'v2_10.quality_script_revisions'],
+    ['quality_storyboards', 'v2_10.quality_storyboard_revisions'],
+    ['quality_approvals', 'v2_10.quality_stage_approval_events'],
+  ];
+  const missing = required.filter(([key]) => !state?.[key]).map(([, table]) => table);
+  if (!state || missing.length) {
+    const error = new Error(`Database '${state?.database || 'unknown'}' is not the prepared Content Factory database (missing: ${missing.join(', ')}). Run dashboard:local again after pulling current main; startup applies required additive migrations automatically.`);
     error.code = 'LOCAL_DASHBOARD_SCHEMA_MISSING';
     throw error;
   }

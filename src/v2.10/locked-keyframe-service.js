@@ -2,7 +2,7 @@
 
 const { createOpenAIMediaProvider } = require('../providers/openai-media-provider');
 const { createSemanticVisualEvaluatorAdapter } = require('../v2.9/semantic-visual-evaluator-factory');
-const { compatible } = require('../v2.10.2/reference-geometry');
+const { compatible, geometry } = require('../v2.10.2/reference-geometry');
 const { validateCreativeCompleteness } = require('./creative-completeness');
 const { fingerprint } = require('./creative-contract');
 const { CreativeProductionError } = require('./creative-production-service-core');
@@ -134,7 +134,7 @@ class LockedKeyframeService {
     if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new LockedKeyframeError('KEYFRAME_SIZE_INVALID',
       `Keyframe must contain 1-${MAX_IMAGE_BYTES} bytes`);
     const probe = await this.imageInspector.inspect({ bytes, contentType, kind: 'image' });
-    if (!probe.width || !probe.height || !compatible({ width: probe.width, height: probe.height }, '9:16')) {
+    if (!probe.width || !probe.height || !compatible(geometry(probe.width, probe.height), '9:16')) {
       throw new LockedKeyframeError('KEYFRAME_GEOMETRY_MISMATCH', 'Keyframe must have verified 9:16 geometry', { probe });
     }
     return probe;
@@ -185,6 +185,10 @@ class LockedKeyframeService {
         height: probe.height, providerRequestId: generated.requestId, provenance: { ...generated.provenance,
           usage: generated.usage || null, externalContentIsUntrustedData: true }, actor: this.actor });
       const { brief, shot } = resolveShot(draft.creative_brief, shotId);
+      if (!boundary) {
+        await this.repository.markLockedStageBoundary({ attemptId: attempt.id });
+        boundary = true;
+      }
       const rawEvaluation = await this.stillEvaluator.evaluate({ bytes: generated.bytes,
         contentType: generated.contentType, probe, creativePlan: { schemaVersion: 2,
           operatorBriefAuthoritative: true, shots: [{ ...shot, generationPrompt: plan.prompt }], continuity: brief.continuity },

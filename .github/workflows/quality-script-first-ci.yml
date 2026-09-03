@@ -106,3 +106,7 @@ jobs:
         run: |
           createdb --maintenance-db=postgres locked_keyframe_quality_regression
           PGDATABASE=locked_keyframe_quality_regression CONTENT_FACTORY_TEST_DATABASE=1 npm run test:locked-keyframe:postgres
+      - name: Locked-stage append-only retry PostgreSQL certification
+        run: |
+          createdb --maintenance-db=postgres locked_stage_retry_history
+          PGDATABASE=locked_stage_retry_history CONTENT_FACTORY_TEST_DATABASE=1 node tests/locked-stage-retry-history-postgres-test.js

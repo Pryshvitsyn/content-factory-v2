@@ -57,11 +57,17 @@ async function main() {
 
   const readiness = await validateDashboardDatabase({ query: async () => ({ rows: [{
     database: 'content_os', productions: true, brands: true, reviews: true,
+    locked_workflows: true, locked_attempts: true, quality_scripts: true,
+    quality_storyboards: true, quality_approvals: true,
   }] }) });
   assert.equal(readiness.database, 'content_os');
   await assert.rejects(() => validateDashboardDatabase({ query: async () => ({ rows: [{
     database: 'n8n', productions: false, brands: false, reviews: false,
-  }] }) }), (error) => error.code === 'LOCAL_DASHBOARD_SCHEMA_MISSING' && /content_os/.test(error.message));
+    locked_workflows: false, locked_attempts: false, quality_scripts: false,
+    quality_storyboards: false, quality_approvals: false,
+  }] }) }), (error) => error.code === 'LOCAL_DASHBOARD_SCHEMA_MISSING'
+    && /v2_10\.quality_script_revisions/.test(error.message)
+    && /startup applies required additive migrations automatically/.test(error.message));
 
   const dashboardEnv = buildDashboardEnvironment({}, discovered, '/tmp/content-factory-storage', { apiPort: 3101, webPort: 3100 });
   assert.equal(dashboardEnv.DATABASE_URL, discovered.url);

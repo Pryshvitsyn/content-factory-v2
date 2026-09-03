@@ -5,7 +5,7 @@ const { URL } = require('node:url');
 const { ControlError } = require('./control-service');
 const { continuationPreflight, continueRecoveredV210 } = require('./v210-quality-resume');
 
-const BODY_LIMIT = 16 * 1024;
+const BODY_LIMIT = 1024 * 1024;
 
 function json(response, status, payload) {
   const body = JSON.stringify(payload);
