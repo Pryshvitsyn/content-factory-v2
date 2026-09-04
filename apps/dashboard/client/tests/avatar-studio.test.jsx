@@ -196,12 +196,18 @@ describe('Avatar Studio dashboard', () => {
   });
 
   it('renders a preview, filename and independent viewpoint selector for every V1 photo before upload', async () => {
+    fetch.mockImplementation((url,options={}) => {
+      if (String(url).startsWith('/api/avatar-studio/avatar-setups?')) return response([]);
+      if (url==='/api/avatar-studio/avatars'&&options.method==='POST') return response({id:'avatar-photo-test',brandIds:[brand.id],vertical:'PSYCHOLOGY_WELLBEING',subjectType:'SYNTHETIC'});
+      return response([]);
+    });
     render(<AvatarStudioV1Intake brands={[brand]} onCreated={() => {}} />);
-    fireEvent.change(screen.getByLabelText('Display name'),{target:{value:'Photo test'}});
     fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});
+    await screen.findByText('No incomplete avatars for this brand.');
+    fireEvent.click(screen.getByRole('button',{name:'START NEW'}));
+    expect(screen.getByLabelText('Display name')).toBeTruthy(); expect(screen.getByLabelText('Subject type')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Display name'),{target:{value:'Photo test'}});
     fireEvent.change(screen.getByLabelText('Subject type'),{target:{value:'SYNTHETIC'}});
-    fetch.mockImplementation((url,options={}) => url==='/api/avatar-studio/avatars'&&options.method==='POST'
-      ? response({id:'avatar-photo-test',brandIds:[brand.id],vertical:'PSYCHOLOGY_WELLBEING',subjectType:'CONSENTED_REAL_PERSON'}) : response([]));
     fireEvent.click(screen.getByRole('button',{name:'CREATE AVATAR'}));
     await screen.findByRole('heading',{name:'Add photos'});
     const first=new File(['one'],'IMG_1001.JPG',{type:'image/jpeg'}),second=new File(['two'],'IMG_1002.JPG',{type:'image/jpeg'});
