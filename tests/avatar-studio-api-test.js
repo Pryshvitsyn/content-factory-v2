@@ -28,6 +28,8 @@ async function main() {
     async passportLab(value) { calls.push(['passportLab', value]); return { id: value.avatarId, currentLevel: 0 }; },
     async bodyExpressionsLab(value) { calls.push(['l2Lab',value]); return {id:value.avatarId,currentLevel:1}; },
     async smokeReadiness(value) { calls.push(['smokeReadiness',value]); return {ready:false,checks:{OPENAI_API_KEY:'NO'},externalGenerationCalls:0}; },
+    async motionPilotState(value) { calls.push(['motionPilotState',value]); return { execution:{id:value.executionId||'11111111-1111-4111-8111-111111111111'} }; },
+    async reviewMotionPilotIdentity(value) { calls.push(['motionPilotIdentityReview',value]); return { identity:'FAIL',motionPilotQualityStatus:'REJECTED' }; },
     async createBodyBuild(value) { calls.push(['bodyBuild',value]); return {bodyBuild:{id:'build-1'}}; },
     async planL2Reference(value) { calls.push(['l2Plan',value]); return {id:'l2-plan-1',externalGenerationCalls:0}; },
     async uploadL2Candidate(value) { calls.push(['l2Upload',value]); return {candidate:{id:'l2-candidate-1'}}; },
@@ -78,6 +80,12 @@ async function main() {
       { brandId: 'brand-1', identity: { personality: 'calm' } })).status, 201);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/passport-lab?brandId=brand-1')).status, 200);
     assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/smoke-readiness',{brandId:'brand-1',kind:'PASSPORT'})).status,200);
+    const motionScope={workspaceId:'workspace-1',brandId:'brand-1',vertical:'TRAVEL',identityVersionId:'11111111-1111-4111-8111-111111111111'};
+    const validMotionExecution='11111111-1111-4111-8111-111111111111',validMotionAttempt='22222222-2222-4222-8222-222222222222';
+    assert.equal((await request(server,'GET',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1`)).status,200);
+    assert.equal((await request(server,'POST',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}/identity-review`,{...motionScope,attemptId:validMotionAttempt,decision:'FAIL',reasonCode:'BODY_DRIFT'})).status,201);
+    const malformedMotion=await request(server,'POST','/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/undefined/identity-review',{...motionScope,attemptId:validMotionAttempt,decision:'FAIL',reasonCode:'BODY_DRIFT'});
+    assert.equal(malformedMotion.status,400);assert.equal(malformedMotion.payload.error.code,'MOTION_PILOT_EXECUTION_ID_INVALID');
     assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/body-expressions-lab?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1')).status,200);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/identity-locks',
       { brandId: 'brand-1', humanApproval: true })).status, 201);
@@ -147,6 +155,8 @@ async function main() {
     const batchCall=calls.find(([name])=>name==='identityBatch')[1];assert.equal(JSON.stringify(batchCall).includes('contentBase64'),false);assert.equal(batchCall.photos.length,3);
     assert.equal(calls.find(([name]) => name === 'sourceViewpoint')[1].value, 'FRONTAL');
     assert.equal(calls.find(([name])=>name==='passportPreflight')[1].generationSpecId,'plan-1');
+    assert.equal(calls.find(([name])=>name==='motionPilotIdentityReview')[1].executionId,validMotionExecution);
+    assert.equal(calls.some(([name])=>name==='motionPilotIdentityReview'&&String(name).includes('undefined')),false);
     assert.equal(calls.find(([name])=>name==='passportGenerate')[1].executionId,'execution-1');
     assert.equal(providerCalls, 2,'only explicit Passport and L2 Generate actions reach mocked execution boundaries');
   } finally { await new Promise((resolve) => server.close(resolve)); }

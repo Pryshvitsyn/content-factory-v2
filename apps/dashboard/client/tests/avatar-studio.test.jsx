@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AvatarDetail, AvatarStudio, LevelLadder, LevelUpWorkflow } from '../src/AvatarStudio';
 import { AvatarStudioV1Intake } from '../src/AvatarStudioV1Intake';
+import { MotionPilot } from '../src/MotionPilot';
 import { approvalDisplay, AttemptDiagnostics } from '../src/PassportLab';
 
 const brand = { id: '11111111-1111-4111-8111-111111111111', name: 'Attune' };
@@ -27,6 +28,48 @@ describe('Avatar Studio dashboard', () => {
       'Gate 0 findings: PROMPT_INJECTION, EMBEDDED_EXECUTION','May have spent: YES','Provider request ID: req_safe_123']) {
       expect(screen.getByText(value)).toBeTruthy();
     }
+  });
+
+  it('uses a restored Motion Pilot execution ID, refreshes review state, and never posts undefined', async () => {
+    const avatar={id:'avatar-motion',internalName:'Mara',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'};
+    const restored={execution:{id:'11111111-1111-4111-8111-111111111111'},attempt:{id:'22222222-2222-4222-8222-222222222222'},result:{id:'result-1',providerRequestId:'request-1',contentUrl:'/safe-video.mp4'},providerStatus:'SUCCEEDED',technicalStatus:'PASS',identityStatus:'NOT_REVIEWED',motionPilotQualityStatus:'AWAITING_IDENTITY_REVIEW'};
+    const rejected={...restored,review:{decision:'FAIL',reasonCode:'BODY_DRIFT'},identityStatus:'FAIL',motionPilotQualityStatus:'REJECTED'};
+    vi.stubGlobal('prompt',vi.fn().mockReturnValueOnce('BODY_DRIFT').mockReturnValueOnce('elongated'));
+    fetch.mockImplementation((url,options={})=>{
+      if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([avatar]);
+      if(String(url)===`/api/avatar-studio/avatars/${avatar.id}?brandId=${brand.id}`)return response(avatar);
+      if(String(url).includes('/identity-review')&&options.method==='POST')return response({motionPilotQualityStatus:'REJECTED'});
+      if(String(url).includes(`/motion-pilot-executions/${restored.execution.id}?`))return response(rejected);
+      if(String(url).includes('/motion-pilot-executions?'))return response(restored);
+      return response([]);
+    });
+    render(<MotionPilot brands={[brand]}/>);
+    fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Mara'});
+    fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});await screen.findByRole('button',{name:'FAIL IDENTITY'});
+    fireEvent.click(screen.getByRole('button',{name:'FAIL IDENTITY'}));await screen.findByText(/IDENTITY: FAIL/);
+    expect(screen.getByText(/MOTION PILOT: REJECTED/)).toBeTruthy();expect(document.querySelector('video').getAttribute('src')).toBe('/safe-video.mp4');
+    const reviewCall=fetch.mock.calls.find(([url])=>String(url).includes('/identity-review'));expect(reviewCall[0]).toContain(`/${restored.execution.id}/identity-review`);
+    expect(fetch.mock.calls.some(([url])=>String(url).includes('/undefined/identity-review'))).toBe(false);
+  });
+
+  it('refreshes durable Motion Pilot state after generate and exposes its persisted video', async () => {
+    const avatar={id:'avatar-generate',internalName:'Mara',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'};
+    const executionId='11111111-1111-4111-8111-111111111111'; const durable={execution:{id:executionId},attempt:{id:'22222222-2222-4222-8222-222222222222'},result:{id:'result-1',contentUrl:'/durable-video.mp4'},providerStatus:'SUCCEEDED',technicalStatus:'PASS',identityStatus:'NOT_REVIEWED',motionPilotQualityStatus:'AWAITING_IDENTITY_REVIEW'};
+    fetch.mockImplementation((url,options={})=>{
+      if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([avatar]);
+      if(String(url)===`/api/avatar-studio/avatars/${avatar.id}?brandId=${brand.id}`)return response(avatar);
+      if(String(url).endsWith('/motion-pilot-plans')&&options.method==='POST')return response({id:'plan-1',identityReferenceBundle:{references:[]}});
+      if(String(url).endsWith('/preflight')&&options.method==='POST')return response({executionId,status:'APPROVED'});
+      if(String(url).includes(`/${executionId}/generate`)&&options.method==='POST')return response({status:'AWAITING_IDENTITY_REVIEW'});
+      if(String(url).includes(`/motion-pilot-executions/${executionId}?`))return response(durable);
+      if(String(url).includes('/motion-pilot-executions?'))return response({execution:{id:executionId}});
+      return response([]);
+    });
+    render(<MotionPilot brands={[brand]}/>);fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Mara'});
+    fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});await screen.findByRole('button',{name:'PLAN MOTION PILOT · ZERO CALLS'});
+    fireEvent.click(screen.getByRole('button',{name:'PLAN MOTION PILOT · ZERO CALLS'}));await screen.findByRole('button',{name:'ZERO-CALL PREFLIGHT'});
+    fireEvent.click(screen.getByRole('button',{name:'ZERO-CALL PREFLIGHT'}));await screen.findByRole('button',{name:'GENERATE 1 REAL VIDEO'});
+    fireEvent.click(screen.getByRole('button',{name:'GENERATE 1 REAL VIDEO'}));await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toBe('/durable-video.mp4'));
   });
 
   it('uses current Passport candidates and does not offer a broken Level 0 approval', () => {
