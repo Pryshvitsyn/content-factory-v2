@@ -58,7 +58,8 @@ async function main() {
   const readiness = await validateDashboardDatabase({ query: async () => ({ rows: [{
     database: 'content_os', productions: true, brands: true, reviews: true,
     locked_workflows: true, locked_attempts: true, quality_scripts: true,
-    quality_storyboards: true, quality_approvals: true,
+    quality_storyboards: true, quality_approvals: true, motion_pilot_plans: true,
+    motion_pilot_executions: true, motion_pilot_approvals: true, motion_pilot_attempts: true,
   }] }) });
   assert.equal(readiness.database, 'content_os');
   await assert.rejects(() => validateDashboardDatabase({ query: async () => ({ rows: [{

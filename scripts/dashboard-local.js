@@ -53,7 +53,11 @@ async function validateDashboardDatabase(db) {
       to_regclass('v2_10.locked_stage_attempts') IS NOT NULL AS locked_attempts,
       to_regclass('v2_10.quality_script_revisions') IS NOT NULL AS quality_scripts,
       to_regclass('v2_10.quality_storyboard_revisions') IS NOT NULL AS quality_storyboards,
-      to_regclass('v2_10.quality_stage_approval_events') IS NOT NULL AS quality_approvals`);
+      to_regclass('v2_10.quality_stage_approval_events') IS NOT NULL AS quality_approvals,
+      to_regclass('avatar_studio.motion_pilot_plans') IS NOT NULL AS motion_pilot_plans,
+      to_regclass('avatar_studio.motion_pilot_executions') IS NOT NULL AS motion_pilot_executions,
+      to_regclass('avatar_studio.motion_pilot_execution_approvals') IS NOT NULL AS motion_pilot_approvals,
+      to_regclass('avatar_studio.motion_pilot_attempts') IS NOT NULL AS motion_pilot_attempts`);
   const state = result.rows[0];
   const required = [
     ['productions', 'v2_1.productions'],
@@ -64,6 +68,10 @@ async function validateDashboardDatabase(db) {
     ['quality_scripts', 'v2_10.quality_script_revisions'],
     ['quality_storyboards', 'v2_10.quality_storyboard_revisions'],
     ['quality_approvals', 'v2_10.quality_stage_approval_events'],
+    ['motion_pilot_plans', 'avatar_studio.motion_pilot_plans'],
+    ['motion_pilot_executions', 'avatar_studio.motion_pilot_executions'],
+    ['motion_pilot_approvals', 'avatar_studio.motion_pilot_execution_approvals'],
+    ['motion_pilot_attempts', 'avatar_studio.motion_pilot_attempts'],
   ];
   const missing = required.filter(([key]) => !state?.[key]).map(([, table]) => table);
   if (!state || missing.length) {
