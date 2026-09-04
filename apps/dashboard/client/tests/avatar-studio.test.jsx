@@ -34,6 +34,7 @@ describe('Avatar Studio dashboard', () => {
     expect(screen.getByRole('button', { name: 'LIBRARY' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'PASSPORT LAB' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'BODY + EXPRESSIONS LAB' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'AVATAR MOTION PILOT' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'GATE 0 REVIEW' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'CREATE AVATAR' }));
     expect(screen.getByRole('heading', { name: 'Context' })).toBeTruthy();
@@ -45,6 +46,13 @@ describe('Avatar Studio dashboard', () => {
     expect(screen.getByRole('button', { name: 'COMPILE PLAN · ZERO PAID CALLS' })).toBeTruthy();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/brands', expect.anything()));
     expect(fetch.mock.calls.some(([url]) => String(url).includes('provider'))).toBe(false);
+  });
+
+  it('exposes the active Avatar Motion Pilot tab', async () => {
+    render(<AvatarStudio />);
+    fireEvent.click(screen.getByRole('button', { name: 'AVATAR MOTION PILOT' }));
+    expect(screen.getByRole('heading', { name: 'AVATAR MOTION PILOT' })).toBeTruthy();
+    expect(screen.getByText(/One technical, silent, chest-up identity\/motion proof/)).toBeTruthy();
   });
 
   it('completes synthetic browser intake without typing an artifact id', async () => {
