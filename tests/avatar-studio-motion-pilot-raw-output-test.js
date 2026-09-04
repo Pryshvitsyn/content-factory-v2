@@ -45,10 +45,11 @@ const plan = { id:'plan', brandId:'b', identityVersionId:'i', identityLockVersio
   const service = new AvatarMotionPilotService({ repository:repo, providerCatalog:{resolveSelection:()=>({})}, assetIntakeService,
     storage:{get:async ({key}) => { assert.equal(key,'raw/key'); return bytes; }}, mediaInspector:{inspect:async()=>({kind:'video',width:720,height:1280,durationMs:5000})},
     outputNormalizer:{normalize:async({bytes:raw,route})=>{assert.equal(raw,bytes);assert.equal(route.model,'alibaba/wan-3');return {bytes:Buffer.from('canonical-mp4'),providerOutput:{width:1280,height:720,durationMs:5000,audioStreams:1},canonicalOutput:{width:720,height:1280,durationMs:5000,audioStreams:0},normalization:{status:'SUCCEEDED',mode:'CROP_SCALE_PRESERVE_ASPECT',aspectRatioPreserved:true,anisotropicStretchApplied:false,audioRemoved:true,sourceRawContentHash:hash,canonicalContentHash:'canonical-hash'}};}},
+    identityQaService:{truthSet:async()=>({truthSetFingerprint:'truth'}),evaluateProviderInput:async()=>({status:'PASS',policyVersion:'test',truthSetFingerprint:'truth',inputs:[]})},
     adapterFactory:() => ({ generate:async () => { generateCalls += 1; return { requestId:'provider-request', output:bytes, metrics:{predict_time:5} }; }, recover:async()=>{ throw new Error('provider recovery must not run when raw output exists'); } }),
     env:{LIVE_PAID_GENERATION:'true',REPLICATE_API_TOKEN:'test'} });
   service.context = async () => c;
-  service.canonicalRequest = async () => ({ request:{}, evidence:{} });
+  service.canonicalRequest = async () => ({ request:{references:{referenceImages:['data:image/jpeg;base64,Y2VydGlmaWVk'] }}, evidence:{} });
   await assert.rejects(() => service.generate({ ...scope, executionId:'execution' }), (error) => error.code === 'SECURITY_REJECTED_OUTPUT');
   assert.equal(generateCalls,1); assert.equal(persisted,true); assert.equal(providerSucceeded,true);
   assert.equal(attempt.providerStatus,'succeeded'); assert.equal(attempt.status,'FAILED'); assert.equal(attempt.failureClassification,'SECURITY_REJECTED_OUTPUT');
