@@ -61,8 +61,8 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         && segments[2] === 'avatars' && segments[4] === 'smoke-readiness' && segments.length === 5) {
         return json(response,200,await avatarService.smokeReadiness({avatarId:segments[3],...await readJson(request)}));
       }
-      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio' && segments[2] === 'avatars' && segments[4] === 'motion-pilot-executions' && segments.length === 6) {
-        return json(response,200,await avatarService.motionPilotState({avatarId:segments[3],executionId:segments[5],workspaceId:url.searchParams.get('workspaceId'),brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio' && segments[2] === 'avatars' && segments[4] === 'motion-pilot-executions' && (segments.length === 5||segments.length===6)) {
+        return json(response,200,await avatarService.motionPilotState({avatarId:segments[3],executionId:segments[5]||null,workspaceId:url.searchParams.get('workspaceId'),brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'passport-lab' && segments.length === 5) {

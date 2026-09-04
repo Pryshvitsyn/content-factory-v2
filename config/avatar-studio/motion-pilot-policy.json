@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "route": {"provider":"replicate","model":"wan-video/wan-2.7-r2v","capability":"REFERENCE_TO_VIDEO","resolution":"720p","aspectRatio":"9:16","durationSeconds":5,"shotType":"single","plannedCalls":1,"automaticRetryAllowed":false},
+  "budget": {"maximumAllowedCostUsd":0.60,"requireKnownOrExplicitlyAcknowledgedCost":true},
+  "references": {"exactCount":4,"providerOrder":[{"role":"CERTIFIED_CHEST_UP_NEUTRAL","viewpoint":"CHEST_UP_NEUTRAL"},{"role":"IDENTITY_SOURCE","viewpoint":"FRONTAL"},{"role":"IDENTITY_SOURCE","viewpoint":"THREE_QUARTER_LEFT"},{"role":"IDENTITY_SOURCE","viewpoint":"THREE_QUARTER_RIGHT"}],"requireGate0Pass":true,"requireStoredBytes":true,"requireSha256Match":true,"requireCurrentIdentityVersion":true,"requireCurrentIdentityLock":true,"requireCertifiedPassport":true,"requireCertifiedChestUpNeutral":true,"requireFaceConsent":true},
+  "review": {"humanIdentityReviewRequired":true,"playableVideoRequiredBeforeDecision":true,"technicalPassDoesNotApproveIdentity":true,"passReasonCode":"IDENTITY_MATCH","failureReasonCodes":["PROVIDER_IDENTITY_SUBSTITUTION_AT_FRAME_0","IDENTITY_DRIFT","FACE_MORPH","AGE_DRIFT","WARDROBE_DRIFT","BODY_DRIFT","OTHER"]},
+  "execution": {"humanApprovalRequiredBeforePaidCall":true,"oneProviderCallMaximumPerExecution":true,"automaticRetryAllowed":false,"persistRawProviderOutputImmediately":true,"localZeroCallRecoveryRequired":true},
+  "minorSafety": {"preserveExistingMinorRestrictions":true,"noAdultization":true,"noTestimonialFraming":true,"noVoiceCloning":true}
+}
