@@ -185,10 +185,13 @@ class AvatarStudioService {
     const avatar=await this.avatar({id:avatarId,brandId}); await this.reconcileIdentityIntakes({avatar,brandId}); const intakes=await this.listIntakes({avatarId,brandId}); const coverage=await this.identityCoverage({avatarId,brandId});
     const face=(avatar.consentEvents||[]).find((item)=>item.modality==='FACE'&&item.status==='APPROVED'&&item.eventType==='GRANT'&&(item.allowedBrandIds||[]).includes(brandId)&&(item.allowedVerticals||[]).includes(avatar.vertical)&&(!item.expiresAt||new Date(item.expiresAt)>new Date()));
     const confirmation=await this.repository.latestIdentityIntakeConfirmation({avatarId,brandId}); const sources=avatar.sources||[];
-    const unusedIntakeIds=intakes.filter((intake)=>intake.effectiveGate0Status==='PASS'&&!sources.some((source)=>source.intakeAssetId===intake.id&&(source.roles||[]).includes('IDENTITY'))).map((intake)=>intake.id);
+    const unusedIntakeIds=intakes.filter((intake)=>['image/jpeg','image/png','image/webp'].includes(String(intake.mimeType||'').toLowerCase())
+      &&intake.effectiveGate0Status==='PASS'&&(intake.provenance?.intakeFlow==='AVATAR_STUDIO_V1_IDENTITY_UPLOAD'
+        || (intake.provenance?.source==='UPLOAD'&&intake.provenance?.visualOnly===true))
+      &&!sources.some((source)=>source.intakeAssetId===intake.id&&(source.roles||[]).includes('IDENTITY'))).map((intake)=>intake.id);
     const hasSources=sources.some((item)=>(item.roles||[]).includes('IDENTITY'));
     const next=avatar.subjectType!=='SYNTHETIC'&&!face?'RIGHTS_CONSENT':!intakes.length||!hasSources||unusedIntakeIds.length?'ADD_PHOTOS':coverage.status==='NOT_READY'?'CHECK_COVERAGE':!confirmation?'CHECK_COVERAGE':'READY';
-    return Object.freeze({avatar,intakes,unusedIntakeIds:Object.freeze(unusedIntakeIds),coverage,faceConsent:face||null,confirmation,next});
+    return Object.freeze({avatar,intakes,unusedIdentityIntakeIds:Object.freeze(unusedIntakeIds),hasIdentitySources:hasSources,coverage,faceConsent:face||null,confirmation,next});
   }
   async identitySetupCandidates({ brandId } = {}) { return this.list({brandId}).then((items)=>items.filter((item)=>Number(item.currentLevel||0)===0)); }
 
