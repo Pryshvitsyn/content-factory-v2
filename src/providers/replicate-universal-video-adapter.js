@@ -22,6 +22,14 @@ function buildWan3Input({ prompt, resolution = '720p', aspectRatio = '9:16', dur
     ...(seed == null ? {} : { seed }) };
 }
 
+function buildWan27R2VInput({ prompt, resolution = '720p', aspectRatio = '9:16', duration = 5, shotType = 'single', referenceImages = [], referenceVideos = [], negativePrompt = '', seed } = {}) {
+  if (!String(prompt || '').trim()) throw new ProviderError('Wan 2.7 R2V requires a prompt', { provider: 'replicate', model: 'wan-video/wan-2.7-r2v' });
+  if (!Number.isInteger(duration) || duration < 2 || duration > 10) throw new ProviderError('Wan 2.7 R2V duration must be 2-10 seconds', { provider: 'replicate', model: 'wan-video/wan-2.7-r2v' });
+  if (!['720p','1080p'].includes(resolution) || !['16:9','9:16','1:1','4:3','3:4'].includes(aspectRatio) || shotType !== 'single') throw new ProviderError('Wan 2.7 R2V settings are unsupported', { provider: 'replicate', model: 'wan-video/wan-2.7-r2v' });
+  if (!Array.isArray(referenceImages) || !referenceImages.length) throw new ProviderError('Wan 2.7 R2V requires at least one reference image', { provider: 'replicate', model: 'wan-video/wan-2.7-r2v' });
+  return { prompt: prompt.trim(), duration, shot_type: shotType, resolution, aspect_ratio: aspectRatio, reference_images: referenceImages, reference_videos: referenceVideos, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}), ...(seed == null ? {} : { seed }) };
+}
+
 function assertWan3ReferenceGeometry(request, refs, aspectRatio) {
   if (!refs.firstFrame) return;
   const evidence = request?.referenceGeometry;
@@ -78,6 +86,7 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
     const input = this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,
       negativePrompt: request?.negativePrompt || requirements.negative_prompt,
       enablePromptExpansion: resolved.enablePromptExpansion ?? requirements.enable_prompt_expansion ?? true })
+      : this.family === 'WAN_2_7_R2V' ? buildWan27R2VInput({ ...common, shotType: request?.shotType || resolved.shotType || 'single', referenceImages: refs.referenceImages || [], referenceVideos: refs.referenceVideos || [], negativePrompt: request?.negativePrompt || requirements.negative_prompt })
       : buildSeedance25Input({ ...common, image: refs.firstFrame || null, lastFrameImage: refs.lastFrame || null,
         referenceImages: [...(refs.characterImages || []), ...(refs.styleImages || [])], referenceVideos: refs.referenceVideos || [],
         referenceAudios: refs.referenceAudios || [], generateAudio: request?.audio?.requested ?? resolved.generateAudio ?? false,
@@ -100,4 +109,4 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
   }
 }
 
-module.exports = { ReplicateUniversalVideoAdapter, assertWan3ReferenceGeometry, buildWan3Input, buildSeedance25Input };
+module.exports = { ReplicateUniversalVideoAdapter, assertWan3ReferenceGeometry, buildWan3Input, buildWan27R2VInput, buildSeedance25Input };

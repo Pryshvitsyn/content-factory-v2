@@ -21,9 +21,9 @@ function createVideoAdapter(selection, { env = process.env, fetchImpl = global.f
       fetchImpl, ...(sleep ? { sleep } : {}), ...(now ? { now } : {}),
       ...(pollIntervalMs ? { pollIntervalMs } : {}), ...(timeoutMs ? { timeoutMs } : {}) });
   }
-  if (selection.provider === 'replicate' && ['replicate-wan-3','replicate-seedance-2.5'].includes(selection.adapterFamily)) {
+  if (selection.provider === 'replicate' && ['replicate-wan-3','replicate-wan-2.7-r2v','replicate-seedance-2.5'].includes(selection.adapterFamily)) {
     return new ReplicateUniversalVideoAdapter({ apiToken: env.REPLICATE_API_TOKEN, model: selection.model,
-      family: selection.adapterFamily === 'replicate-wan-3' ? 'WAN_3' : 'SEEDANCE_2_5', fetchImpl,
+      family: selection.adapterFamily === 'replicate-wan-3' ? 'WAN_3' : selection.adapterFamily === 'replicate-wan-2.7-r2v' ? 'WAN_2_7_R2V' : 'SEEDANCE_2_5', fetchImpl,
       ...(sleep ? { sleep } : {}), ...(now ? { now } : {}), ...(pollIntervalMs ? { pollIntervalMs } : {}), ...(timeoutMs ? { timeoutMs } : {}) });
   }
   const baseProtocol = selection.provider === 'alibaba'

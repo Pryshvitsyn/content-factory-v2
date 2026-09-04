@@ -22,6 +22,9 @@ const PRICE_RECORDS = Object.freeze([
     sourceType: 'OFFICIAL_PROVIDER_PAGE',
     source: 'https://replicate.com/alibaba/wan-3',
   })),
+  Object.freeze({ provider: 'replicate', modelFamily: 'WAN_2_7_R2V', providerModelId: 'wan-video/wan-2.7-r2v', model: 'wan-video/wan-2.7-r2v',
+    component: 'VIDEO', profile: 'STANDARD', variant: null, resolution: '720p', currency: 'USD', unit: 'SECOND', amountUsd: 0.10,
+    formula: 'amountUsd * generated seconds', status: 'VERIFIED', verifiedAt: '2026-09-04', sourceType: 'OFFICIAL_PROVIDER_PAGE', source: 'https://replicate.com/wan-video/wan-2.7-r2v' }),
   ...['480p','720p','1080p'].map((resolution, index) => Object.freeze({
     provider: 'alibaba', modelFamily: 'WAN_3', providerModelId: 'wan3.0-video', model: 'wan3.0-video',
     component: 'VIDEO', profile: 'STANDARD', variant: 'PROMOTIONAL', resolution, currency: 'USD', unit: 'SECOND',
