@@ -330,6 +330,7 @@ class AvatarStudioService {
   async approveL2Generation(input={}) { return this.requireL2().approve(input); }
   async generateL2Candidates(input={}) { return this.requireL2().generate(input); }
   requireMotionPilot() { if (!this.motionPilotService) throw new AvatarStudioError(503,'MOTION_PILOT_SERVICE_UNAVAILABLE','Avatar Motion Pilot is not configured'); return this.motionPilotService; }
+  async motionPilotRoutes() { return this.requireMotionPilot().routes(); }
   async planMotionPilot(input={}) { return this.requireMotionPilot().plan(input); }
   async preflightMotionPilot(input={}) { return this.requireMotionPilot().preflight(input); }
   async approveMotionPilot(input={}) { return this.requireMotionPilot().approve(input); }

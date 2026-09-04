@@ -28,6 +28,7 @@ async function main() {
     async passportLab(value) { calls.push(['passportLab', value]); return { id: value.avatarId, currentLevel: 0 }; },
     async bodyExpressionsLab(value) { calls.push(['l2Lab',value]); return {id:value.avatarId,currentLevel:1}; },
     async smokeReadiness(value) { calls.push(['smokeReadiness',value]); return {ready:false,checks:{OPENAI_API_KEY:'NO'},externalGenerationCalls:0}; },
+    async motionPilotRoutes() { calls.push(['motionPilotRoutes']); return [{id:'WAN_27_R2V_MULTI_REFERENCE'},{id:'WAN_3_I2V_CERTIFIED_START_FRAME'}]; },
     async motionPilotState(value) { calls.push(['motionPilotState',value]); return { execution:{id:value.executionId||'11111111-1111-4111-8111-111111111111'} }; },
     async reviewMotionPilotIdentity(value) { calls.push(['motionPilotIdentityReview',value]); return { identity:'FAIL',motionPilotQualityStatus:'REJECTED' }; },
     async createBodyBuild(value) { calls.push(['bodyBuild',value]); return {bodyBuild:{id:'build-1'}}; },
@@ -80,6 +81,7 @@ async function main() {
       { brandId: 'brand-1', identity: { personality: 'calm' } })).status, 201);
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/passport-lab?brandId=brand-1')).status, 200);
     assert.equal((await request(server,'POST','/api/avatar-studio/avatars/avatar-1/smoke-readiness',{brandId:'brand-1',kind:'PASSPORT'})).status,200);
+    const motionRoutes=await request(server,'GET','/api/avatar-studio/motion-pilot-routes');assert.equal(motionRoutes.status,200);assert.deepEqual(motionRoutes.payload.map((route)=>route.id),['WAN_27_R2V_MULTI_REFERENCE','WAN_3_I2V_CERTIFIED_START_FRAME']);
     const motionScope={workspaceId:'workspace-1',brandId:'brand-1',vertical:'TRAVEL',identityVersionId:'11111111-1111-4111-8111-111111111111'};
     const validMotionExecution='11111111-1111-4111-8111-111111111111',validMotionAttempt='22222222-2222-4222-8222-222222222222';
     assert.equal((await request(server,'GET',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1`)).status,200);

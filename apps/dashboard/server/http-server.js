@@ -116,6 +116,8 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
           'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
         return response.end(content.bytes);
       }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'motion-pilot-routes' && segments.length === 3) return json(response,200,await avatarService.motionPilotRoutes());
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments.length === 5) {
         const body = await readJson(request);
@@ -139,7 +141,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'motion-pilot-plans' && segments[6] === 'preflight' && segments.length === 7) {
-        return json(response,201,await avatarService.preflightMotionPilot({avatarId:segments[3],...await readJson(request)}));
+        return json(response,201,await avatarService.preflightMotionPilot({avatarId:segments[3],planId:segments[5],...await readJson(request)}));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'motion-pilot-executions' && segments.length === 7) {

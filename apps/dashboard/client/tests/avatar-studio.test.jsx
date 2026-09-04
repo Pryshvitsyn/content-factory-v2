@@ -56,6 +56,7 @@ describe('Avatar Studio dashboard', () => {
     const avatar={id:'avatar-generate',internalName:'Mara',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'};
     const executionId='11111111-1111-4111-8111-111111111111'; const durable={execution:{id:executionId},attempt:{id:'22222222-2222-4222-8222-222222222222'},result:{id:'result-1',contentUrl:'/durable-video.mp4'},providerStatus:'SUCCEEDED',technicalStatus:'PASS',identityStatus:'NOT_REVIEWED',motionPilotQualityStatus:'AWAITING_IDENTITY_REVIEW'};
     fetch.mockImplementation((url,options={})=>{
+      if(String(url)==='/api/avatar-studio/motion-pilot-routes')return response([{id:'WAN_27_R2V_MULTI_REFERENCE',label:'Wan 2.7 R2V · multi-reference',provider:'replicate',model:'wan-video/wan-2.7-r2v',capability:'REFERENCE_TO_VIDEO',referenceStrategy:'CERTIFIED_CHEST_UP_PLUS_THREE_IDENTITY_REFERENCES',exactReferenceCount:4,durationSeconds:5,resolution:'720p',aspectRatio:'9:16',costExpectationUsd:.5}]);
       if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([avatar]);
       if(String(url)===`/api/avatar-studio/avatars/${avatar.id}?brandId=${brand.id}`)return response(avatar);
       if(String(url).endsWith('/motion-pilot-plans')&&options.method==='POST')return response({id:'plan-1',identityReferenceBundle:{references:[]}});
