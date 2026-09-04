@@ -2,13 +2,14 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AvatarDetail, AvatarStudio, LevelLadder } from '../src/AvatarStudio';
+import { AvatarStudioV1Intake } from '../src/AvatarStudioV1Intake';
 import { approvalDisplay, AttemptDiagnostics } from '../src/PassportLab';
 
 const brand = { id: '11111111-1111-4111-8111-111111111111', name: 'Attune' };
 function response(payload, ok = true) { return Promise.resolve({ ok, status: ok ? 200 : 400, json: async () => payload }); }
 
 describe('Avatar Studio dashboard', () => {
-  beforeEach(() => { vi.stubGlobal('fetch', vi.fn(() => response([brand]))); });
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn(() => response([brand]))); Object.defineProperty(URL, 'createObjectURL', { configurable:true, value: vi.fn((file) => `blob:${file.name}`) }); });
   afterEach(() => vi.unstubAllGlobals());
 
   it('restores durable approval state for completed executions', () => {
@@ -192,5 +193,24 @@ describe('Avatar Studio dashboard', () => {
     expect(screen.getByText(/Open BODY \+ EXPRESSIONS LAB/)).toBeTruthy();
     expect(screen.queryByLabelText('Wardrobe pack name')).toBeNull();
     expect(screen.queryByRole('button', { name: 'APPROVE LEVEL 2' })).toBeNull();
+  });
+
+  it('renders a preview, filename and independent viewpoint selector for every V1 photo before upload', async () => {
+    render(<AvatarStudioV1Intake brands={[brand]} onCreated={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Display name'),{target:{value:'Photo test'}});
+    fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});
+    fireEvent.change(screen.getByLabelText('Age class'),{target:{value:'ADULT'}});
+    fetch.mockImplementation((url,options={}) => url==='/api/avatar-studio/avatars'&&options.method==='POST'
+      ? response({id:'avatar-photo-test',brandIds:[brand.id],vertical:'PSYCHOLOGY_WELLBEING',subjectType:'CONSENTED_REAL_PERSON'}) : response([]));
+    fireEvent.click(screen.getByRole('button',{name:'CREATE AVATAR'}));
+    await screen.findByRole('heading',{name:'Add photos'});
+    const first=new File(['one'],'IMG_1001.JPG',{type:'image/jpeg'}),second=new File(['two'],'IMG_1002.JPG',{type:'image/jpeg'});
+    fireEvent.change(screen.getByLabelText('Add identity photos'),{target:{files:[first,second]}});
+    expect(screen.getByAltText('Selected photo IMG_1001.JPG').getAttribute('src')).toBe('blob:IMG_1001.JPG');
+    expect(screen.getByAltText('Selected photo IMG_1002.JPG').getAttribute('src')).toBe('blob:IMG_1002.JPG');
+    expect(screen.getByText('IMG_1001.JPG')).toBeTruthy(); expect(screen.getByText('IMG_1002.JPG')).toBeTruthy();
+    const firstView=screen.getByLabelText('View for IMG_1001.JPG'),secondView=screen.getByLabelText('View for IMG_1002.JPG');
+    fireEvent.change(firstView,{target:{value:'FRONTAL'}});
+    expect(firstView.value).toBe('FRONTAL'); expect(secondView.value).toBe('UNKNOWN');
   });
 });

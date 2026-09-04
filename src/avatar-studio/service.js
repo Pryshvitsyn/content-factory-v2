@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 const { AUDIENCE_VERTICALS, AvatarStudioError, PERFORMANCE_PACKS, assertBrandPermission,
   canonicalCharacter, canonicalIdentity, canonicalIdentityLock, fingerprint, requiredText, stringList } = require('./domain');
 const { assertGateUsable, inspectGateZero } = require('./gate-zero');
@@ -112,18 +114,23 @@ class AvatarStudioService {
     const results = [];
     for (const photo of photos) {
       const proposedViewpoint = viewpoint(photo.viewpoint || 'UNKNOWN');
-      const intake = await this.requireIntake().intake({ avatar, brandId, sourceType: 'UPLOAD', file: photo.file,
-        provenance: { ...(photo.provenance || {}), source: 'AVATAR_STUDIO_V1_IDENTITY_BATCH', visualOnly: true,
-          viewpointProposal: proposedViewpoint, viewpointClassifier: 'HUMAN_GUIDED_NO_AUTOMATIC_BIOMETRICS' } });
-      let source = null; let duplicate = (avatar.sources || []).some((item) => item.contentHash === intake.asset.contentHash && (item.roles || []).includes('IDENTITY'));
-      const existing = await this.repository.sourceForIntake({ intakeId: intake.asset.id, avatarId: avatar.id, brandId });
+      if (!photo?.intakeId || photo.file) throw new AvatarStudioError(400, 'IDENTITY_BATCH_METADATA_REQUIRED', 'Identity batch accepts persisted intake IDs and viewpoint metadata only');
+      const intake = await this.repository.intake({ id: photo.intakeId, brandId, avatarId: avatar.id });
+      if (!intake || !['image/jpeg','image/png','image/webp'].includes(String(intake.mimeType || '').toLowerCase()) || intake.effectiveGate0Status !== 'PASS'
+        || !intake.artifactStorageKey || !intake.contentHash) throw new AvatarStudioError(409, 'IDENTITY_INTAKE_INELIGIBLE', 'A selected photo is unavailable, not an image, or is not Gate 0 PASS');
+      const bytes = await this.requireIntake().storage.get({ key: intake.artifactStorageKey });
+      if (!Buffer.isBuffer(bytes) || !bytes.length || crypto.createHash('sha256').update(bytes).digest('hex') !== intake.contentHash) {
+        throw new AvatarStudioError(409, 'IDENTITY_INTAKE_HASH_MISMATCH', 'A selected photo no longer matches its durable intake record');
+      }
+      let source = null; let duplicate = (avatar.sources || []).some((item) => item.contentHash === intake.contentHash && (item.roles || []).includes('IDENTITY'));
+      const existing = await this.repository.sourceForIntake({ intakeId: intake.id, avatarId: avatar.id, brandId });
       if (existing) { source = existing; duplicate = true; }
       else if (!duplicate && intake.asset.effectiveGate0Status === 'PASS') {
-        const used = await this.requireIntake().use({ avatar, brandId, intakeId: intake.asset.id, roles: ['IDENTITY'] }); source = used.source;
+        const used = await this.requireIntake().use({ avatar, brandId, intakeId: intake.id, roles: ['IDENTITY'] }); source = used.source;
         if (proposedViewpoint !== 'UNKNOWN') await this.repository.addSourceViewpointClassification({ avatar, source, viewpoint: proposedViewpoint,
           provenance: { source: 'AVATAR_STUDIO_V1_GUIDED_VIEWPOINT', proposedViewpoint, automatedVisualInference: false }, actor: this.actor });
       }
-      results.push(Object.freeze({ ...intake, source, duplicate }));
+      results.push(Object.freeze({ intakeId: intake.id, previewUrl: `/api/avatar-studio/intakes/${encodeURIComponent(intake.id)}/content?brandId=${encodeURIComponent(brandId)}&avatarId=${encodeURIComponent(avatar.id)}`, source, duplicate }));
     }
     return Object.freeze({ photos: Object.freeze(results), coverage: await this.identityCoverage({ avatarId, brandId }), paidProviderCalls: 0, externalGenerationCalls: 0 });
   }

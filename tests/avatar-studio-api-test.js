@@ -52,6 +52,8 @@ async function main() {
     async certifyPassportCandidate(value) { calls.push(['passportCandidateCertify', value]); return { avatar: { currentLevel: 1 }, paidProviderCalls: 0 }; },
     async reviewQueue(value) { calls.push(['reviewQueue', value]); return []; },
     async listIntakes(value) { calls.push(['listIntakes', value]); return []; },
+    async identityCoverage(value) { calls.push(['identityCoverage', value]); return { status:'NOT_READY' }; },
+    async intakeIdentityBatch(value) { calls.push(['identityBatch', value]); return { photos:value.photos, coverage:{status:'NOT_READY'}, paidProviderCalls:0, externalGenerationCalls:0 }; },
     async existingAssets(value) { calls.push(['existingAssets', value]); return []; },
     async intakeAsset(value) { calls.push(['intakeAsset', value]); return { asset: { id: 'intake-1' }, gate0: { status: 'PASS' } }; },
     async reviewIntake(value) { calls.push(['reviewIntake', value]); return { event: { action: value.action } }; },
@@ -115,6 +117,12 @@ async function main() {
     assert.equal((await request(server, 'GET', '/api/avatar-studio/avatars/avatar-1/existing-assets?brandId=brand-1')).status, 200);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes',
       { brandId: 'brand-1', sourceType: 'UPLOAD', file: { contentBase64: 'AA==' } })).status, 201);
+    // Normal photo bytes travel individually through the 36 MB asset route; the V1 batch is small intake-ID metadata.
+    for (const id of ['a','b','c']) assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes',
+      { brandId:'brand-1', sourceType:'UPLOAD', file:{name:`phone-${id}.jpg`,mimeType:'image/jpeg',contentBase64:'x'.repeat(20 * 1024)} })).status,201);
+    const identityBatch=await request(server,'POST','/api/avatar-studio/avatars/avatar-1/identity-photo-batches',
+      {brandId:'brand-1',photos:[{intakeId:'intake-a',viewpoint:'FRONTAL'},{intakeId:'intake-b',viewpoint:'THREE_QUARTER_LEFT'},{intakeId:'intake-c',viewpoint:'THREE_QUARTER_RIGHT'}]});
+    assert.equal(identityBatch.status,201);assert(identityBatch.payload.photos.every((photo)=>photo.intakeId));
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes/intake-1/review',
       { brandId: 'brand-1', action: 'APPROVE_FOR_USE' })).status, 201);
     assert.equal((await request(server, 'POST', '/api/avatar-studio/avatars/avatar-1/intakes/intake-1/consent-requests',
@@ -136,6 +144,7 @@ async function main() {
     assert.equal(calls.find(([name]) => name === 'passportQa')[1].candidateId, 'candidate-1');
     assert.equal(calls.find(([name]) => name === 'passportCandidateCertify')[1].candidateId, 'candidate-1');
     assert.deepEqual(calls.find(([name]) => name === 'useIntake')[1].roles, ['IDENTITY']);
+    const batchCall=calls.find(([name])=>name==='identityBatch')[1];assert.equal(JSON.stringify(batchCall).includes('contentBase64'),false);assert.equal(batchCall.photos.length,3);
     assert.equal(calls.find(([name]) => name === 'sourceViewpoint')[1].value, 'FRONTAL');
     assert.equal(calls.find(([name])=>name==='passportPreflight')[1].generationSpecId,'plan-1');
     assert.equal(calls.find(([name])=>name==='passportGenerate')[1].executionId,'execution-1');
