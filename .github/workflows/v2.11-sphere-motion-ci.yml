@@ -8,7 +8,9 @@ on:
     paths:
       - "src/v2.11/**"
       - "scripts/impulseoff-sphere-motion-master.js"
+      - "scripts/impulseoff-build-canonical-reference.js"
       - "tests/v2.11-sphere-motion-master-test.js"
+      - "tests/v2.11-canonical-reference-builder-test.js"
       - "package.json"
       - ".github/workflows/v2.11-sphere-motion-ci.yml"
   pull_request:
@@ -17,7 +19,9 @@ on:
     paths:
       - "src/v2.11/**"
       - "scripts/impulseoff-sphere-motion-master.js"
+      - "scripts/impulseoff-build-canonical-reference.js"
       - "tests/v2.11-sphere-motion-master-test.js"
+      - "tests/v2.11-canonical-reference-builder-test.js"
       - "package.json"
       - ".github/workflows/v2.11-sphere-motion-ci.yml"
 
@@ -53,5 +57,7 @@ jobs:
           LIVE_PAID_GENERATION: "false"
           PAID_PROVIDER_CALLS: "0"
           EXTERNAL_GENERATION_CALLS: "0"
-        run: npm run test:v2.11
+        run: |
+          npm run test:v2.11
+          node tests/v2.11-canonical-reference-builder-test.js
         timeout-minutes: 3
