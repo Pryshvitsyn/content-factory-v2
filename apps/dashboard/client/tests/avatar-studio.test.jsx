@@ -209,7 +209,7 @@ describe('Avatar Studio dashboard', () => {
     fireEvent.change(screen.getByLabelText('Display name'),{target:{value:'Photo test'}});
     fireEvent.change(screen.getByLabelText('Subject type'),{target:{value:'SYNTHETIC'}});
     fireEvent.click(screen.getByRole('button',{name:'CREATE AVATAR'}));
-    await screen.findByRole('heading',{name:'Add photos'});
+    await screen.findByRole('heading',{name:'Add / Manage Photos'});
     const first=new File(['one'],'IMG_1001.JPG',{type:'image/jpeg'}),second=new File(['two'],'IMG_1002.JPG',{type:'image/jpeg'});
     fireEvent.change(screen.getByLabelText('Add identity photos'),{target:{files:[first,second]}});
     expect(screen.getByAltText('Selected photo IMG_1001.JPG').getAttribute('src')).toBe('blob:IMG_1001.JPG');
