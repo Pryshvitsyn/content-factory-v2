@@ -172,6 +172,15 @@ class AvatarStudioService {
     return Object.freeze({ confirmation, coverage, status: coverage.status, paidProviderCalls: 0, externalGenerationCalls: 0 });
   }
 
+  async identitySetupState({ avatarId, brandId } = {}) {
+    const avatar=await this.avatar({id:avatarId,brandId}); const intakes=await this.listIntakes({avatarId,brandId}); const coverage=await this.identityCoverage({avatarId,brandId});
+    const face=(avatar.consentEvents||[]).find((item)=>item.modality==='FACE'&&item.status==='APPROVED'&&item.eventType==='GRANT'&&(item.allowedBrandIds||[]).includes(brandId)&&(item.allowedVerticals||[]).includes(avatar.vertical)&&(!item.expiresAt||new Date(item.expiresAt)>new Date()));
+    const confirmation=await this.repository.latestIdentityIntakeConfirmation({avatarId,brandId}); const hasSources=(avatar.sources||[]).some((item)=>(item.roles||[]).includes('IDENTITY'));
+    const next=avatar.subjectType!=='SYNTHETIC'&&!face?'RIGHTS_CONSENT':!intakes.length?'ADD_PHOTOS':!hasSources?'ADD_PHOTOS':coverage.status==='NOT_READY'?'CHECK_COVERAGE':!confirmation?'CHECK_COVERAGE':'READY';
+    return Object.freeze({avatar,intakes,coverage,faceConsent:face||null,confirmation,next});
+  }
+  async identitySetupCandidates({ brandId } = {}) { return this.list({brandId}).then((items)=>items.filter((item)=>Number(item.currentLevel||0)===0)); }
+
   async avatar({ id, brandId }) {
     if (!brandId) throw new AvatarStudioError(400, 'BRAND_SCOPE_REQUIRED', 'brandId is required');
     const avatar = await this.repository.getCharacter({ id, brandId });

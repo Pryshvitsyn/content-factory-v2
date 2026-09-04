@@ -75,7 +75,7 @@ class AvatarStudioPostgresRepository {
   }
 
   async getCharacter({ id, brandId = null } = {}) {
-    const base = (await this.db.query(`SELECT c.*,cv.id AS identity_version_id,cv.version,cv.identity_spec,cv.identity_hash,ls.current_level,ls.level_name,
+    const base = (await this.db.query(`SELECT c.*,cv.id AS identity_version_id,cv.version,cv.identity_spec,cv.identity_hash,cv.provenance,ls.current_level,ls.level_name,
       ls.completed_requirements,ls.missing_requirements,ls.blocking_failures
       FROM avatar_studio.characters c JOIN avatar_studio.character_versions cv ON cv.character_id=c.id
       AND cv.version=(SELECT max(version) FROM avatar_studio.character_versions WHERE character_id=c.id)
@@ -374,6 +374,10 @@ class AvatarStudioPostgresRepository {
       (workspace_id,brand_id,character_id,identity_version_id,confirmation_text,confirmed_by,provenance)
       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [avatar.workspaceId,brandId,avatar.id,avatar.identityVersionId || null,
       confirmationText,actor,{ source:'AVATAR_STUDIO_V1_HUMAN_IDENTITY_CONFIRMATION', biometricVerification:false }])).rows[0]);
+  }
+
+  async latestIdentityIntakeConfirmation({ avatarId, brandId }) {
+    const row=(await this.db.query(`SELECT * FROM avatar_studio.identity_intake_confirmations WHERE character_id=$1 AND brand_id=$2 ORDER BY confirmed_at DESC,id DESC LIMIT 1`,[avatarId,brandId])).rows[0]; return row?camel(row):null;
   }
 
   async addReviewEvent({ intake, action, reason, actor }) {

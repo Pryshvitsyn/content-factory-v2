@@ -47,6 +47,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         return json(response, 200, await avatarService.list({ brandId: url.searchParams.get('brandId'),
           vertical: url.searchParams.get('vertical') }));
       }
+      if (avatarService && request.method === 'GET' && url.pathname === '/api/avatar-studio/avatar-setups') return json(response,200,await avatarService.identitySetupCandidates({brandId:url.searchParams.get('brandId')}));
       if (avatarService && request.method === 'GET' && url.pathname === '/api/avatar-studio/gate0-reviews') {
         return json(response, 200, await avatarService.reviewQueue({ brandId: url.searchParams.get('brandId') }));
       }
@@ -57,6 +58,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         && segments[2] === 'avatars' && segments.length === 4) {
         return json(response, 200, await avatarService.avatar({ id: segments[3], brandId: url.searchParams.get('brandId') }));
       }
+      if (avatarService && request.method === 'GET' && segments[0]==='api'&&segments[1]==='avatar-studio'&&segments[2]==='avatars'&&segments[4]==='identity-setup'&&segments.length===5) return json(response,200,await avatarService.identitySetupState({avatarId:segments[3],brandId:url.searchParams.get('brandId')}));
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'smoke-readiness' && segments.length === 5) {
         return json(response,200,await avatarService.smokeReadiness({avatarId:segments[3],...await readJson(request)}));
