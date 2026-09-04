@@ -186,6 +186,17 @@ class AvatarAssetIntakeService {
     return Object.freeze({asset:publicIntake(stored),artifact,gate0});
   }
 
+  // This checkpoint deliberately precedes media validation and Gate 0. A paid provider
+  // response must remain recoverable even if any later policy or intake step rejects it.
+  async persistMotionPilotRawProviderOutput({ bytes, provider, model, attemptId } = {}) {
+    if (!Buffer.isBuffer(bytes) || !bytes.length) throw new AvatarStudioError(502, 'PROVIDER_OUTPUT_INVALID', 'Provider returned no video bytes');
+    return this.artifactService.createVersion({
+      artifactId: `avatar-motion-pilot-raw-${attemptId}`, type: 'binary', content: bytes,
+      stageId: 'AVATAR_MOTION_PILOT_RAW_PROVIDER_OUTPUT', attemptId,
+      idempotencyKey: `avatar-motion-pilot-raw:${attemptId}`, provider, model, validationStatus: 'RAW_PROVIDER_SUCCESS',
+    });
+  }
+
   eligibility(intake, avatar, roles) {
     const failures = [];
     if (intake.effectiveGate0Status !== 'PASS') failures.push(intake.effectiveGate0Status === 'BLOCK' ? 'GATE0_BLOCKED' : 'GATE0_REVIEW_REQUIRED');

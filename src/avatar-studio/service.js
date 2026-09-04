@@ -238,6 +238,7 @@ class AvatarStudioService {
   async approveMotionPilot(input={}) { return this.requireMotionPilot().approve(input); }
   async generateMotionPilot(input={}) { return this.requireMotionPilot().generate(input); }
   async recoverMotionPilot(input={}) { return this.requireMotionPilot().recoverExisting(input); }
+  async recoverMotionPilotLocalOutput(input={}) { return this.requireMotionPilot().recoverFromPersistedProviderOutput(input); }
 
   async planPassportGeneration({ avatarId, brandId, sourceAssetIds, requestedCandidateCount = 4,
     preferredProvider = null, preferredModel = null, originalGenerationSpecId = null, repairDelta = null } = {}) {

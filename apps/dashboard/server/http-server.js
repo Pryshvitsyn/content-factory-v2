@@ -128,6 +128,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if(segments[6]==='approve')return json(response,201,await avatarService.approveMotionPilot(args));
         if(segments[6]==='generate')return json(response,202,await avatarService.generateMotionPilot(args));
         if(segments[6]==='recover')return json(response,202,await avatarService.recoverMotionPilot(args));
+        if(segments[6]==='recover-local-output')return json(response,202,await avatarService.recoverMotionPilotLocalOutput(args));
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'l2-readiness' && segments.length === 5) {
