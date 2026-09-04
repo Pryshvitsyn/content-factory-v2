@@ -84,7 +84,7 @@ describe('Avatar Studio dashboard', () => {
       return response([]);
     });
     render(<MotionPilot brands={[brand]}/>);fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Mara'});fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});
-    await screen.findByText('LOCAL AUTOMATIC QA RUNTIME');expect(screen.getByText(/BODY REFERENCE SET: READY/)).toBeTruthy();expect(screen.getByText(/BATCH INFRASTRUCTURE: READY/)).toBeTruthy();expect(screen.getByRole('button',{name:'START AUTOMATIC QUALITY LOOP · QA READINESS REQUIRED'}).disabled).toBe(true);
+    await screen.findByText('LOCAL AUTOMATIC QA RUNTIME');expect(screen.getByText(/BODY REFERENCE SET: READY/)).toBeTruthy();expect(screen.getByRole('button',{name:'PLAN QUALITY BATCH · ZERO CALLS'})).toBeTruthy();expect(screen.queryByRole('button',{name:'START AUTOMATIC QUALITY LOOP'})).toBeNull();
   });
 
   it('uses current Passport candidates and does not offer a broken Level 0 approval', () => {

@@ -60,7 +60,9 @@ async function validateDashboardDatabase(db) {
       to_regclass('avatar_studio.motion_pilot_attempts') IS NOT NULL AS motion_pilot_attempts,
       to_regclass('avatar_studio.motion_pilot_automatic_qa_assessments') IS NOT NULL AS motion_pilot_auto_qa,
       to_regclass('avatar_studio.motion_pilot_quality_batches') IS NOT NULL AS motion_pilot_quality_batches,
-      to_regclass('avatar_studio.motion_pilot_quality_batch_children') IS NOT NULL AS motion_pilot_quality_batch_children`);
+      to_regclass('avatar_studio.motion_pilot_quality_batch_children') IS NOT NULL AS motion_pilot_quality_batch_children,
+      to_regclass('avatar_studio.motion_pilot_quality_batch_preflights') IS NOT NULL AS motion_pilot_quality_batch_preflights,
+      to_regclass('avatar_studio.motion_pilot_quality_batch_approvals') IS NOT NULL AS motion_pilot_quality_batch_approvals`);
   const state = result.rows[0];
   const required = [
     ['productions', 'v2_1.productions'],
@@ -78,6 +80,8 @@ async function validateDashboardDatabase(db) {
     ['motion_pilot_auto_qa', 'avatar_studio.motion_pilot_automatic_qa_assessments'],
     ['motion_pilot_quality_batches', 'avatar_studio.motion_pilot_quality_batches'],
     ['motion_pilot_quality_batch_children', 'avatar_studio.motion_pilot_quality_batch_children'],
+    ['motion_pilot_quality_batch_preflights', 'avatar_studio.motion_pilot_quality_batch_preflights'],
+    ['motion_pilot_quality_batch_approvals', 'avatar_studio.motion_pilot_quality_batch_approvals'],
   ];
   const missing = required.filter(([key]) => !state?.[key]).map(([, table]) => table);
   if (!state || missing.length) {

@@ -12,10 +12,12 @@ async function main() {
   const retryMigration = V210_MIGRATIONS.indexOf('migrations/20260903_locked_stage_retry_history.sql');
   const motionPilotMigration = V210_MIGRATIONS.indexOf('migrations/20260904_avatar_motion_pilot.sql');
   const automaticQaMigration = V210_MIGRATIONS.indexOf('migrations/20260911_avatar_motion_pilot_automatic_qa.sql');
+  const batchPreflightMigration = V210_MIGRATIONS.indexOf('migrations/20260912_avatar_motion_quality_batch_preflight.sql');
   assert(qualityMigration >= 0, 'dashboard/local preparation must auto-apply QUALITY script-first schema');
   assert(retryMigration > qualityMigration, 'append-only retry migration must run after QUALITY script-first schema');
   assert(motionPilotMigration > retryMigration, 'dashboard/local preparation must apply the Avatar Motion Pilot schema after prior additive migrations');
   assert(automaticQaMigration > motionPilotMigration, 'dashboard/local preparation must apply append-only automatic Motion QA schema');
+  assert(batchPreflightMigration > automaticQaMigration, 'dashboard/local preparation must apply immutable Quality Batch preflight schema');
 
   const readyState = {
     database: 'test',
@@ -28,7 +30,7 @@ async function main() {
     quality_storyboards: true,
     quality_approvals: true,
     motion_pilot_plans: true, motion_pilot_executions: true, motion_pilot_approvals: true, motion_pilot_attempts: true,
-    motion_pilot_auto_qa: true, motion_pilot_quality_batches: true, motion_pilot_quality_batch_children: true,
+    motion_pilot_auto_qa: true, motion_pilot_quality_batches: true, motion_pilot_quality_batch_children: true, motion_pilot_quality_batch_preflights: true, motion_pilot_quality_batch_approvals: true,
   };
   let readinessQuery = '';
   const readyDb = {
@@ -52,6 +54,8 @@ async function main() {
     'avatar_studio.motion_pilot_automatic_qa_assessments',
     'avatar_studio.motion_pilot_quality_batches',
     'avatar_studio.motion_pilot_quality_batch_children',
+    'avatar_studio.motion_pilot_quality_batch_preflights',
+    'avatar_studio.motion_pilot_quality_batch_approvals',
   ]) assert(readinessQuery.includes(table), `readiness must verify ${table}`);
 
   const missingDb = {
