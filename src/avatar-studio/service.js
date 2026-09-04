@@ -141,6 +141,29 @@ class AvatarStudioService {
     return coverageFromSources(avatar.sources || [], (source) => byId.get(source.intakeAssetId));
   }
 
+  async grantIdentityFaceConsent({ avatarId, brandId, ownerRelationship, subjectName, evidenceNotes, humanApproval = false,
+    disclosureAccepted = false } = {}) {
+    if (!humanApproval || !disclosureAccepted) throw new AvatarStudioError(409, 'HUMAN_APPROVAL_REQUIRED', 'Explicit rights and FACE consent confirmation is required');
+    const avatar = await this.avatar({ id: avatarId, brandId });
+    if (avatar.subjectType === 'SYNTHETIC') throw new AvatarStudioError(409, 'FACE_CONSENT_NOT_REQUIRED', 'Synthetic avatars do not require this real-person consent step');
+    const relationship = String(ownerRelationship || '').toUpperCase(); const ageClass = avatar.provenance?.ageClass || null;
+    if (!['SELF','AUTHORIZED_BY_SUBJECT','GUARDIAN_AUTHORIZED'].includes(relationship)
+      || (ageClass === 'MINOR' && relationship !== 'GUARDIAN_AUTHORIZED') || (ageClass !== 'MINOR' && relationship === 'GUARDIAN_AUTHORIZED')) {
+      throw new AvatarStudioError(400, 'IDENTITY_RIGHTS_ATTESTATION_INVALID', 'Choose the applicable adult authorization or minor guardian authorization');
+    }
+    const consent = await this.repository.addAvatarConsentEvent({ avatar, brandId, modality:'FACE',
+      subjectIdentity:{ name: requiredText('subjectName',subjectName), ownerRelationship:relationship }, rightsBasis:relationship,
+      allowedBrandIds:[brandId], allowedVerticals:[avatar.vertical], allowedChannels:avatar.intendedChannels || ['web'],
+      allowedUseTypes:['AVATAR_IDENTITY','PASSPORT_REFERENCE'], evidenceNotes:requiredText('evidenceNotes',evidenceNotes), actor:this.actor });
+    const intakes = await this.repository.listIntakes({ brandId, avatarId:avatar.id }); const resolved=[];
+    for (const intake of intakes) {
+      const codes=(intake.gate0Findings || []).map((item)=>item.code); const rightsOnly=codes.length>0 && codes.every((code)=>['FACE_CONSENT_REQUIRED','PROVENANCE_UNCERTAIN'].includes(code));
+      if (intake.gate0Status === 'REVIEW' && rightsOnly) { await this.repository.addReviewEvent({ intake, action:'APPROVE_FOR_USE',
+        reason:'Explicit scoped FACE consent and ownership/authorization attestation resolve the recorded rights-only review findings.', actor:this.actor }); resolved.push(intake.id); }
+    }
+    return Object.freeze({ consent, resolvedIntakeIds:Object.freeze(resolved), paidProviderCalls:0, externalGenerationCalls:0 });
+  }
+
   async confirmIdentityIntake({ avatarId, brandId, confirmed = false } = {}) {
     if (!confirmed) throw new AvatarStudioError(409, 'IDENTITY_CONFIRMATION_REQUIRED', 'Confirm that the accepted photos show the intended person');
     const avatar = await this.avatar({ id: avatarId, brandId }); const coverage = await this.identityCoverage({ avatarId, brandId });

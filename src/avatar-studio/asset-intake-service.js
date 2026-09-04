@@ -16,10 +16,13 @@ function publicIntake(intake) {
   if (!intake) return null;
   const { artifactStorageKey, tokenHash, ...safe } = intake;
   const analysis = intake.provenance?.intakeAnalysis || {};
-  const faceConsent = (intake.effectiveConsents || []).some((item) => item.modality === 'FACE' && item.status === 'APPROVED');
+  const faceEvent = (intake.effectiveConsents || []).find((item) => item.modality === 'FACE' && item.status === 'APPROVED');
+  const faceConsent = Boolean(faceEvent);
+  const rightsAttested = Boolean(faceEvent?.subjectIdentity?.ownerRelationship);
   const voiceConsent = (intake.effectiveConsents || []).some((item) => item.modality === 'VOICE' && item.status === 'APPROVED');
   const unresolvedFindings = (intake.gate0Findings || []).filter((item) => {
     if (item.code === 'FACE_CONSENT_REQUIRED' && faceConsent) return false;
+    if (item.code === 'PROVENANCE_UNCERTAIN' && rightsAttested) return false;
     if (item.code === 'VOICE_CONSENT_REQUIRED' && voiceConsent) return false;
     if (item.code === 'PROVENANCE_UNCERTAIN' && intake.effectiveRightsStatus === 'VERIFIED') return false;
     return item.severity === 'BLOCK' || intake.effectiveGate0Status !== 'PASS';
@@ -111,6 +114,8 @@ class AvatarAssetIntakeService {
     const completeMedia = { ...media, filename };
     const faceConsent = currentAvatarConsent(avatar, 'FACE');
     const voiceConsent = currentAvatarConsent(avatar, 'VOICE');
+    const rightsAttestation = faceConsent && consentAllows(faceConsent,
+      { brandId, vertical: avatar.vertical, modality: 'FACE' }) && faceConsent.subjectIdentity?.ownerRelationship;
     const faceConsentVerified = avatar.subjectType === 'SYNTHETIC' || consentAllows(faceConsent,
       { brandId, vertical: avatar.vertical, modality: 'FACE' });
     const voiceConsentVerified = avatar.subjectType === 'SYNTHETIC' || consentAllows(voiceConsent,
@@ -129,7 +134,8 @@ class AvatarAssetIntakeService {
     const rightsStatus = avatar.subjectType === 'SYNTHETIC' ? 'NOT_REQUIRED' : 'UNKNOWN';
     const stored = await this.repository.createIntake({ id: intakeId, avatar, brandId, artifact,
       media: completeMedia, sourceType: normalizedType, sourceLocator, existingAssetId: existing?.id, gate0, rightsStatus,
-      provenance: { ...provenance, intakeAnalysis: { detectedMime: media.detectedMime, width: media.width, height: media.height,
+      provenance: { ...provenance, owner: rightsAttestation || provenance.owner || null,
+        rightsAttestationEventId: rightsAttestation ? faceConsent.id : null, intakeAnalysis: { detectedMime: media.detectedMime, width: media.width, height: media.height,
         orientation: media.orientation, rotation: media.rotation, byteSize: media.byteSize, encoding: media.encoding,
         metadataParser: media.metadataParser, readiness },
         artifactService: 'CONTENT_FACTORY_IMMUTABLE_ARTIFACT_V1', uploader: this.actor,

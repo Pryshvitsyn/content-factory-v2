@@ -404,6 +404,16 @@ class AvatarStudioPostgresRepository {
       evidenceArtifactVersion || null,evidenceNotes || null,expiresAt || null,supersedesEventId,actor])).rows[0]);
   }
 
+  async addAvatarConsentEvent({ avatar, brandId, modality, subjectIdentity, rightsBasis, allowedBrandIds, allowedVerticals,
+    allowedChannels, allowedUseTypes, evidenceNotes, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.consent_events
+      (workspace_id,brand_id,character_id,intake_asset_id,modality,event_type,status,subject_identity,rights_basis,
+       allowed_brand_ids,allowed_verticals,allowed_channels,allowed_use_types,evidence_notes,recorded_by)
+      VALUES($1,$2,$3,NULL,$4,'GRANT','APPROVED',$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [avatar.workspaceId,brandId,avatar.id,modality,subjectIdentity,rightsBasis,json(allowedBrandIds),json(allowedVerticals),
+      json(allowedChannels),json(allowedUseTypes),evidenceNotes,actor])).rows[0]);
+  }
+
   async listExistingAssets({ brandId, workspaceId }) {
     return (await this.db.query(`SELECT ar.id,ar.asset_id AS "artifactId",ar.artifact_version AS "artifactVersion",
       ar.artifact_storage_key AS "storageKey",ar.kind,ar.metadata,ar.created_at AS "createdAt",p.workspace_id AS "workspaceId",

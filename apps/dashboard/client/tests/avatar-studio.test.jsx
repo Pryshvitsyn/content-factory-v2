@@ -199,7 +199,7 @@ describe('Avatar Studio dashboard', () => {
     render(<AvatarStudioV1Intake brands={[brand]} onCreated={() => {}} />);
     fireEvent.change(screen.getByLabelText('Display name'),{target:{value:'Photo test'}});
     fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});
-    fireEvent.change(screen.getByLabelText('Age class'),{target:{value:'ADULT'}});
+    fireEvent.change(screen.getByLabelText('Subject type'),{target:{value:'SYNTHETIC'}});
     fetch.mockImplementation((url,options={}) => url==='/api/avatar-studio/avatars'&&options.method==='POST'
       ? response({id:'avatar-photo-test',brandIds:[brand.id],vertical:'PSYCHOLOGY_WELLBEING',subjectType:'CONSENTED_REAL_PERSON'}) : response([]));
     fireEvent.click(screen.getByRole('button',{name:'CREATE AVATAR'}));

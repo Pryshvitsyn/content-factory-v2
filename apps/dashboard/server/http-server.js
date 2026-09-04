@@ -112,6 +112,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         const body = await readJson(request);
         const args = { avatarId: segments[3], ...body };
         if (segments[4] === 'identity') return json(response, 201, await avatarService.updateIdentity(args));
+        if (segments[4] === 'identity-rights-consent') return json(response, 201, await avatarService.grantIdentityFaceConsent(args));
         if (segments[4] === 'identity-photo-batches') return json(response, 201, await avatarService.intakeIdentityBatch(args));
         if (segments[4] === 'identity-confirmations') return json(response, 201, await avatarService.confirmIdentityIntake(args));
         if (segments[4] === 'sources') return json(response, 201, await avatarService.importSource(args));
