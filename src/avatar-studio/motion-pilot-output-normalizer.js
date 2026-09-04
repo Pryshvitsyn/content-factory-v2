@@ -1,0 +1,31 @@
+'use strict';
+
+const fs=require('node:fs/promises'); const os=require('node:os'); const path=require('node:path'); const crypto=require('node:crypto');
+const { runProcess }=require('../v2.1/ffmpeg-master-renderer');
+const { AvatarStudioError }=require('./domain');
+
+function number(value,fallback=0){const parsed=Number(value);return Number.isFinite(parsed)?parsed:fallback;}
+function squarePixels(value){return !value||value==='1:1'||value==='1/1';}
+function probeEvidence(payload={}) { const streams=payload.streams||[];const video=streams.find((stream)=>stream.codec_type==='video')||{};const audio=streams.filter((stream)=>stream.codec_type==='audio');const format=payload.format||{};return Object.freeze({container:String(format.format_name||''),codec:String(video.codec_name||''),pixelFormat:String(video.pix_fmt||''),width:number(video.width),height:number(video.height),durationMs:Math.round(number(format.duration||video.duration)*1000),audioStreams:audio.length,sampleAspectRatio:String(video.sample_aspect_ratio||'1:1'),displayAspectRatio:String(video.display_aspect_ratio||''),size:number(format.size)});}
+function cropForAspect(width,height,targetWidth,targetHeight){const sourceAspect=width/height,targetAspect=targetWidth/targetHeight;if(sourceAspect>targetAspect){const cropWidth=Math.floor(height*targetAspect);return Object.freeze({x:Math.floor((width-cropWidth)/2),y:0,width:cropWidth,height});}const cropHeight=Math.floor(width/targetAspect);return Object.freeze({x:0,y:Math.floor((height-cropHeight)/2),width,height:cropHeight});}
+function canonicalMatches(probe,canonical){return probe.width===canonical.width&&probe.height===canonical.height&&probe.codec==='h264'&&probe.pixelFormat==='yuv420p'&&squarePixels(probe.sampleAspectRatio);}
+
+class FfmpegMotionPilotOutputNormalizer {
+  constructor({ffmpegPath='ffmpeg',ffprobePath='ffprobe',run=runProcess}={}){Object.assign(this,{ffmpegPath,ffprobePath,run});}
+  async probeFile(inputPath){const result=await this.run(this.ffprobePath,['-v','error','-show_streams','-show_format','-of','json',inputPath]);return probeEvidence(JSON.parse(result.stdout.toString('utf8')));}
+  async normalize({bytes,route}={}){
+    if(!Buffer.isBuffer(bytes)||!bytes.length)throw new AvatarStudioError(502,'MOTION_PILOT_VIDEO_MISSING','Provider output bytes are required for local canonicalization');
+    const canonical=route?.canonicalOutput,policy=route?.outputNormalization;
+    if(!canonical||!policy)throw new AvatarStudioError(409,'MOTION_PILOT_OUTPUT_POLICY_MISSING','The persisted Motion Pilot route has no canonical output policy');
+    const directory=await fs.mkdtemp(path.join(os.tmpdir(),'motion-pilot-output-'));const input=path.join(directory,'provider.mp4'),output=path.join(directory,'canonical.mp4');
+    try { await fs.writeFile(input,bytes,{flag:'wx'});const providerOutput=await this.probeFile(input);if(!providerOutput.width||!providerOutput.height||providerOutput.durationMs<=0||!providerOutput.container.includes('mp4'))throw new AvatarStudioError(502,'MOTION_PILOT_PROVIDER_OUTPUT_INVALID','Raw provider output is not a playable MP4');
+      const needsGeometry=!canonicalMatches(providerOutput,canonical);const needsAudio=Boolean(canonical.silent&&providerOutput.audioStreams>0);if(!needsGeometry&&!needsAudio)return Object.freeze({bytes,providerOutput,canonicalOutput:providerOutput,normalization:{status:'SUCCEEDED',mode:'NONE',policyVersion:policy.version||'motion-pilot-output-v1',geometryStrategy:'NONE',cropRectangle:null,scaleOperation:null,aspectRatioPreserved:true,anisotropicStretchApplied:false,audioRemoved:false,squarePixels:true,sourceRawContentHash:crypto.createHash('sha256').update(bytes).digest('hex'),canonicalContentHash:crypto.createHash('sha256').update(bytes).digest('hex')}});
+      if(policy.allowed!==true)throw new AvatarStudioError(409,'MOTION_PILOT_OUTPUT_NORMALIZATION_DISALLOWED','The route does not permit local provider-output normalization');
+      let args=['-hide_banner','-loglevel','error','-y','-i',input,'-map','0:v:0'];let cropRectangle=null,scaleOperation=null,mode='AUDIO_REMOVAL_ONLY';
+      if(needsGeometry){if(policy.geometryStrategy!=='CROP_SCALE_PRESERVE_ASPECT')throw new AvatarStudioError(409,'MOTION_PILOT_OUTPUT_GEOMETRY_UNSUPPORTED','The route does not permit aspect-preserving output geometry normalization');cropRectangle=cropForAspect(providerOutput.width,providerOutput.height,canonical.width,canonical.height);scaleOperation={width:canonical.width,height:canonical.height,algorithm:'lanczos'};args.push('-vf',`crop=${cropRectangle.width}:${cropRectangle.height}:${cropRectangle.x}:${cropRectangle.y},scale=${canonical.width}:${canonical.height}:flags=lanczos,setsar=1,format=yuv420p`,'-c:v','libx264','-pix_fmt','yuv420p','-preset','medium','-crf','18');mode='CROP_SCALE_PRESERVE_ASPECT';}else args.push('-c:v','copy');
+      if(canonical.silent||policy.removeAudio)args.push('-an');args.push('-movflags','+faststart',output);await this.run(this.ffmpegPath,args);const normalized=await fs.readFile(output);const canonicalOutput=await this.probeFile(output);if(!canonicalMatches(canonicalOutput,canonical)||canonicalOutput.durationMs<5000||canonicalOutput.durationMs>8000||(canonical.silent&&canonicalOutput.audioStreams!==0))throw new AvatarStudioError(502,'MOTION_PILOT_CANONICAL_OUTPUT_INVALID','Local canonicalization did not produce the route-required Motion Pilot output');
+      return Object.freeze({bytes:normalized,providerOutput,canonicalOutput,normalization:{status:'SUCCEEDED',mode,policyVersion:policy.version||'motion-pilot-output-v1',geometryStrategy:needsGeometry?policy.geometryStrategy:'NONE',cropRectangle,scaleOperation,aspectRatioPreserved:true,anisotropicStretchApplied:false,audioRemoved:needsAudio, squarePixels:true,sourceRawContentHash:crypto.createHash('sha256').update(bytes).digest('hex'),canonicalContentHash:crypto.createHash('sha256').update(normalized).digest('hex')}});
+    } catch(error){if(error.code)throw error;throw new AvatarStudioError(502,'MOTION_PILOT_OUTPUT_NORMALIZATION_FAILED',`Local Motion Pilot output canonicalization failed: ${error.message}`);} finally {await fs.rm(directory,{recursive:true,force:true});}
+  }
+}
+module.exports={FfmpegMotionPilotOutputNormalizer,probeEvidence,cropForAspect};

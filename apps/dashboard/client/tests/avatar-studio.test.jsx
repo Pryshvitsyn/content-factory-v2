@@ -32,7 +32,7 @@ describe('Avatar Studio dashboard', () => {
 
   it('uses a restored Motion Pilot execution ID, refreshes review state, and never posts undefined', async () => {
     const avatar={id:'avatar-motion',internalName:'Mara',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'};
-    const restored={execution:{id:'11111111-1111-4111-8111-111111111111'},attempt:{id:'22222222-2222-4222-8222-222222222222'},result:{id:'result-1',providerRequestId:'request-1',contentUrl:'/safe-video.mp4'},providerStatus:'SUCCEEDED',technicalStatus:'PASS',identityStatus:'NOT_REVIEWED',motionPilotQualityStatus:'AWAITING_IDENTITY_REVIEW'};
+    const restored={execution:{id:'11111111-1111-4111-8111-111111111111'},attempt:{id:'22222222-2222-4222-8222-222222222222'},result:{id:'result-1',providerRequestId:'request-1',contentUrl:'/safe-video.mp4'},providerStatus:'SUCCEEDED',technicalStatus:'PASS',identityStatus:'NOT_REVIEWED',outputNormalization:{geometryStrategy:'CROP_SCALE_PRESERVE_ASPECT',audioRemoved:true,providerOutput:{width:1280,height:720},canonicalOutput:{width:720,height:1280}},motionPilotQualityStatus:'AWAITING_IDENTITY_REVIEW'};
     const rejected={...restored,review:{decision:'FAIL',reasonCode:'BODY_DRIFT'},identityStatus:'FAIL',motionPilotQualityStatus:'REJECTED'};
     vi.stubGlobal('prompt',vi.fn().mockReturnValueOnce('BODY_DRIFT').mockReturnValueOnce('elongated'));
     fetch.mockImplementation((url,options={})=>{
@@ -47,7 +47,7 @@ describe('Avatar Studio dashboard', () => {
     fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Mara'});
     fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});await screen.findByRole('button',{name:'FAIL IDENTITY'});
     fireEvent.click(screen.getByRole('button',{name:'FAIL IDENTITY'}));await screen.findByText(/IDENTITY: FAIL/);
-    expect(screen.getByText(/MOTION PILOT: REJECTED/)).toBeTruthy();expect(document.querySelector('video').getAttribute('src')).toBe('/safe-video.mp4');
+    expect(screen.getByText(/MOTION PILOT: REJECTED/)).toBeTruthy();expect(screen.getByText(/Provider output: 1280×720/)).toBeTruthy();expect(document.querySelector('video').getAttribute('src')).toBe('/safe-video.mp4');
     const reviewCall=fetch.mock.calls.find(([url])=>String(url).includes('/identity-review'));expect(reviewCall[0]).toContain(`/${restored.execution.id}/identity-review`);
     expect(fetch.mock.calls.some(([url])=>String(url).includes('/undefined/identity-review'))).toBe(false);
   });

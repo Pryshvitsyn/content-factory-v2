@@ -1,0 +1,13 @@
+'use strict';
+
+const assert=require('node:assert/strict'); const fs=require('node:fs/promises'); const os=require('node:os'); const path=require('node:path'); const { execFile }=require('node:child_process'); const { promisify }=require('node:util');
+const { FfmpegMotionPilotOutputNormalizer }=require('../src/avatar-studio/motion-pilot-output-normalizer'); const { loadMotionPilotPolicy }=require('../src/avatar-studio/motion-pilot-policy');
+const run=promisify(execFile);
+
+(async()=>{const directory=await fs.mkdtemp(path.join(os.tmpdir(),'motion-pilot-output-test-'));const raw=path.join(directory,'raw.mp4');try{
+  await run('ffmpeg',['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc2=size=1280x720:rate=24','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','5','-map','0:v:0','-map','1:a:0','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-movflags','+faststart',raw]);
+  const bytes=await fs.readFile(raw);const route=loadMotionPilotPolicy().routes.WAN_3_I2V_CERTIFIED_START_FRAME;const normalizer=new FfmpegMotionPilotOutputNormalizer();const normalized=await normalizer.normalize({bytes,route});
+  assert.equal(normalized.providerOutput.width,1280);assert.equal(normalized.providerOutput.height,720);assert.equal(normalized.providerOutput.codec,'h264');assert.equal(normalized.providerOutput.audioStreams,1);assert.equal(normalized.canonicalOutput.width,720);assert.equal(normalized.canonicalOutput.height,1280);assert.equal(normalized.canonicalOutput.codec,'h264');assert.equal(normalized.canonicalOutput.pixelFormat,'yuv420p');assert.equal(normalized.canonicalOutput.audioStreams,0);assert.equal(normalized.canonicalOutput.sampleAspectRatio,'1:1');assert(normalized.canonicalOutput.durationMs>=5000&&normalized.canonicalOutput.durationMs<=8000);assert.equal(normalized.normalization.mode,'CROP_SCALE_PRESERVE_ASPECT');assert.equal(normalized.normalization.aspectRatioPreserved,true);assert.equal(normalized.normalization.anisotropicStretchApplied,false);assert.equal(normalized.normalization.audioRemoved,true);assert.deepEqual(normalized.normalization.cropRectangle,{x:437,y:0,width:405,height:720});assert.deepEqual(normalized.normalization.scaleOperation,{width:720,height:1280,algorithm:'lanczos'});
+  const noOp=await normalizer.normalize({bytes:normalized.bytes,route});assert.equal(noOp.normalization.mode,'NONE');assert.equal(noOp.bytes.equals(normalized.bytes),true);
+  console.log('Motion Pilot output normalization tests passed; local FFmpeg only, provider calls = 0.');
+}finally{await fs.rm(directory,{recursive:true,force:true});}})().catch((error)=>{console.error(error);process.exitCode=1;});
