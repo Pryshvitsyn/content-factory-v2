@@ -26,13 +26,13 @@ function main() {
   assert.equal(SPHERE_TOP, 280);
 
   const cosmos = renderCosmosPpm();
-  assert.equal(cosmos.subarray(0, 16).toString('ascii'), 'P6\n720 1280\n255');
   const cosmosOffset = payloadOffset(cosmos);
+  assert.equal(cosmos.subarray(0, cosmosOffset).toString('ascii'), 'P6\n720 1280\n255\n');
   assert.equal(cosmos.length - cosmosOffset, 720 * 1280 * 3);
 
   const mask = renderRecordedMaskPgm();
-  assert.equal(mask.subarray(0, 14).toString('ascii'), 'P5\n720 720\n255');
   const maskOffset = payloadOffset(mask);
+  assert.equal(mask.subarray(0, maskOffset).toString('ascii'), 'P5\n720 720\n255\n');
   const pixels = mask.subarray(maskOffset);
   assert.equal(pixels.length, 720 * 720);
   assert.equal(pixels[0], 0);
