@@ -86,7 +86,7 @@ class AvatarMotionPilotService {
       const validation=await validateMotionPilotVideo({bytes:result.output,inspector:this.mediaInspector});
       const ingested=await this.assetIntakeService.ingestProviderVideoOutput({avatar:c.avatar,brandId:scope.brandId,bytes:result.output,filename:'motion-pilot.mp4',provider:ROUTE.provider,model:ROUTE.model,attemptId:attempt.id,providerRequestId:result.requestId,consentVerified:lineage.assurances.requiredFaceConsent!=='INVALID',provenance:lineage});
       const recorded=await this.repository.completeMotionPilotAttempt({attempt,result,ingested,validation,actor:this.actor});
-      return Object.freeze({executionId:execution.id,status:'SUCCEEDED',attempt:recorded,artifact:ingested.asset,validation,providerCalls:1,externalGenerationCalls:1});
+      return Object.freeze({executionId:execution.id,status:'AWAITING_IDENTITY_REVIEW',providerStatus:'SUCCEEDED',technicalStatus:'PASS',identityStatus:'NOT_REVIEWED',motionPilotQualityStatus:'AWAITING_IDENTITY_REVIEW',attempt:recorded,artifact:ingested.asset,validation,providerCalls:1,externalGenerationCalls:1});
     } catch(error) {
       const failed=await this.repository.failMotionPilotAttempt({attempt,error,actor:this.actor});
       error.details={...(error.details||{}),motionPilotAttempt:{id:attempt.id,executionId:execution.id,providerStatus:failed?.providerStatus||'unknown',rawOutputSaved:Boolean(failed?.rawArtifactId),failureClassification:error.code}};
