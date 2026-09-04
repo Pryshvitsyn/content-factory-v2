@@ -78,6 +78,10 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         return json(response, 200, await avatarService.listIntakes({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'identity-coverage' && segments.length === 5) {
+        return json(response, 200, await avatarService.identityCoverage({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
+      }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'existing-assets' && segments.length === 5) {
         return json(response, 200, await avatarService.existingAssets({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
       }
@@ -108,6 +112,8 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         const body = await readJson(request);
         const args = { avatarId: segments[3], ...body };
         if (segments[4] === 'identity') return json(response, 201, await avatarService.updateIdentity(args));
+        if (segments[4] === 'identity-photo-batches') return json(response, 201, await avatarService.intakeIdentityBatch(args));
+        if (segments[4] === 'identity-confirmations') return json(response, 201, await avatarService.confirmIdentityIntake(args));
         if (segments[4] === 'sources') return json(response, 201, await avatarService.importSource(args));
         if (segments[4] === 'passports') return json(response, 201, await avatarService.registerPassport(args));
         if (segments[4] === 'identity-locks') return json(response, 201, await avatarService.createIdentityLock(args));

@@ -369,6 +369,13 @@ class AvatarStudioPostgresRepository {
     return Promise.all(rows.map((row) => this.intake({ id: row.id, brandId, avatarId })));
   }
 
+  async createIdentityIntakeConfirmation({ avatar, brandId, confirmationText, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.identity_intake_confirmations
+      (workspace_id,brand_id,character_id,identity_version_id,confirmation_text,confirmed_by,provenance)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [avatar.workspaceId,brandId,avatar.id,avatar.identityVersionId || null,
+      confirmationText,actor,{ source:'AVATAR_STUDIO_V1_HUMAN_IDENTITY_CONFIRMATION', biometricVerification:false }])).rows[0]);
+  }
+
   async addReviewEvent({ intake, action, reason, actor }) {
     return camel((await this.db.query(`INSERT INTO avatar_studio.gate0_review_events
       (workspace_id,brand_id,intake_asset_id,action,reason,findings_snapshot,decided_by)

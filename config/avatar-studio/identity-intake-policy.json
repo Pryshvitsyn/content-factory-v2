@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "photoBatch": { "minimum": 1, "maximum": 10 },
+  "canonicalViewpoints": ["FRONTAL", "THREE_QUARTER_LEFT", "THREE_QUARTER_RIGHT", "PROFILE_LEFT", "PROFILE_RIGHT"],
+  "minimumIdentityCoverage": {
+    "required": ["FRONTAL", "THREE_QUARTER_LEFT", "THREE_QUARTER_RIGHT"],
+    "recommended": ["PROFILE_LEFT", "PROFILE_RIGHT"]
+  },
+  "quality": { "rejectExactDuplicates": true, "requireValidImage": true, "requireGate0Pass": true },
+  "humanControl": { "viewpointCorrectionAllowed": true, "identityConfirmationRequired": true },
+  "minorSafety": { "explicitAgeClassDeclarationRequired": true, "neverInferMinorStatusFromImage": true }
+}

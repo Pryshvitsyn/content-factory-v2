@@ -50,6 +50,7 @@ const V210_MIGRATIONS = [
   'migrations/20260906_avatar_motion_pilot_identity_reviews.sql',
   'migrations/20260907_avatar_motion_pilot_identity_review_immutable.sql',
   'migrations/20260908_avatar_motion_pilot_reference_to_video.sql',
+  'migrations/20260909_avatar_studio_identity_intake_v1.sql',
 ];
 
 function discoverDatabaseUrl(env = process.env) {

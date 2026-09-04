@@ -91,9 +91,12 @@ function canonicalIdentityLock(input = {}) {
 
 function canonicalCharacter(input = {}) {
   const vertical = String(input.vertical || input.verticalCode || '').toUpperCase();
-  const subjectType = String(input.subjectType || '').toUpperCase();
+  const requestedSubjectType = String(input.subjectType || '').toUpperCase();
+  const subjectType = requestedSubjectType === 'REAL' ? 'CONSENTED_REAL_PERSON' : requestedSubjectType;
+  const ageClass = subjectType === 'SYNTHETIC' ? null : String(input.ageClass || '').toUpperCase();
   if (!AUDIENCE_VERTICALS.includes(vertical)) throw new AvatarStudioError(400, 'VERTICAL_INVALID', 'Choose a supported audience vertical');
   if (!SUBJECT_TYPES.includes(subjectType)) throw new AvatarStudioError(400, 'SUBJECT_TYPE_INVALID', 'Choose a supported avatar subject type');
+  if (requestedSubjectType === 'REAL' && !['ADULT','MINOR'].includes(ageClass)) throw new AvatarStudioError(400, 'AGE_CLASS_REQUIRED', 'Real people require an explicit ADULT or MINOR declaration');
   const brandIds = stringList('brandIds', input.brandIds, { required: true });
   const consent = Object.freeze({
     status: String(input.consent?.status || (subjectType === 'SYNTHETIC' ? 'APPROVED' : 'REVIEW')).toUpperCase(),
@@ -112,7 +115,7 @@ function canonicalCharacter(input = {}) {
     intendedChannels: stringList('intendedChannels', input.intendedChannels),
     identity: canonicalIdentity(input.identity || input),
     consent,
-    provenance: Object.freeze({ ...(input.provenance || {}), source: input.provenance?.source || 'OPERATOR_INPUT' }),
+    provenance: Object.freeze({ ...(input.provenance || {}), ageClass, source: input.provenance?.source || 'OPERATOR_INPUT' }),
   });
 }
 

@@ -5,6 +5,7 @@ import { PassportLab } from './PassportLab';
 import { BodyExpressionsLab } from './BodyExpressionsLab';
 import { MotionPilot } from './MotionPilot';
 import { CreateAvatarMultiSource } from './CreateAvatarMultiSource';
+import { AvatarStudioV1Intake } from './AvatarStudioV1Intake';
 import './AvatarStudio.css';
 
 function ErrorPanel({ error }) { return error ? <div className="error-panel"><strong>{error.code}</strong><p>{error.message}</p></div> : null; }
@@ -18,7 +19,7 @@ export function AvatarStudio() {
     <p className="page-note">Identity, consent, references and level approvals remain brand-scoped, versioned and plan-only until a separate production preflight.</p>
     <ErrorPanel error={error}/><div className="avatar-tabs">{tabs.map((item)=><button className={tab===item?'active':''} onClick={()=>setTab(item)} key={item}>{item}</button>)}</div>
     {tab==='LIBRARY'?<AvatarLibrary brands={brands} selectedBrand={selectedBrand} setSelectedBrand={setSelectedBrand} revision={revision}/>:null}
-    {tab==='CREATE AVATAR'?<CreateAvatarMultiSource brands={brands} onCreated={()=>setRevision((value)=>value+1)}/>:null}
+    {tab==='CREATE AVATAR'?<AvatarStudioV1Intake brands={brands} onCreated={()=>setRevision((value)=>value+1)}/>:null}
     {tab==='PASSPORT LAB'?<PassportLab brands={brands}/>:null}
     {tab==='BODY + EXPRESSIONS LAB'?<BodyExpressionsLab brands={brands}/>:null}
     {tab==='AVATAR MOTION PILOT'?<MotionPilot brands={brands}/>:null}

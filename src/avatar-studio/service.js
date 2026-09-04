@@ -11,6 +11,8 @@ const { compilePassportGenerationSpec } = require('./passport-plan-compiler');
 const { analyzePassportCandidate } = require('./passport-qa');
 const { buildSmokeReadiness } = require('./smoke-readiness');
 const { viewpoint } = require('./source-viewpoint');
+const { loadIdentityIntakePolicy } = require('./identity-intake-policy');
+const { coverageFromSources } = require('./identity-coverage');
 
 const PASSPORT_REJECTION_REASONS = Object.freeze(['PROFILE_DRIFT','NOSE_CHANGED','JAW_CHANGED','CHIN_CHANGED','AGE_CHANGED',
   'HAIR_CHANGED','HAIRLINE_CHANGED','FACE_CHANGED','ACCESSORY_CONTAMINATION','WARDROBE_CONTAMINATION','BACKGROUND_ERROR',
@@ -102,6 +104,42 @@ class AvatarStudioService {
   async intakeContent(input = {}) {
     const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
     return this.requireIntake().content({ avatar, ...input });
+  }
+
+  async intakeIdentityBatch({ avatarId, brandId, photos = [] } = {}) {
+    const policy = loadIdentityIntakePolicy(); const avatar = await this.avatar({ id: avatarId, brandId });
+    if (!Array.isArray(photos) || photos.length < policy.photoBatch.minimum || photos.length > policy.photoBatch.maximum) throw new AvatarStudioError(400, 'IDENTITY_PHOTO_BATCH_INVALID', 'Add between 1 and 10 photos in one batch');
+    const results = [];
+    for (const photo of photos) {
+      const proposedViewpoint = viewpoint(photo.viewpoint || 'UNKNOWN');
+      const intake = await this.requireIntake().intake({ avatar, brandId, sourceType: 'UPLOAD', file: photo.file,
+        provenance: { ...(photo.provenance || {}), source: 'AVATAR_STUDIO_V1_IDENTITY_BATCH', visualOnly: true,
+          viewpointProposal: proposedViewpoint, viewpointClassifier: 'HUMAN_GUIDED_NO_AUTOMATIC_BIOMETRICS' } });
+      let source = null; let duplicate = (avatar.sources || []).some((item) => item.contentHash === intake.asset.contentHash && (item.roles || []).includes('IDENTITY'));
+      const existing = await this.repository.sourceForIntake({ intakeId: intake.asset.id, avatarId: avatar.id, brandId });
+      if (existing) { source = existing; duplicate = true; }
+      else if (!duplicate && intake.asset.effectiveGate0Status === 'PASS') {
+        const used = await this.requireIntake().use({ avatar, brandId, intakeId: intake.asset.id, roles: ['IDENTITY'] }); source = used.source;
+        if (proposedViewpoint !== 'UNKNOWN') await this.repository.addSourceViewpointClassification({ avatar, source, viewpoint: proposedViewpoint,
+          provenance: { source: 'AVATAR_STUDIO_V1_GUIDED_VIEWPOINT', proposedViewpoint, automatedVisualInference: false }, actor: this.actor });
+      }
+      results.push(Object.freeze({ ...intake, source, duplicate }));
+    }
+    return Object.freeze({ photos: Object.freeze(results), coverage: await this.identityCoverage({ avatarId, brandId }), paidProviderCalls: 0, externalGenerationCalls: 0 });
+  }
+
+  async identityCoverage({ avatarId, brandId } = {}) {
+    const avatar = await this.avatar({ id: avatarId, brandId }); const intakes = await this.repository.listIntakes({ brandId, avatarId: avatar.id });
+    const byId = new Map(intakes.map((item) => [item.id, item]));
+    return coverageFromSources(avatar.sources || [], (source) => byId.get(source.intakeAssetId));
+  }
+
+  async confirmIdentityIntake({ avatarId, brandId, confirmed = false } = {}) {
+    if (!confirmed) throw new AvatarStudioError(409, 'IDENTITY_CONFIRMATION_REQUIRED', 'Confirm that the accepted photos show the intended person');
+    const avatar = await this.avatar({ id: avatarId, brandId }); const coverage = await this.identityCoverage({ avatarId, brandId });
+    if (coverage.status === 'NOT_READY') throw new AvatarStudioError(409, 'IDENTITY_COVERAGE_INCOMPLETE', 'Complete the required front and slight-angle photos first', coverage);
+    const confirmation = await this.repository.createIdentityIntakeConfirmation({ avatar, brandId, confirmationText: 'I confirm these photos show the intended person.', actor: this.actor });
+    return Object.freeze({ confirmation, coverage, status: coverage.status, paidProviderCalls: 0, externalGenerationCalls: 0 });
   }
 
   async avatar({ id, brandId }) {
