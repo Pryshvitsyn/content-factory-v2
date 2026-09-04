@@ -338,6 +338,13 @@ class AvatarStudioService {
   async recoverMotionPilot(input={}) { return this.requireMotionPilot().recoverExisting(input); }
   async recoverMotionPilotLocalOutput(input={}) { return this.requireMotionPilot().recoverFromPersistedProviderOutput(input); }
   async reviewMotionPilotIdentity(input={}) { return this.requireMotionPilot().reviewIdentity(input); }
+  async motionPilotAutomaticQaReadiness(input={}) { return this.requireMotionPilot().automaticQaReadiness(input); }
+  async assessMotionPilotAutomaticQa(input={}) { return this.requireMotionPilot().assessAutomaticQa(input); }
+  async planMotionQualityBatch(input={}) { return this.requireMotionPilot().planQualityBatch(input); }
+  async preflightMotionQualityBatch(input={}) { return this.requireMotionPilot().preflightQualityBatch(input); }
+  async approveMotionQualityBatch(input={}) { return this.requireMotionPilot().approveQualityBatch(input); }
+  async startMotionQualityBatch(input={}) { return this.requireMotionPilot().startQualityBatch(input); }
+  async cancelMotionQualityBatch(input={}) { return this.requireMotionPilot().cancelQualityBatch(input); }
   async motionPilotState(input={}) { return this.requireMotionPilot().state(input); }
 
   async planPassportGeneration({ avatarId, brandId, sourceAssetIds, requestedCandidateCount = 4,

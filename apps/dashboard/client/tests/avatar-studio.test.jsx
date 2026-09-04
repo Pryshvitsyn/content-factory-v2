@@ -73,6 +73,20 @@ describe('Avatar Studio dashboard', () => {
     fireEvent.click(screen.getByRole('button',{name:'GENERATE 1 REAL VIDEO'}));await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toBe('/durable-video.mp4'));
   });
 
+  it('shows durable local Motion QA runtime and blocks automatic batch start when readiness is blocked', async () => {
+    const avatar={id:'avatar-qa',internalName:'Mara',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'};
+    fetch.mockImplementation((url)=>{
+      if(String(url)==='/api/avatar-studio/motion-pilot-routes')return response([{id:'WAN_27_R2V_MULTI_REFERENCE',label:'Wan 2.7 R2V',provider:'replicate',model:'wan-video/wan-2.7-r2v',capability:'REFERENCE_TO_VIDEO',referenceStrategy:'CERTIFIED_CHEST_UP_PLUS_THREE_IDENTITY_REFERENCES',exactReferenceCount:4,durationSeconds:5,resolution:'720p',aspectRatio:'9:16',costExpectationUsd:.5}]);
+      if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([avatar]);
+      if(String(url)===`/api/avatar-studio/avatars/${avatar.id}?brandId=${brand.id}`)return response(avatar);
+      if(String(url).includes('/motion-pilot-qa-readiness?'))return response({status:'BLOCKED',taskProfile:{id:'MOTION_PILOT_CHEST_UP',minimumUsableBodyReferences:3},runtime:{identity:{status:'READY'},pose:{status:'READY'},bodyGeometry:{status:'READY'},motionContinuity:{status:'READY'}},bodyReferenceSet:{readiness:'READY',references:[{intakeId:'a'},{intakeId:'b'},{intakeId:'c'}]},blockers:[{code:'PROVIDER_CREDENTIAL_UNAVAILABLE',message:'A provider credential is required before real start'}]});
+      if(String(url).includes('/motion-pilot-executions?'))return response({execution:{id:'execution'}});
+      return response([]);
+    });
+    render(<MotionPilot brands={[brand]}/>);fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Mara'});fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});
+    await screen.findByText('LOCAL AUTOMATIC QA RUNTIME');expect(screen.getByText(/BODY REFERENCE SET: READY/)).toBeTruthy();expect(screen.getByText(/BATCH INFRASTRUCTURE: READY/)).toBeTruthy();expect(screen.getByRole('button',{name:'START AUTOMATIC QUALITY LOOP · QA READINESS REQUIRED'}).disabled).toBe(true);
+  });
+
   it('uses current Passport candidates and does not offer a broken Level 0 approval', () => {
     const blockedL0={currentLevel:0,currentLevelName:'IDENTITY',nextLevel:{level:0,name:'IDENTITY'},levels:[
       {level:0,status:'BLOCKED'},{level:1,status:'BLOCKED'},{level:2,status:'BLOCKED'}],missingRequirements:['IDENTITY_HUMAN_CONFIRMATION']};

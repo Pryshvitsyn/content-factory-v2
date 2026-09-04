@@ -73,6 +73,9 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio' && segments[2] === 'avatars' && segments[4] === 'motion-pilot-executions' && (segments.length === 5||segments.length===6)) {
         return json(response,200,await avatarService.motionPilotState({avatarId:segments[3],executionId:segments[5]?requiredMotionPilotUuid(segments[5],'execution_id'):null,workspaceId:url.searchParams.get('workspaceId'),brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
       }
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio' && segments[2] === 'avatars' && segments[4] === 'motion-pilot-qa-readiness' && segments.length === 5) {
+        return json(response,200,await avatarService.motionPilotAutomaticQaReadiness({avatarId:segments[3],routeId:url.searchParams.get('routeId'),workspaceId:url.searchParams.get('workspaceId'),brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
+      }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'passport-lab' && segments.length === 5) {
         return json(response, 200, await avatarService.passportLab({ avatarId: segments[3], brandId: url.searchParams.get('brandId') }));
@@ -137,11 +140,20 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (segments[4] === 'l2-candidates') return json(response,201,await avatarService.uploadL2Candidate(args));
         if (segments[4] === 'l2-certification') return json(response,201,await avatarService.certifyL2Pack(args));
         if (segments[4] === 'motion-pilot-plans') return json(response,201,await avatarService.planMotionPilot(args));
+        if (segments[4] === 'motion-quality-batches') return json(response,201,await avatarService.planMotionQualityBatch(args));
         if (segments[4] === 'level-assets') return json(response, 201, await avatarService.addLevelAsset(args));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'motion-pilot-plans' && segments[6] === 'preflight' && segments.length === 7) {
         return json(response,201,await avatarService.preflightMotionPilot({avatarId:segments[3],planId:segments[5],...await readJson(request)}));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'motion-quality-batches' && segments.length === 7) {
+        const args={avatarId:segments[3],batchId:requiredMotionPilotUuid(segments[5],'batch_id'),...await readJson(request)};
+        if(segments[6]==='preflight')return json(response,201,await avatarService.preflightMotionQualityBatch(args));
+        if(segments[6]==='approve')return json(response,201,await avatarService.approveMotionQualityBatch(args));
+        if(segments[6]==='start')return json(response,202,await avatarService.startMotionQualityBatch(args));
+        if(segments[6]==='cancel')return json(response,201,await avatarService.cancelMotionQualityBatch(args));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'motion-pilot-executions' && segments.length === 7) {
@@ -152,6 +164,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if(segments[6]==='recover')return json(response,202,await avatarService.recoverMotionPilot(args));
         if(segments[6]==='recover-local-output')return json(response,202,await avatarService.recoverMotionPilotLocalOutput(args));
         if(segments[6]==='identity-review')return json(response,201,await avatarService.reviewMotionPilotIdentity(args));
+        if(segments[6]==='automatic-qa')return json(response,201,await avatarService.assessMotionPilotAutomaticQa(args));
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'l2-readiness' && segments.length === 5) {

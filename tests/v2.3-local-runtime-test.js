@@ -60,6 +60,7 @@ async function main() {
     locked_workflows: true, locked_attempts: true, quality_scripts: true,
     quality_storyboards: true, quality_approvals: true, motion_pilot_plans: true,
     motion_pilot_executions: true, motion_pilot_approvals: true, motion_pilot_attempts: true,
+    motion_pilot_auto_qa: true, motion_pilot_quality_batches: true, motion_pilot_quality_batch_children: true,
   }] }) });
   assert.equal(readiness.database, 'content_os');
   await assert.rejects(() => validateDashboardDatabase({ query: async () => ({ rows: [{

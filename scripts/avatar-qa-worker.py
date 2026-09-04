@@ -40,7 +40,9 @@ def pose(value):
     fx,fy,fw,fh=candidate_face['box'];px1,py1=bbox[0];px2,py2=bbox[1];nose=joints['nose'];inside=px1<=fx+fw/2<=px2 and py1<=fy+fh/2<=py2
     near=np.hypot(nose['x']*image.shape[1]-(fx+fw/2),nose['y']*image.shape[0]-(fy+fh/2))<=max(fw,fh)
     association='ASSOCIATED' if inside and near else 'ASSOCIATION_UNCERTAIN'
-  return {'status':'POSE_USABLE' if usable and association=='ASSOCIATED' else 'POSE_PARTIAL' if usable else 'POSE_NOT_USABLE','association':association,'personCount':1,'confidence':float(confidence),'personBox':[float(bbox[0][0]/image.shape[1]),float(bbox[0][1]/image.shape[0]),float(bbox[1][0]/image.shape[1]),float(bbox[1][1]/image.shape[0])],'joints':joints,'maskCoverage':float(np.count_nonzero(mask)/mask.size)}
+  face_geometry=None
+  if candidate_face['status']=='ONE_USABLE_FACE':face_geometry={'box':candidate_face['box'],'landmarks':candidate_face['landmarks'],'width':candidate_face['width'],'height':candidate_face['height'],'confidence':candidate_face['confidence']}
+  return {'status':'POSE_USABLE' if usable and association=='ASSOCIATED' else 'POSE_PARTIAL' if usable else 'POSE_NOT_USABLE','association':association,'personCount':1,'confidence':float(confidence),'personBox':[float(bbox[0][0]/image.shape[1]),float(bbox[0][1]/image.shape[0]),float(bbox[1][0]/image.shape[1]),float(bbox[1][1]/image.shape[0])],'joints':joints,'maskCoverage':float(np.count_nonzero(mask)/mask.size),'faceGeometry':face_geometry}
 def evaluate(req):
   candidate=face(req['candidate']);out={'candidateStatus':candidate['status'],'observations':[]}
   if candidate['status']!='ONE_USABLE_FACE':return out

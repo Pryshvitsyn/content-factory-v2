@@ -31,6 +31,8 @@ async function main() {
     async motionPilotRoutes() { calls.push(['motionPilotRoutes']); return [{id:'WAN_27_R2V_MULTI_REFERENCE'},{id:'WAN_3_I2V_CERTIFIED_START_FRAME'}]; },
     async motionPilotState(value) { calls.push(['motionPilotState',value]); return { execution:{id:value.executionId||'11111111-1111-4111-8111-111111111111'} }; },
     async reviewMotionPilotIdentity(value) { calls.push(['motionPilotIdentityReview',value]); return { identity:'FAIL',motionPilotQualityStatus:'REJECTED' }; },
+    async motionPilotAutomaticQaReadiness(value) { calls.push(['motionPilotAutomaticQaReadiness',value]); return {status:'BLOCKED',blockers:[{code:'PROVIDER_CREDENTIAL_UNAVAILABLE'}],externalGenerationCalls:0}; },
+    async assessMotionPilotAutomaticQa(value) { calls.push(['motionPilotAutomaticQa',value]); return {id:'assessment-1',aggregate:{status:'UNCERTAIN'},providerCalls:0,externalGenerationCalls:0}; },
     async createBodyBuild(value) { calls.push(['bodyBuild',value]); return {bodyBuild:{id:'build-1'}}; },
     async planL2Reference(value) { calls.push(['l2Plan',value]); return {id:'l2-plan-1',externalGenerationCalls:0}; },
     async uploadL2Candidate(value) { calls.push(['l2Upload',value]); return {candidate:{id:'l2-candidate-1'}}; },
@@ -85,6 +87,8 @@ async function main() {
     const motionScope={workspaceId:'workspace-1',brandId:'brand-1',vertical:'TRAVEL',identityVersionId:'11111111-1111-4111-8111-111111111111'};
     const validMotionExecution='11111111-1111-4111-8111-111111111111',validMotionAttempt='22222222-2222-4222-8222-222222222222';
     assert.equal((await request(server,'GET',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1`)).status,200);
+    assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/motion-pilot-qa-readiness?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1&routeId=WAN_27_R2V_MULTI_REFERENCE')).status,200);
+    assert.equal((await request(server,'POST',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}/automatic-qa`,motionScope)).status,201);
     assert.equal((await request(server,'POST',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}/identity-review`,{...motionScope,attemptId:validMotionAttempt,decision:'FAIL',reasonCode:'BODY_DRIFT'})).status,201);
     const malformedMotion=await request(server,'POST','/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/undefined/identity-review',{...motionScope,attemptId:validMotionAttempt,decision:'FAIL',reasonCode:'BODY_DRIFT'});
     assert.equal(malformedMotion.status,400);assert.equal(malformedMotion.payload.error.code,'MOTION_PILOT_EXECUTION_ID_INVALID');
