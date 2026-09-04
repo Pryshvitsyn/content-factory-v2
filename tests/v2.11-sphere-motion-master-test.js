@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { APPROVAL_GATES, NEGATIVE_PROMPT, SphereMotionError, SphereMotionMasterService, createGenerationPlan, createMotionSpec, exportPaths, validateManifest } = require('../src/v2.11/sphere-motion-master');
+const { APPROVAL_GATES, BASE_PROMPT, NEGATIVE_PROMPT, SphereMotionError, SphereMotionMasterService, createGenerationPlan, createMotionSpec, exportPaths, validateManifest } = require('../src/v2.11/sphere-motion-master');
 const { buildFrameArgs, buildLoopPreviewArgs, buildTrimArgs, extractSegment, inspectOutput, run } = require('../src/v2.11/sphere-motion-media');
 const { analyze, validateLoop } = require('../src/v2.11/loop-validator');
 
@@ -28,6 +28,11 @@ async function main() {
   assert.ok(plan.prompt.includes('Hard exclusions:'));
   assert.ok(plan.prompt.includes('no white ring'));
   assert.ok(plan.negativePrompt.includes('no white ring'));
+  assert.ok(BASE_PROMPT.includes('dark blue-black cosmic scene'));
+  assert.ok(BASE_PROMPT.includes('subtle cool blue nebula and haze'));
+  assert.ok(BASE_PROMPT.includes('sparse dim stars'));
+  assert.ok(BASE_PROMPT.includes('star positions visually stable'));
+  assert.equal(BASE_PROMPT.includes('nearly black cinematic environment'), false);
   assert.equal(plan.expectedPaidCalls, 1);
   assert.equal(NEGATIVE_PROMPT.includes('no red'), true);
   assert.ok(NEGATIVE_PROMPT.length <= 500, `NEGATIVE_PROMPT must stay <= 500 chars, got ${NEGATIVE_PROMPT.length}`);
