@@ -36,9 +36,13 @@ function filePayload(file) { return new Promise((resolve, reject) => { const rea
 
 function LevelLadder({ avatar }) {
   const state = avatar?.levelState || avatar;
-  return <div className="avatar-levels">{LEVEL_NAMES.map((name, level) => <article className={level <= (state?.currentLevel ?? 0) ? 'complete' : level === (state?.currentLevel ?? 0) + 1 ? 'next' : ''} key={name}>
-    <span>L{level}</span><strong>{name}</strong><small>{level <= (state?.currentLevel ?? 0) ? 'COMPLETE' : level === (state?.currentLevel ?? 0) + 1 ? 'NEXT' : 'LOCKED'}</small>
-  </article>)}</div>;
+  return <div className="avatar-levels">{LEVEL_NAMES.map((name, level) => {
+    const actual = state?.levels?.find((item) => item.level === level);
+    const status = actual?.status || (level <= (state?.currentLevel ?? 0) ? 'COMPLETE' : level === (state?.currentLevel ?? 0) + 1 ? 'NEXT' : 'LOCKED');
+    return <article className={status === 'COMPLETE' ? 'complete' : status === 'BLOCKED' && state?.nextLevel?.level === level ? 'next' : ''} key={name}>
+      <span>L{level}</span><strong>{name}</strong><small>{status}</small>
+    </article>;
+  })}</div>;
 }
 
 function LevelUpWorkflow({ avatar, brandId, onUpdated }) {
@@ -72,6 +76,7 @@ function LevelUpWorkflow({ avatar, brandId, onUpdated }) {
       onUpdated(result.avatar);
     } catch (cause) { setError(cause); } finally { setBusy(false); }
   }
+  if (next.level === 0) return <section className="level-up-workflow"><h3>Identity setup incomplete</h3><p>Complete the listed identity, consent, Gate 0, human-confirmation, and current Identity Lock requirements in the Identity Intake workflow. Level 0 is not approved from this screen.</p></section>;
   if (next.level === 1) return <section className="level-up-workflow"><h3>Next level · L1 PASSPORT</h3><p>Use Create Avatar to register Gate 0 source evidence, compare multiple three-angle candidates, and make the immutable human certification.</p></section>;
   if (next.level === 2) return <section className="level-up-workflow"><h3>Next level · L2 BODY_EXPRESSIONS</h3><p>Open BODY + EXPRESSIONS LAB. Six individual reference certifications and one final explicit pack certification are required; legacy artifact IDs cannot advance L2.</p></section>;
   return <form className="level-up-workflow avatar-form" onSubmit={submit}><span className="eyebrow">EXACTLY ONE NEXT-LEVEL WORKFLOW</span><h3>Next level · L{next.level} {next.name}</h3><ErrorPanel error={error} /><div className="form-grid">
@@ -91,7 +96,7 @@ function AvatarDetail({ avatar, brandId, close, onUpdated }) {
     <div className="avatar-summary"><div><span>CURRENT LEVEL</span><strong>L{state.currentLevel} · {state.currentLevelName || state.levelName}</strong></div><div><span>NEXT LEVEL</span><strong>{state.nextLevel ? `L${state.nextLevel.level} · ${state.nextLevel.name}` : 'MAX FIRST-SLICE LEVEL'}</strong></div><div><span>VERTICAL</span><strong>{VERTICAL_LABELS[avatar.vertical || avatar.verticalCode]}</strong></div><div><span>CONSENT</span><Badge value={avatar.consentApproved || avatar.consent?.status || 'APPROVED'} /></div></div>
     <LevelLadder avatar={avatar} />
     <div className="avatar-requirements"><article><h3>Completed requirements</h3>{(state.completedRequirements || []).map((item) => <code key={item}>{item}</code>)}</article><article><h3>Missing requirements</h3>{(state.missingRequirements || []).length ? state.missingRequirements.map((item) => <code key={item}>{item}</code>) : <small>None</small>}</article><article><h3>Blocking failures</h3>{(state.blockingFailures || []).length ? state.blockingFailures.map((item) => <code key={item}>{item}</code>) : <small>None</small>}</article></div>
-    <div className="avatar-pack-grid">{[['Passport candidates',avatar.passports],['Wardrobe packs',avatar.wardrobes],['Voice profiles',avatar.voiceProfiles],['Location packs',avatar.locations],['Performance packs',avatar.performancePacks]].map(([label,items]) => <article key={label}><span>{label}</span><strong>{items?.length || 0}</strong></article>)}</div><LevelUpWorkflow avatar={avatar} brandId={brandId} onUpdated={onUpdated} />
+    <div className="avatar-pack-grid">{[['Passport candidates',avatar.passportCandidates],['Wardrobe packs',avatar.wardrobes],['Voice profiles',avatar.voiceProfiles],['Location packs',avatar.locations],['Performance packs',avatar.performancePacks]].map(([label,items]) => <article key={label}><span>{label}</span><strong>{items?.length || 0}</strong></article>)}</div><LevelUpWorkflow avatar={avatar} brandId={brandId} onUpdated={onUpdated} />
   </section>;
 }
 

@@ -38,7 +38,13 @@ class AvatarStudioService {
   async list({ brandId, vertical = null } = {}) {
     if (!brandId) throw new AvatarStudioError(400, 'BRAND_SCOPE_REQUIRED', 'brandId is required to list avatars');
     if (vertical && !AUDIENCE_VERTICALS.includes(vertical)) throw new AvatarStudioError(400, 'VERTICAL_INVALID', 'Audience vertical is invalid');
-    return this.repository.listCharacters({ brandId, vertical });
+    const summaries = await this.repository.listCharacters({ brandId, vertical });
+    return Promise.all(summaries.map(async (summary) => {
+      const avatar = await this.repository.getCharacter({ id: summary.id, brandId });
+      if (!avatar) return summary;
+      const state = evaluateAvatarLevels(avatar);
+      return Object.freeze({ ...summary, ...state, levelState: state });
+    }));
   }
 
   async create(input) {

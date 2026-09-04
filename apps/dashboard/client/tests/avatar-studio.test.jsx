@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AvatarDetail, AvatarStudio, LevelLadder } from '../src/AvatarStudio';
+import { AvatarDetail, AvatarStudio, LevelLadder, LevelUpWorkflow } from '../src/AvatarStudio';
 import { AvatarStudioV1Intake } from '../src/AvatarStudioV1Intake';
 import { approvalDisplay, AttemptDiagnostics } from '../src/PassportLab';
 
@@ -27,6 +27,19 @@ describe('Avatar Studio dashboard', () => {
       'Gate 0 findings: PROMPT_INJECTION, EMBEDDED_EXECUTION','May have spent: YES','Provider request ID: req_safe_123']) {
       expect(screen.getByText(value)).toBeTruthy();
     }
+  });
+
+  it('uses current Passport candidates and does not offer a broken Level 0 approval', () => {
+    const blockedL0={currentLevel:0,currentLevelName:'IDENTITY',nextLevel:{level:0,name:'IDENTITY'},levels:[
+      {level:0,status:'BLOCKED'},{level:1,status:'BLOCKED'},{level:2,status:'BLOCKED'}],missingRequirements:['IDENTITY_HUMAN_CONFIRMATION']};
+    render(<><AvatarDetail avatar={{id:'avatar-1',internalName:'Mara',vertical:'TRAVEL',consent:{status:'APPROVED'},
+      levelState:blockedL0,passports:[],passportCandidates:[{id:'current-candidate'}],wardrobes:[],voiceProfiles:[],locations:[],performancePacks:[]}}
+      brandId={brand.id} close={()=>{}} onUpdated={()=>{}}/><LevelUpWorkflow avatar={{id:'avatar-1',levelState:blockedL0}} brandId={brand.id} onUpdated={()=>{}}/></>);
+    expect(screen.getByText('Passport candidates')).toBeTruthy();
+    expect(screen.getByText('1')).toBeTruthy();
+    expect(screen.getAllByText('BLOCKED').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Identity setup incomplete').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button',{name:'APPROVE LEVEL 0'})).toBeNull();
   });
 
   it('renders the Library, Create Avatar and plan-only Test Content screens', async () => {

@@ -48,6 +48,23 @@ const newLock=evaluateAvatarLevels(avatar({identityLocks:[{id:'lock-v2',identity
   passportCertificationEvents:[{identityVersionId:'identity-v2',identityLockVersionId:'lock-v1'}]}));
 assert.equal(newLock.currentLevel,0,'a new Identity Lock version requires a new human-certified passport');
 
+const canonicalV1=avatar({subjectType:'CONSENTED_REAL_PERSON',identity:{agePresentation:'DECLARED_BY_OPERATOR',personality:'TO_BE_DEFINED',
+  role:'Creator',languages:['und'],visualDirection:'TO_BE_DEFINED',permanentAttributes:{},prohibitedUses:['unconsented use']},
+  provenance:{ageClass:'ADULT'},consent:{status:'APPROVED'},consentRecords:[{status:'APPROVED',scope:'FACE'}],
+  sources:[{roles:['IDENTITY'],effectiveGate0Status:'PASS'}],identityIntakeConfirmations:[{identityVersionId:'identity-v2'}]});
+const canonicalV1L0=evaluateAvatarLevels(canonicalV1);
+assert.equal(canonicalV1L0.currentLevel,0); assert.deepEqual(canonicalV1L0.nextLevel,{level:1,name:'PASSPORT'});
+assert(!canonicalV1L0.levels[0].missing.includes('IDENTITY_PERSONALITY_ROLE'));
+assert(!canonicalV1L0.levels[0].missing.includes('IDENTITY_LANGUAGES'));
+assert(!canonicalV1L0.levels[0].missing.includes('IDENTITY_VISUAL_DIRECTION'));
+const canonicalV1L1=evaluateAvatarLevels({...canonicalV1,passportCertificationEvents:[{identityVersionId:'identity-v2',identityLockVersionId:'lock-v1',explicitConfirmation:true}]});
+assert.equal(canonicalV1L1.currentLevel,1); assert.deepEqual(canonicalV1L1.nextLevel,{level:2,name:'BODY_EXPRESSIONS'});
+for (const unsafe of [
+  {...canonicalV1,consent:{status:'REVIEW'},consentRecords:[{status:'REVIEW'}]},
+  {...canonicalV1,identityLocks:[]},
+  {...canonicalV1,sources:[{roles:['IDENTITY'],effectiveGate0Status:'BLOCK'}]},
+]) assert.equal(evaluateAvatarLevels(unsafe).nextLevel.level,0,'canonical V1 safety requirements fail closed');
+
 const catalog=new ProviderCatalog({env:{OPENAI_API_KEY:'configured-for-local-catalog-test'}});
 assert.equal(normalizeCapability('MULTI_VIEW_IDENTITY_REFERENCE'),CAPABILITIES.MULTI_VIEW_IDENTITY_REFERENCE);
 const model=catalog.listModels('openai').find((item)=>item.modelId==='gpt-image-1');

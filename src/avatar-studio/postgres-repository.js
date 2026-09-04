@@ -96,6 +96,7 @@ class AvatarStudioPostgresRepository {
       ['locations', 'SELECT * FROM avatar_studio.location_packs WHERE character_id=$1 ORDER BY created_at'],
       ['performancePacks', 'SELECT * FROM avatar_studio.performance_packs WHERE character_id=$1 ORDER BY created_at'],
       ['continuityReadiness', 'SELECT * FROM avatar_studio.continuity_readiness WHERE character_id=$1 ORDER BY approved_at'],
+      ['identityIntakeConfirmations', 'SELECT * FROM avatar_studio.identity_intake_confirmations WHERE character_id=$1 ORDER BY confirmed_at DESC,id DESC'],
       ['identityLocks', 'SELECT * FROM avatar_studio.identity_lock_versions WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
       ['passportGenerationSpecs', 'SELECT * FROM avatar_studio.passport_generation_specs WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
       ['passportCertificationEvents', 'SELECT * FROM avatar_studio.passport_certification_events WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
@@ -110,6 +111,7 @@ class AvatarStudioPostgresRepository {
     ];
     const results = await Promise.all(tableQueries.map(([, sql]) => this.db.query(sql, [id])));
     const avatar = camel(base);
+    avatar.activeBrandId = brandId || null;
     tableQueries.forEach(([key], index) => { avatar[key] = results[index].rows.map(camel); });
     for (const source of avatar.sources) await this.hydrateSource(source);
     avatar.vertical = avatar.verticalCode; avatar.subjectType = avatar.subjectType; avatar.identity = avatar.identitySpec;

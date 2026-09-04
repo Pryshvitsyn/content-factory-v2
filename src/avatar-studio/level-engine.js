@@ -24,6 +24,8 @@ function evaluateAvatarLevels(avatar = {}) {
   const latestFaceEvent = (avatar.consentEvents || []).find((item) => item.modality === 'FACE');
   const consent = avatar.consent || (latestFaceEvent?.status === 'APPROVED' ? latestFaceEvent : null)
     || (avatar.consentRecords || []).find((item) => (item.status || '').toUpperCase() === 'APPROVED');
+  const consentInvalidated = (avatar.consentRecords || []).some((item) => ['REVOKED','EXPIRED'].includes(item.status))
+    || (avatar.consentEvents || []).some((item) => ['REVOKED','EXPIRED'].includes(item.status));
   const sourceBlocks = (avatar.sources || []).filter((item) => (item.gate0Status || item.gate0_status) === 'BLOCK');
   const currentIdentityVersionId = avatar.identityVersionId || avatar.identity_version_id
     || (avatar.version && (avatar.characterVersionId || avatar.character_version_id));
@@ -34,6 +36,15 @@ function evaluateAvatarLevels(avatar = {}) {
     ? avatar.identityLocks.find((item) => (item.identityVersionId || item.identity_version_id) === currentIdentityVersionId)
       || (!avatar.identityLocks.length && legacyPassportEvidence ? { id: 'LEGACY_CERTIFIED_IDENTITY_BOUNDARY' } : null)
     : { id: 'LEGACY_FIXTURE_COMPATIBILITY' };
+  const v1IdentityConfirmation = (avatar.identityIntakeConfirmations || []).some((item) =>
+    (item.identityVersionId || item.identity_version_id) === currentIdentityVersionId
+      && (!avatar.activeBrandId || (item.brandId || item.brand_id) === avatar.activeBrandId));
+  const canonicalV1IdentityIntake = v1IdentityConfirmation;
+  const usableIdentitySource = (avatar.sources || []).some((item) => (!avatar.activeBrandId || (item.brandId || item.brand_id) === avatar.activeBrandId)
+    && (item.roles || []).includes('IDENTITY')
+    && (item.effectiveGate0Status || item.effective_gate0_status || item.gate0Status || item.gate0_status) === 'PASS');
+  const ageClass = avatar.provenance?.ageClass || avatar.provenance?.age_class || identity.permanentAttributes?.subjectAgeClass;
+  const ageClassDeclared = (avatar.subjectType || avatar.subject_type) === 'SYNTHETIC' || ['ADULT','MINOR'].includes(String(ageClass || '').toUpperCase());
   const v12Certification = Array.isArray(avatar.passportCertificationEvents)
     ? avatar.passportCertificationEvents.some((item) => (item.identityVersionId || item.identity_version_id) === currentIdentityVersionId
       && (!currentIdentityLock || (item.identityLockVersionId || item.identity_lock_version_id) === currentIdentityLock.id))
@@ -60,13 +71,19 @@ function evaluateAvatarLevels(avatar = {}) {
     [requirement('IDENTITY_NAME', Boolean(avatar.internalName || avatar.internal_name)),
       requirement('IDENTITY_SUBJECT_TYPE', Boolean(avatar.subjectType || avatar.subject_type)),
       requirement('IDENTITY_VERTICAL', Boolean(avatar.vertical || avatar.verticalCode || avatar.vertical_code)),
-      requirement('IDENTITY_AGE_PRESENTATION', resolved(identity.agePresentation)),
-      requirement('IDENTITY_PERSONALITY_ROLE', resolved(identity.personality) && resolved(identity.role)),
-      requirement('IDENTITY_LANGUAGES', Boolean(identity.languages?.some((item) => String(item).toLowerCase() !== 'und'))),
-      requirement('IDENTITY_VISUAL_DIRECTION', resolved(identity.visualDirection)),
-      requirement('IDENTITY_PROHIBITED_USES', Boolean(identity.prohibitedUses?.length)),
+      ...(canonicalV1IdentityIntake ? [
+        requirement('IDENTITY_AGE_CLASSIFICATION', ageClassDeclared),
+        requirement('IDENTITY_SOURCE_GATE0_PASS', usableIdentitySource),
+        requirement('IDENTITY_HUMAN_CONFIRMATION', v1IdentityConfirmation),
+      ] : [
+        requirement('IDENTITY_AGE_PRESENTATION', resolved(identity.agePresentation)),
+        requirement('IDENTITY_PERSONALITY_ROLE', resolved(identity.personality) && resolved(identity.role)),
+        requirement('IDENTITY_LANGUAGES', Boolean(identity.languages?.some((item) => String(item).toLowerCase() !== 'und'))),
+        requirement('IDENTITY_VISUAL_DIRECTION', resolved(identity.visualDirection)),
+        requirement('IDENTITY_PROHIBITED_USES', Boolean(identity.prohibitedUses?.length)),
+      ]),
       requirement('IDENTITY_BRAND_PERMISSION', brandPermissions.length > 0),
-      requirement('IDENTITY_CONSENT_RIGHTS', consent?.status === 'APPROVED'),
+      requirement('IDENTITY_CONSENT_RIGHTS', consent?.status === 'APPROVED' && !consentInvalidated),
       requirement('IDENTITY_LOCK_CURRENT_VERSION', Boolean(currentIdentityLock))],
     [requirement('CERTIFIED_PASSPORT_REQUIRED', passportCertified)],
     [requirement('L2_PACK_HUMAN_CERTIFICATION', l2Certified || legacyL2Complete)],
@@ -92,8 +109,7 @@ function evaluateAvatarLevels(avatar = {}) {
   const currentLevel = Math.max(0, completedLevel);
   const blockingFailures = [];
   if (sourceBlocks.length) blockingFailures.push('GATE0_BLOCKED_SOURCE');
-  if ((avatar.consentRecords || []).some((item) => ['REVOKED','EXPIRED'].includes(item.status))
-    || (avatar.consentEvents || []).some((item) => ['REVOKED','EXPIRED'].includes(item.status))) blockingFailures.push('CONSENT_NOT_VALID');
+  if (consentInvalidated) blockingFailures.push('CONSENT_NOT_VALID');
   if ((avatar.continuityReadiness || []).some((item) => item.approvalStatus === 'REJECTED' || item.approval_status === 'REJECTED')) blockingFailures.push('CONTINUITY_REJECTED');
   if ((avatar.productionEligibility || avatar.production_eligibility) === 'BLOCKED') blockingFailures.push('PROVENANCE_NOT_PRODUCTION_ELIGIBLE');
   const current = levels[currentLevel]; const next = levels[completedLevel + 1] || null;
