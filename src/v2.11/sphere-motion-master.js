@@ -7,7 +7,7 @@ const { CAPABILITIES } = require('../v2.8/capabilities');
 const SPHERE_MOTION_KINDS = Object.freeze(['calm_loop', 'micro_pulse', 'small_pulse', 'medium_pulse', 'active_internal', 'pressure_hold', 'settle', 'strong_response']);
 const APPROVAL_GATES = Object.freeze(['visual_spec', 'generation_prompt', 'generated_master', 'motion_segmentation', 'loop', 'final_export']);
 const MASTER_ID = 'impulseoff-sphere-motion-master-v1';
-const NEGATIVE_PROMPT = 'no white ring, no circular stroke, no outline, no neon rim, no halo ring, no glowing border, no hard shell edge, no poles, no polar caps, no visible axis, no red, no pink, no magenta contamination, no inverted colors, no negative-photo appearance, no flashing, no camera movement, no sphere relocation, no background jump, no particle explosion, no sparks, no electric lightning, no audio spectrum, no waveform visualization, no equalizer, no obvious breathing animation, no cartoon squash and stretch, no abrupt morphing, no cuts, no text, no logo, no watermark';
+const NEGATIVE_PROMPT = 'no white ring, outline, neon rim, halo, glowing border, hard shell edge, poles, polar caps, visible axis, red, pink, magenta, inverted or negative-photo colors, flashing, camera movement, sphere relocation, background jump, particle explosion, sparks, lightning, audio spectrum, waveform, equalizer, obvious breathing, cartoon squash/stretch, abrupt morphing, cuts, text, logos, watermark, multiple spheres, split screen, collage';
 const BASE_PROMPT = 'A single premium living organic sphere suspended centrally in a nearly black cinematic environment. Soft translucent glass-like organic membrane with subtle depth. Slow liquid-like internal masses, smooth volumetric flow, coherent organic material, no discrete particles. Completely locked camera: no zoom, pan, tilt, orbit, dolly, or lens breathing. Stable near-black atmospheric background with no distracting moving stars. Motion happens primarily inside the sphere; any expansion is organic internal pressure, never a 2D scale transform. Premium product-film quality, minimal, elegant, calm, physically coherent, never a synthetic UI visualizer.';
 
 class SphereMotionError extends Error { constructor(code, message, details) { super(message); this.name = 'SphereMotionError'; this.code = code; this.details = details || null; } }
@@ -46,17 +46,18 @@ function createMotionSpec(raw = {}) {
   return Object.freeze({ schemaVersion: '1.0', assetId: raw.assetId || MASTER_ID, reference: required(raw.reference, 'REFERENCE_REQUIRED', 'An approved visual identity reference is required'), units: Object.freeze(units), negativePrompt: raw.negativePrompt || NEGATIVE_PROMPT });
 }
 
-function createGenerationPlan({ reference, motionSpec, providerSelection, durationSeconds = 5, resolution = '720p', aspectRatio = '9:16', seed = null } = {}) {
+function createGenerationPlan({ reference, providerReference = reference, motionSpec, providerSelection, durationSeconds = 5, resolution = '720p', aspectRatio = '9:16', seed = null } = {}) {
   const spec = createMotionSpec(motionSpec);
   if (spec.reference !== reference) throw new SphereMotionError('REFERENCE_MISMATCH', 'The plan reference must exactly match the approved motion-spec reference');
   const primary = spec.units[0];
-  const prompt = `${BASE_PROMPT} Requested motion unit: ${primary.kind.replaceAll('_', ' ')}. Start state: ${primary.startState}. End state: ${primary.endState}. ${primary.notes || ''}`.trim();
-  return Object.freeze({ schemaVersion: '1.0', assetId: spec.assetId, strategy: 'REFERENCE_CONDITIONED_ANCHOR_CLIPS',
+  const prompt = `${BASE_PROMPT} Hard exclusions: ${spec.negativePrompt}. Requested motion unit: ${primary.kind.replaceAll('_', ' ')}. Start state: ${primary.startState}. End state: ${primary.endState}. ${primary.notes || ''}`.trim();
+  return Object.freeze({ schemaVersion: '1.0', assetId: spec.assetId, strategy: 'REFERENCE_CONDITIONED_ANCHOR_CLIPS', referenceIdentity: reference,
     rationale: 'The catalog supports image-to-video and reference-to-video, while exact continuation support is provider-dependent. Generate a locked reference-conditioned anchor first; only use a terminal frame as the next first-frame after visual approval.',
     motionSpec: spec, prompt, negativePrompt: spec.negativePrompt,
     request: createCanonicalMediaRequest({ capability: CAPABILITIES.IMAGE_TO_VIDEO, prompt, negativePrompt: spec.negativePrompt,
-      durationSeconds, resolution, aspectRatio, seed, references: { firstFrame: reference }, audio: { requested: false, strategy: 'EXTERNAL_VOICE' },
-      camera: { locked: true }, continuity: { lockedCamera: true, stableBackground: true, sphereCenterInvariant: true }, providerSelection }),
+      durationSeconds, resolution, aspectRatio, seed, references: { firstFrame: providerReference }, audio: { requested: false, strategy: 'EXTERNAL_VOICE' },
+      camera: { locked: true }, continuity: { lockedCamera: true, stableBackground: true, sphereCenterInvariant: true }, providerSelection,
+      resolvedSettings: { enablePromptExpansion: false, watermark: false } }),
     expectedPaidCalls: 1, approvalRequirements: Object.freeze(['visual_spec', 'generation_prompt']) });
 }
 
