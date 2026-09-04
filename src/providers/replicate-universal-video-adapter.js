@@ -70,7 +70,9 @@ function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16
 class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
   constructor({ family, ...options } = {}) { super(options); this.family = family; }
   supports({ capability, model } = {}) {
-    const supported = ['video-generation','TEXT_TO_VIDEO','IMAGE_TO_VIDEO','REFERENCE_TO_VIDEO','VIDEO_TO_VIDEO','VIDEO_EXTENSION'];
+    const supported = this.family === 'WAN_3' ? ['video-generation','TEXT_TO_VIDEO','IMAGE_TO_VIDEO']
+      : this.family === 'WAN_2_7_R2V' ? ['REFERENCE_TO_VIDEO']
+      : ['video-generation','TEXT_TO_VIDEO','IMAGE_TO_VIDEO','REFERENCE_TO_VIDEO','VIDEO_TO_VIDEO','VIDEO_EXTENSION'];
     return supported.includes(capability) && (!model || model === this.model);
   }
   async generate(options = {}) {
@@ -93,7 +95,7 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
         watermark: resolved.watermark ?? false });
     const enrich = (result) => Object.freeze({ ...result, provenance: Object.freeze({ ...(result.provenance || {}),
       capability: request?.capability || supportRequest.capability, requestedAspectRatio: common.aspectRatio,
-      framingInheritedFrom: refs.firstFrame ? 'VERIFIED_FIRST_FRAME' : 'ASPECT_RATIO_PARAMETER',
+      framingInheritedFrom: this.family === 'WAN_2_7_R2V' ? 'VERIFIED_REFERENCE_IMAGES' : refs.firstFrame ? 'VERIFIED_FIRST_FRAME' : 'ASPECT_RATIO_PARAMETER',
       referenceGeometry: request?.referenceGeometry || null, resolvedSettings: resolved }) });
     if (!options.idempotencyKey) return enrich(await this.runPrediction({ input, idempotencyKey: null, onProviderRequest: options.onProviderRequest }));
     const identity = JSON.stringify(input);
