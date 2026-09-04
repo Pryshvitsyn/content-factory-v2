@@ -1,7 +1,13 @@
 import base64,json,os,sys,cv2,numpy as np
 ROOT=os.environ.get('AVATAR_QA_MODEL_ROOT','')
+sys.path.insert(0,ROOT)
+from mp_persondet import MPPersonDet
+from mp_pose import MPPose
 detector=cv2.FaceDetectorYN.create(os.path.join(ROOT,'face_detection_yunet_2023mar.onnx'),'',(320,320),0.85,0.3,5000)
 recognizer=cv2.FaceRecognizerSF.create(os.path.join(ROOT,'face_recognition_sface_2021dec.onnx'),'')
+person_detector=MPPersonDet(os.path.join(ROOT,'person_detection_mediapipe_2023mar.onnx'),scoreThreshold=.5)
+pose_detector=MPPose(os.path.join(ROOT,'pose_estimation_mediapipe_2023mar.onnx'),confThreshold=.5)
+JOINTS=['nose','leftEyeInner','leftEye','leftEyeOuter','rightEyeInner','rightEye','rightEyeOuter','leftEar','rightEar','mouthLeft','mouthRight','leftShoulder','rightShoulder','leftElbow','rightElbow','leftWrist','rightWrist','leftPinky','rightPinky','leftIndex','rightIndex','leftThumb','rightThumb','leftHip','rightHip','leftKnee','rightKnee','leftAnkle','rightAnkle','leftHeel','rightHeel','leftFootIndex','rightFootIndex']
 def face(value):
   image=cv2.imdecode(np.frombuffer(base64.b64decode(value),np.uint8),cv2.IMREAD_COLOR)
   if image is None:return {'status':'DECODE_FAILED'}
@@ -15,6 +21,26 @@ def face(value):
   item=usable[0];aligned=recognizer.alignCrop(image,item);feature=recognizer.feature(aligned)
   box=[float(x) for x in item[:4]];landmarks=[float(x) for x in item[4:14]]
   return {'status':'ONE_USABLE_FACE','faceCount':1,'feature':feature,'box':box,'landmarks':landmarks,'confidence':float(item[-1]),'width':image.shape[1],'height':image.shape[0]}
+def pose(value):
+  image=cv2.imdecode(np.frombuffer(base64.b64decode(value),np.uint8),cv2.IMREAD_COLOR)
+  if image is None:return {'status':'POSE_NOT_FOUND','association':'ASSOCIATION_UNCERTAIN'}
+  people=person_detector.infer(image)
+  if len(people)==0:return {'status':'NO_PERSON','association':'ASSOCIATION_UNCERTAIN'}
+  if len(people)>1:return {'status':'MULTIPLE_PERSONS','association':'ASSOCIATION_UNCERTAIN','personCount':int(len(people))}
+  result=pose_detector.infer(image,people[0])
+  if result is None:return {'status':'POSE_LOW_CONFIDENCE','association':'ASSOCIATION_UNCERTAIN','personCount':1}
+  bbox,landmarks,world,mask,heatmap,confidence=result
+  joints={}
+  for index,name in enumerate(JOINTS):
+    point=landmarks[index];world_point=world[index]
+    joints[name]={'x':float(point[0]/image.shape[1]),'y':float(point[1]/image.shape[0]),'z':float(point[2]/max(image.shape[:2])),'visibility':float(point[3]),'presence':float(point[4]),'world':[float(world_point[0]),float(world_point[1]),float(world_point[2])],'sourceLandmarkIndex':index,'sourceModel':'pose_estimation_mediapipe_2023mar'}
+  required=['nose','leftShoulder','rightShoulder'];usable=all(joints[name]['visibility']>=.5 and joints[name]['presence']>=.5 for name in required)
+  candidate_face=face(value);association='ASSOCIATION_UNCERTAIN'
+  if candidate_face['status']=='ONE_USABLE_FACE':
+    fx,fy,fw,fh=candidate_face['box'];px1,py1=bbox[0];px2,py2=bbox[1];nose=joints['nose'];inside=px1<=fx+fw/2<=px2 and py1<=fy+fh/2<=py2
+    near=np.hypot(nose['x']*image.shape[1]-(fx+fw/2),nose['y']*image.shape[0]-(fy+fh/2))<=max(fw,fh)
+    association='ASSOCIATED' if inside and near else 'ASSOCIATION_UNCERTAIN'
+  return {'status':'POSE_USABLE' if usable and association=='ASSOCIATED' else 'POSE_PARTIAL' if usable else 'POSE_NOT_USABLE','association':association,'personCount':1,'confidence':float(confidence),'personBox':[float(bbox[0][0]/image.shape[1]),float(bbox[0][1]/image.shape[0]),float(bbox[1][0]/image.shape[1]),float(bbox[1][1]/image.shape[0])],'joints':joints,'maskCoverage':float(np.count_nonzero(mask)/mask.size)}
 def evaluate(req):
   candidate=face(req['candidate']);out={'candidateStatus':candidate['status'],'observations':[]}
   if candidate['status']!='ONE_USABLE_FACE':return out
@@ -50,7 +76,9 @@ def video(req):
     else:previous=None
     frames.append(row)
   return {'frames':frames}
+def skeleton(req):
+  return pose(req['image'])
 for line in sys.stdin:
   try:
-    req=json.loads(line);operation=req.get('operation');result=scan(req) if operation=='scan' else video(req) if operation=='video' else evaluate(req);print(json.dumps({'id':req['id'],'ok':True,'result':result}),flush=True)
+    req=json.loads(line);operation=req.get('operation');result=scan(req) if operation=='scan' else video(req) if operation=='video' else skeleton(req) if operation=='skeleton' else evaluate(req);print(json.dumps({'id':req['id'],'ok':True,'result':result}),flush=True)
   except Exception as error:print(json.dumps({'id':req.get('id'),'ok':False,'error':'LOCAL_EVALUATOR_ERROR'}),flush=True)

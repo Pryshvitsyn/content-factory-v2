@@ -1,0 +1,14 @@
+'use strict';
+
+// Provider-independent canonical skeleton and geometry contracts. The only
+// model-specific mapping belongs in the local worker; consumers never depend
+// on MediaPipe/OpenCV tensor indexes.
+const REQUIRED_CHEST_UP=Object.freeze(['nose','leftShoulder','rightShoulder']);
+function point(skeleton,name){const value=skeleton?.joints?.[name];return value&&value.visibility>=.5&&value.presence>=.5?value:null;}
+function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function bodyGeometry(skeleton,{required=REQUIRED_CHEST_UP}={}){if(skeleton?.status!=='POSE_USABLE'||skeleton.association!=='ASSOCIATED')return Object.freeze({status:'UNCERTAIN',reasonCode:skeleton?.status==='NO_PERSON'?'AUTO_NO_PERSON':'AUTO_POSE_NOT_USABLE'});const values=Object.fromEntries(required.map((name)=>[name,point(skeleton,name)]));if(Object.values(values).some((value)=>!value))return Object.freeze({status:'UNCERTAIN',reasonCode:'AUTO_POSE_NOT_USABLE'});const shoulderWidth=distance(values.leftShoulder,values.rightShoulder);if(shoulderWidth<=0)return Object.freeze({status:'UNCERTAIN',reasonCode:'AUTO_UPPER_BODY_UNCERTAIN'});const center={x:(values.leftShoulder.x+values.rightShoulder.x)/2,y:(values.leftShoulder.y+values.rightShoulder.y)/2};const descriptor=Object.freeze({shoulderWidth,shoulderAngle:Math.atan2(values.rightShoulder.y-values.leftShoulder.y,values.rightShoulder.x-values.leftShoulder.x),headToShoulderX:(values.nose.x-center.x)/shoulderWidth,headToShoulderY:(values.nose.y-center.y)/shoulderWidth,headToShoulderDistance:distance(values.nose,center)/shoulderWidth,coordinateSpace:'SCREEN_NORMALIZED'});return Object.freeze({status:'PASS',reasonCode:'VISIBLE_REGION_GEOMETRY_AVAILABLE',descriptor});}
+function poseState(skeleton){const geometry=bodyGeometry(skeleton);if(geometry.status!=='PASS')return geometry;return Object.freeze({status:'PASS',reasonCode:'POSE_STATE_AVAILABLE',descriptor:{shoulderAngle:geometry.descriptor.shoulderAngle,headToShoulderX:geometry.descriptor.headToShoulderX,headToShoulderY:geometry.descriptor.headToShoulderY}});}
+class AvatarPoseQaService { constructor({evaluator}){this.evaluator=evaluator;} async inspect({image}){if(!this.evaluator?.skeleton)throw new Error('Local skeleton evaluator is required');return this.evaluator.skeleton({image});} }
+class AvatarBodyGeometryQaService { evaluate(skeleton,policy){return bodyGeometry(skeleton,policy);} }
+class AvatarMotionContinuityQaService { evaluate(frames){const states=frames.map((frame)=>bodyGeometry(frame));if(states.some((item)=>item.status!=='PASS'))return Object.freeze({status:'UNCERTAIN',reasonCode:'AUTO_POSE_CONTINUITY_UNCERTAIN',states});return Object.freeze({status:'PASS',reasonCode:'VISIBLE_REGION_POSE_CONTINUITY_AVAILABLE',states});} }
+module.exports={AvatarPoseQaService,AvatarBodyGeometryQaService,AvatarMotionContinuityQaService,REQUIRED_CHEST_UP,bodyGeometry,poseState};
