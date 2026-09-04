@@ -116,11 +116,14 @@ class AvatarAssetIntakeService {
     const voiceConsent = currentAvatarConsent(avatar, 'VOICE');
     const rightsAttestation = faceConsent && consentAllows(faceConsent,
       { brandId, vertical: avatar.vertical, modality: 'FACE' }) && faceConsent.subjectIdentity?.ownerRelationship;
+    // Only a current, scoped, durable FACE attestation may satisfy real-person ownership provenance.
+    const trustedProvenance = avatar.subjectType === 'SYNTHETIC' ? provenance : { ...provenance,
+      owner: rightsAttestation || null, rightsAttestationEventId: rightsAttestation ? faceConsent.id : null };
     const faceConsentVerified = avatar.subjectType === 'SYNTHETIC' || consentAllows(faceConsent,
       { brandId, vertical: avatar.vertical, modality: 'FACE' });
     const voiceConsentVerified = avatar.subjectType === 'SYNTHETIC' || consentAllows(voiceConsent,
       { brandId, vertical: avatar.vertical, modality: 'VOICE' });
-    const gate0 = inspectAssetGateZero({ media: completeMedia, sourceType: normalizedType, sourceLocator, provenance,
+    const gate0 = inspectAssetGateZero({ media: completeMedia, sourceType: normalizedType, sourceLocator, provenance: trustedProvenance,
       subjectType: avatar.subjectType, consentVerified: faceConsentVerified, voiceConsentVerified,
       visualOnly: provenance.visualOnly === true });
     const readiness = sourceReadiness({ media: completeMedia, gate0 });
@@ -134,8 +137,7 @@ class AvatarAssetIntakeService {
     const rightsStatus = avatar.subjectType === 'SYNTHETIC' ? 'NOT_REQUIRED' : 'UNKNOWN';
     const stored = await this.repository.createIntake({ id: intakeId, avatar, brandId, artifact,
       media: completeMedia, sourceType: normalizedType, sourceLocator, existingAssetId: existing?.id, gate0, rightsStatus,
-      provenance: { ...provenance, owner: rightsAttestation || provenance.owner || null,
-        rightsAttestationEventId: rightsAttestation ? faceConsent.id : null, intakeAnalysis: { detectedMime: media.detectedMime, width: media.width, height: media.height,
+      provenance: { ...trustedProvenance, intakeAnalysis: { detectedMime: media.detectedMime, width: media.width, height: media.height,
         orientation: media.orientation, rotation: media.rotation, byteSize: media.byteSize, encoding: media.encoding,
         metadataParser: media.metadataParser, readiness },
         artifactService: 'CONTENT_FACTORY_IMMUTABLE_ARTIFACT_V1', uploader: this.actor,

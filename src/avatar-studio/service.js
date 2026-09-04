@@ -110,6 +110,7 @@ class AvatarStudioService {
 
   async intakeIdentityBatch({ avatarId, brandId, photos = [] } = {}) {
     const policy = loadIdentityIntakePolicy(); const avatar = await this.avatar({ id: avatarId, brandId });
+    await this.reconcileIdentityIntakes({avatar,brandId});
     if (!Array.isArray(photos) || photos.length < policy.photoBatch.minimum || photos.length > policy.photoBatch.maximum) throw new AvatarStudioError(400, 'IDENTITY_PHOTO_BATCH_INVALID', 'Add between 1 and 10 photos in one batch');
     const results = [];
     for (const photo of photos) {
@@ -125,7 +126,7 @@ class AvatarStudioService {
       let source = null; let duplicate = (avatar.sources || []).some((item) => item.contentHash === intake.contentHash && (item.roles || []).includes('IDENTITY'));
       const existing = await this.repository.sourceForIntake({ intakeId: intake.id, avatarId: avatar.id, brandId });
       if (existing) { source = existing; duplicate = true; }
-      else if (!duplicate && intake.asset.effectiveGate0Status === 'PASS') {
+      else if (!duplicate && intake.effectiveGate0Status === 'PASS') {
         const used = await this.requireIntake().use({ avatar, brandId, intakeId: intake.id, roles: ['IDENTITY'] }); source = used.source;
         if (proposedViewpoint !== 'UNKNOWN') await this.repository.addSourceViewpointClassification({ avatar, source, viewpoint: proposedViewpoint,
           provenance: { source: 'AVATAR_STUDIO_V1_GUIDED_VIEWPOINT', proposedViewpoint, automatedVisualInference: false }, actor: this.actor });
@@ -155,13 +156,21 @@ class AvatarStudioService {
       subjectIdentity:{ name: requiredText('subjectName',subjectName), ownerRelationship:relationship }, rightsBasis:relationship,
       allowedBrandIds:[brandId], allowedVerticals:[avatar.vertical], allowedChannels:avatar.intendedChannels || ['web'],
       allowedUseTypes:['AVATAR_IDENTITY','PASSPORT_REFERENCE'], evidenceNotes:requiredText('evidenceNotes',evidenceNotes), actor:this.actor });
+    const resolved=await this.reconcileIdentityIntakes({avatar:await this.avatar({id:avatarId,brandId}),brandId});
+    return Object.freeze({ consent, resolvedIntakeIds:Object.freeze(resolved), paidProviderCalls:0, externalGenerationCalls:0 });
+  }
+
+  async reconcileIdentityIntakes({avatar,brandId}={}) {
+    const face=(avatar.consentEvents||[]).find((item)=>item.modality==='FACE'&&item.status==='APPROVED'&&item.eventType==='GRANT'&&(item.allowedBrandIds||[]).includes(brandId)&&(item.allowedVerticals||[]).includes(avatar.vertical)&&item.subjectIdentity?.ownerRelationship&&(!item.expiresAt||new Date(item.expiresAt)>new Date()));
+    if (!face) return [];
     const intakes = await this.repository.listIntakes({ brandId, avatarId:avatar.id }); const resolved=[];
     for (const intake of intakes) {
       const codes=(intake.gate0Findings || []).map((item)=>item.code); const rightsOnly=codes.length>0 && codes.every((code)=>['FACE_CONSENT_REQUIRED','PROVENANCE_UNCERTAIN'].includes(code));
-      if (intake.gate0Status === 'REVIEW' && rightsOnly) { await this.repository.addReviewEvent({ intake, action:'APPROVE_FOR_USE',
+      const alreadyApproved=(intake.reviewEvents||[]).some((item)=>item.action==='APPROVE_FOR_USE');
+      if (intake.gate0Status === 'REVIEW' && rightsOnly && !alreadyApproved) { await this.repository.addReviewEvent({ intake, action:'APPROVE_FOR_USE',
         reason:'Explicit scoped FACE consent and ownership/authorization attestation resolve the recorded rights-only review findings.', actor:this.actor }); resolved.push(intake.id); }
     }
-    return Object.freeze({ consent, resolvedIntakeIds:Object.freeze(resolved), paidProviderCalls:0, externalGenerationCalls:0 });
+    return resolved;
   }
 
   async confirmIdentityIntake({ avatarId, brandId, confirmed = false } = {}) {
@@ -173,7 +182,7 @@ class AvatarStudioService {
   }
 
   async identitySetupState({ avatarId, brandId } = {}) {
-    const avatar=await this.avatar({id:avatarId,brandId}); const intakes=await this.listIntakes({avatarId,brandId}); const coverage=await this.identityCoverage({avatarId,brandId});
+    const avatar=await this.avatar({id:avatarId,brandId}); await this.reconcileIdentityIntakes({avatar,brandId}); const intakes=await this.listIntakes({avatarId,brandId}); const coverage=await this.identityCoverage({avatarId,brandId});
     const face=(avatar.consentEvents||[]).find((item)=>item.modality==='FACE'&&item.status==='APPROVED'&&item.eventType==='GRANT'&&(item.allowedBrandIds||[]).includes(brandId)&&(item.allowedVerticals||[]).includes(avatar.vertical)&&(!item.expiresAt||new Date(item.expiresAt)>new Date()));
     const confirmation=await this.repository.latestIdentityIntakeConfirmation({avatarId,brandId}); const hasSources=(avatar.sources||[]).some((item)=>(item.roles||[]).includes('IDENTITY'));
     const next=avatar.subjectType!=='SYNTHETIC'&&!face?'RIGHTS_CONSENT':!intakes.length?'ADD_PHOTOS':!hasSources?'ADD_PHOTOS':coverage.status==='NOT_READY'?'CHECK_COVERAGE':!confirmation?'CHECK_COVERAGE':'READY';
