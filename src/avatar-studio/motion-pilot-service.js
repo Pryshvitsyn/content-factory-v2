@@ -126,5 +126,10 @@ class AvatarMotionPilotService {
     const review=await this.repository.createMotionPilotIdentityReview({execution,attempt,result,decision:normalized,reasonCode:reasonCode||'IDENTITY_MATCH',humanNote,actor:this.actor});
     return Object.freeze({review,providerStatus:attempt.providerStatus||'succeeded',technical:'PASS',identity:normalized,motionPilotQualityStatus:normalized==='PASS'?'APPROVED':'REJECTED'});
   }
+  async state({executionId,...scope}={}) {
+    const execution=await this.repository.motionPilotExecution({id:executionId,...scope}); if(!execution) throw new AvatarStudioError(404,'MOTION_PILOT_EXECUTION_NOT_FOUND','Motion pilot execution was not found');
+    const attempt=(execution.attempts||[]).at(-1)||null; const result=attempt?await this.repository.motionPilotResult({attemptId:attempt.id}):null; const review=attempt?await this.repository.motionPilotIdentityReview({attemptId:attempt.id}):null;
+    const identityStatus=review?.decision||'NOT_REVIEWED'; return Object.freeze({execution,attempt,result,review,providerStatus:attempt?.providerStatus||null,technicalStatus:result?'PASS':null,identityStatus,motionPilotQualityStatus:!result?'PENDING_TECHNICAL':identityStatus==='PASS'?'APPROVED':identityStatus==='FAIL'?'REJECTED':'AWAITING_IDENTITY_REVIEW'});
+  }
 }
 module.exports={AvatarMotionPilotService,NEGATIVE,ROUTE,motionPrompt,validateMotionPilotVideo};
