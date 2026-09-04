@@ -26,7 +26,7 @@ function main() {
   assert.equal(SPHERE_TOP, 280);
 
   const cosmos = renderCosmosPpm();
-  assert.equal(cosmos.subarray(0, 15).toString('ascii'), 'P6\n720 1280\n25');
+  assert.equal(cosmos.subarray(0, 16).toString('ascii'), 'P6\n720 1280\n255');
   const cosmosOffset = payloadOffset(cosmos);
   assert.equal(cosmos.length - cosmosOffset, 720 * 1280 * 3);
 
