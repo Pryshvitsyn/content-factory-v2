@@ -54,6 +54,7 @@ const V210_MIGRATIONS = [
   'migrations/20260910_avatar_motion_pilot_route_variants.sql',
   'migrations/20260911_avatar_motion_pilot_automatic_qa.sql',
   'migrations/20260912_avatar_motion_quality_batch_preflight.sql',
+  'migrations/20260913_avatar_provider_reference_canonical.sql',
 ];
 
 function discoverDatabaseUrl(env = process.env) {

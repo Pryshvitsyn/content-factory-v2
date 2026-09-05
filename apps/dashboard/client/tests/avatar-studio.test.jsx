@@ -87,6 +87,24 @@ describe('Avatar Studio dashboard', () => {
     await screen.findByText('LOCAL AUTOMATIC QA RUNTIME');expect(screen.getByText(/BODY REFERENCE SET: READY/)).toBeTruthy();expect(screen.getByRole('button',{name:'PLAN QUALITY BATCH · ZERO CALLS'})).toBeTruthy();expect(screen.queryByRole('button',{name:'START AUTOMATIC QUALITY LOOP'})).toBeNull();
   });
 
+  it('shows automatic provider-reference preparation and inspectable derived lineage', async () => {
+    const avatar={id:'avatar-reference',internalName:'Andrii',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'};
+    const input={index:0,role:'PROVIDER_REFERENCE_CANONICAL',viewpoint:'CHEST_UP_NEUTRAL',intakeId:'source-intake',providerReferenceCanonicalId:'canonical-1',sourceContentHash:'source-hash',inputContentHash:'canonical-hash',canonicalTransform:{operation:'PERSON_ROI_CROP_AND_ROUTE_PRESENTATION',crop:{x:10,y:20,width:300,height:500}},providerReferenceQaStatus:'PASS',qa:{status:'PASS'}};
+    fetch.mockImplementation((url,options={})=>{
+      if(String(url)==='/api/avatar-studio/motion-pilot-routes')return response([{id:'WAN_27_R2V_MULTI_REFERENCE',label:'Wan 2.7 R2V',provider:'replicate',model:'wan-video/wan-2.7-r2v',capability:'REFERENCE_TO_VIDEO',referenceStrategy:'CERTIFIED_CHEST_UP_PLUS_THREE_IDENTITY_REFERENCES',exactReferenceCount:4,durationSeconds:5,resolution:'720p',aspectRatio:'9:16',costExpectationUsd:.5}]);
+      if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([avatar]);
+      if(String(url)===`/api/avatar-studio/avatars/${avatar.id}?brandId=${brand.id}`)return response(avatar);
+      if(String(url).includes('/motion-pilot-qa-readiness?'))return response({status:'READY',taskProfile:{id:'MOTION_PILOT_CHEST_UP',minimumUsableBodyReferences:3},runtime:{identity:{status:'READY'},pose:{status:'READY'}},bodyReferenceSet:{readiness:'READY',references:[{},{},{}]},blockers:[]});
+      if(String(url).endsWith('/motion-quality-batches')&&options.method==='POST')return response({id:'batch-1',preferredRouteId:'WAN_27_R2V_MULTI_REFERENCE',maximumVariants:2,maximumTotalCostUsd:1,status:'AWAITING_APPROVAL'});
+      if(String(url).endsWith('/preflight')&&options.method==='POST')return response({status:'READY_FOR_APPROVAL',readiness:{preferredRouteId:'WAN_27_R2V_MULTI_REFERENCE',routeScope:[{routeId:'WAN_27_R2V_MULTI_REFERENCE',provider:'replicate',model:'wan-video/wan-2.7-r2v',inputs:[input]}],dimensions:{PROVIDER_INPUT_IDENTITY_QA:'PASS',CONSENT:'VALID',IDENTITY_LOCK:'CURRENT'},costPerVariantUsd:.5,proposedWorstCaseCostUsd:1,blockers:[]}});
+      return response([]);
+    });
+    render(<MotionPilot brands={[brand]}/>);fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Andrii'});fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});
+    await screen.findByRole('button',{name:'PLAN QUALITY BATCH · ZERO CALLS'});fireEvent.click(screen.getByRole('button',{name:'PLAN QUALITY BATCH · ZERO CALLS'}));await screen.findByRole('button',{name:'ZERO-CALL BATCH PREFLIGHT'});fireEvent.click(screen.getByRole('button',{name:'ZERO-CALL BATCH PREFLIGHT'}));
+    await screen.findAllByText('PROVIDER REFERENCE READY');expect(screen.getAllByText(/SUBJECT ISOLATED/).length).toBeGreaterThan(0);expect(screen.getAllByText(/Source: source-intake · Derived reference: canonical-1/).length).toBeGreaterThan(0);expect(screen.getAllByText(/canonical-hash/).length).toBeGreaterThan(0);
+    expect(fetch.mock.calls.some(([url])=>/generate|predictions/.test(String(url)))).toBe(false);
+  });
+
   it('uses current Passport candidates and does not offer a broken Level 0 approval', () => {
     const blockedL0={currentLevel:0,currentLevelName:'IDENTITY',nextLevel:{level:0,name:'IDENTITY'},levels:[
       {level:0,status:'BLOCKED'},{level:1,status:'BLOCKED'},{level:2,status:'BLOCKED'}],missingRequirements:['IDENTITY_HUMAN_CONFIRMATION']};

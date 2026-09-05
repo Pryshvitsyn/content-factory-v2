@@ -21,6 +21,34 @@ def face(value):
   item=usable[0];aligned=recognizer.alignCrop(image,item);feature=recognizer.feature(aligned)
   box=[float(x) for x in item[:4]];landmarks=[float(x) for x in item[4:14]]
   return {'status':'ONE_USABLE_FACE','faceCount':1,'feature':feature,'box':box,'landmarks':landmarks,'confidence':float(item[-1]),'width':image.shape[1],'height':image.shape[0]}
+def diagnose(req):
+  image=cv2.imdecode(np.frombuffer(base64.b64decode(req['candidate']),np.uint8),cv2.IMREAD_COLOR)
+  if image is None:return {'status':'DECODE_FAILED','faces':[],'persons':[]}
+  height,width=image.shape[:2];detector.setInputSize((width,height));_,detected=detector.detect(image)
+  usable=[]
+  for index,item in enumerate(list(detected) if detected is not None else []):
+    if item[-1]<0.85 or item[2]<32 or item[3]<32:continue
+    aligned=recognizer.alignCrop(image,item);feature=recognizer.feature(aligned);observations=[]
+    for source in req.get('sources',[]):
+      source_face=face(source['bytes']);row={'sourceHash':source['contentHash'],'sourceStatus':source_face['status']}
+      if source_face['status']=='ONE_USABLE_FACE':row['cosine']=float(recognizer.match(feature,source_face['feature'],cv2.FaceRecognizerSF_FR_COSINE))
+      observations.append(row)
+    box=[float(x) for x in item[:4]];usable.append({'faceIndex':len(usable),'detectorIndex':index,'box':box,'landmarks':[float(x) for x in item[4:14]],'confidence':float(item[-1]),'width':width,'height':height,'area':float(box[2]*box[3]),'areaRatio':float((box[2]*box[3])/(width*height)),'center':{'x':float((box[0]+box[2]/2)/width),'y':float((box[1]+box[3]/2)/height)},'observations':observations})
+  persons=[]
+  for person_index,person in enumerate(person_detector.infer(image)):
+    result=pose_detector.infer(image,person)
+    if result is None:persons.append({'personIndex':person_index,'status':'POSE_LOW_CONFIDENCE','association':'ASSOCIATION_UNCERTAIN','associatedFaceIndices':[]});continue
+    bbox,landmarks,world,mask,heatmap,confidence=result;joints={}
+    for index,name in enumerate(JOINTS):
+      point_value=landmarks[index];world_point=world[index];joints[name]={'x':float(point_value[0]/width),'y':float(point_value[1]/height),'z':float(point_value[2]/max(image.shape[:2])),'visibility':float(point_value[3]),'presence':float(point_value[4]),'world':[float(world_point[0]),float(world_point[1]),float(world_point[2])],'sourceLandmarkIndex':index,'sourceModel':'pose_estimation_mediapipe_2023mar'}
+    pixel_box=[float(bbox[0][0]),float(bbox[0][1]),float(bbox[1][0]),float(bbox[1][1])];normalized_box=[pixel_box[0]/width,pixel_box[1]/height,pixel_box[2]/width,pixel_box[3]/height];nose=joints['nose'];associated=[]
+    for face_item in usable:
+      fx,fy,fw,fh=face_item['box'];cx,cy=fx+fw/2,fy+fh/2;inside=pixel_box[0]<=cx<=pixel_box[2] and pixel_box[1]<=cy<=pixel_box[3];distance=float(np.hypot(nose['x']*width-cx,nose['y']*height-cy));near=distance<=max(fw,fh)
+      if inside and near:associated.append(face_item['faceIndex']);face_item.setdefault('associations',[]).append({'personIndex':person_index,'insidePersonRoi':inside,'noseDistancePixels':distance,'noseDistanceFaceHeights':distance/max(fh,1),'confidence':float(min(confidence,nose['visibility'],nose['presence'])),'status':'ASSOCIATED'})
+    required=['nose','leftShoulder','rightShoulder'];pose_usable=all(joints[name]['visibility']>=.5 and joints[name]['presence']>=.5 for name in required)
+    persons.append({'personIndex':person_index,'status':'POSE_USABLE' if pose_usable else 'POSE_NOT_USABLE','association':'ASSOCIATED' if len(associated)==1 else 'ASSOCIATION_UNCERTAIN','associatedFaceIndices':associated,'confidence':float(confidence),'personBox':normalized_box,'personBoxPixels':pixel_box,'joints':joints,'maskCoverage':float(np.count_nonzero(mask)/mask.size)})
+  for face_item in usable:face_item.setdefault('associations',[])
+  return {'status':'ONE_USABLE_FACE' if len(usable)==1 else 'MULTIPLE_FACES' if len(usable)>1 else 'NO_FACE','faceCount':len(usable),'personCount':len(persons),'width':width,'height':height,'faces':usable,'persons':persons,'embeddingsPersisted':False}
 def pose(value):
   image=cv2.imdecode(np.frombuffer(base64.b64decode(value),np.uint8),cv2.IMREAD_COLOR)
   if image is None:return {'status':'POSE_NOT_FOUND','association':'ASSOCIATION_UNCERTAIN'}
@@ -80,7 +108,8 @@ def video(req):
   return {'frames':frames}
 def skeleton(req):
   return pose(req['image'])
+
 for line in sys.stdin:
   try:
-    req=json.loads(line);operation=req.get('operation');result=scan(req) if operation=='scan' else video(req) if operation=='video' else skeleton(req) if operation=='skeleton' else evaluate(req);print(json.dumps({'id':req['id'],'ok':True,'result':result}),flush=True)
+    req=json.loads(line);operation=req.get('operation');result=diagnose(req) if operation=='diagnose' else scan(req) if operation=='scan' else video(req) if operation=='video' else skeleton(req) if operation=='skeleton' else evaluate(req);print(json.dumps({'id':req['id'],'ok':True,'result':result}),flush=True)
   except Exception as error:print(json.dumps({'id':req.get('id'),'ok':False,'error':'LOCAL_EVALUATOR_ERROR'}),flush=True)
