@@ -15,7 +15,7 @@ Limits: 30 images, 10 videos/30 seconds combined, 10 audios/30 seconds combined,
 
 References retain provider order and aliases `[Image1]`, `[Video1]`, and `[Audio1]`; reordering changes the request fingerprint. Immutable artifact ID/version/SHA and any derived lineage must be resolved before constructing the provider input. Replicate SDK local `Buffer`/file inputs are preferred; data URIs are not the large-media default.
 
-Pricing is `UNKNOWN_CURRENT_PRICE` until a reviewed official per-property rate is recorded. Workflows requiring known cost must fail closed; an estimate must never be labeled verified.
+Pricing is `UNKNOWN_CURRENT_PRICE` until a reviewed official per-property rate is recorded. Zero-call review remains available, but paid start fails closed with `PRICE_NOT_VERIFIABLE`; acknowledgment plus a numeric maximum is not treated as an enforceable ceiling. An estimate must never be labeled verified.
 
 Zero-call example: resolve a `TEXT_TO_VIDEO` request through `resolveVideoModelRequest()`, inspect its exact provider input and fingerprint, run backend preflight, and bind human approval. This performs no prediction. Generation remains unavailable while `LIVE_PAID_GENERATION=false`.
 

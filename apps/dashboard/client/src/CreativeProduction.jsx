@@ -74,7 +74,7 @@ function normalizePersistedVideo(value = {}) {
   const profile = String(value.profile || '').toUpperCase() === 'QUALITY' ? 'STANDARD' : String(value.profile || '').toUpperCase();
   const rawResolution = String(value.resolution || '');
   return { provider: value.provider || '', model: value.model || '', modelFamily: value.modelFamily || '', profile,
-    resolution: LEGACY_CANVAS.has(rawResolution) ? null : (value.resolution || null),modelRequest:{resolvedInputMode:value.resolvedInputMode||'TEXT_TO_VIDEO',durationSeconds:value.durationSeconds??5,resolution:value.resolution||'720p',aspectRatio:value.aspectRatio||'16:9',generateAudio:value.generateAudio===true,watermark:value.watermark===true,outputFormat:value.outputFormat||'mp4',seed:value.seed??null} };
+    resolution: LEGACY_CANVAS.has(rawResolution) ? null : (value.resolution || null),modelRequest:{resolvedInputMode:value.resolvedInputMode||'TEXT_TO_VIDEO',durationSeconds:value.durationSeconds??5,resolution:value.resolution||'720p',aspectRatio:value.aspectRatio||'9:16',generateAudio:value.generateAudio===true,watermark:value.watermark===true,outputFormat:value.outputFormat||'mp4',seed:value.seed??null} };
 }
 function humanProviderState(provider) { return provider?.configured ? 'CONFIGURED' : 'NOT CONFIGURED'; }
 

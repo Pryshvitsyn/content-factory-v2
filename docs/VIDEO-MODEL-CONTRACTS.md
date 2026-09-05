@@ -8,7 +8,7 @@ Content Factory resolves video work as workflow policy → generation plan → r
 - A model contract owns supported modes and fields, defaults, compatibility, limits, request mapping, schema provenance, pricing status, output expectations, and compatible QA profiles.
 - Workflows own creative intent, brand/identity policy, additional QA, budgets, and human decisions.
 
-`src/v2.8/video-model-contracts.js` is the reviewed local registry. Runtime never adopts a remote schema automatically. `compareVideoModelSchema()` is a developer/test drift report; `SCHEMA_DRIFT` requires review and a new local contract version. Catalog responses expose serializable contract metadata so operator controls can use the same enums and modes.
+`src/v2.8/video-model-contracts.js` is the reviewed local registry. Runtime never adopts a remote schema automatically. `compareVideoModelSchema()` compares field presence plus reviewed type, enum/range, requiredness, and defaults; `SCHEMA_DRIFT` requires review and a new local contract version. Catalog responses expose serializable contract metadata so operator controls can use the same enums and modes.
 
 `resolveVideoModelRequest()` requires an explicit input mode, resolves every execution-sensitive default, rejects unknown fields, preserves ordered references, maps provider input, records pricing/schema/contract versions, fixes expected calls at one, and hashes a stable immutable snapshot. Approval must bind to `requestFingerprint`; any prompt, media/version/hash/order, mode, setting, contract, schema, or pricing change produces a different fingerprint and requires fresh preflight/approval.
 
