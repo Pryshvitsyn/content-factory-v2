@@ -3,6 +3,7 @@
 const { ReplicateWanVideoAdapter, parseGenerationPrompt } = require('./replicate-wan-video-adapter');
 const { ProviderError } = require('./provider-contract');
 const { compatible } = require('../v2.10.2/reference-geometry');
+const { resolveVideoModelRequest } = require('../v2.8/video-model-contracts');
 const crypto = require('node:crypto');
 
 function requestOf(options) {
@@ -49,26 +50,14 @@ function assertWan3ReferenceGeometry(request, refs, aspectRatio) {
   }
 }
 
-function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16', duration = 5,
+function buildSeedance25Input({ resolvedInputMode, prompt, resolution = '720p', aspectRatio = '16:9', duration = 5,
   image = null, lastFrameImage = null, referenceImages = [], referenceVideos = [], referenceAudios = [],
-  generateAudio = false, watermark = false, seed } = {}) {
-  if (!String(prompt || '').trim()) throw new ProviderError('Seedance 2.5 requires a prompt', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  if (!Number.isInteger(duration) || duration < 1 || duration > 30) throw new ProviderError('Seedance 2.5 duration must be 1-30 seconds', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  if ((image || lastFrameImage) && (referenceImages.length || referenceVideos.length || referenceAudios.length)) {
-    throw new ProviderError('Seedance first/last frames cannot be combined with reference media', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  }
-  if (referenceImages.length > 30 || referenceVideos.length > 10 || referenceAudios.length > 10) {
-    throw new ProviderError('Seedance reference media limit exceeded', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  }
-  return { prompt: prompt.trim(), resolution, duration, aspect_ratio: aspectRatio, generate_audio: Boolean(generateAudio),
-    watermark: Boolean(watermark), output_format: 'mp4', ...(image ? { image } : {}),
-    ...(lastFrameImage ? { last_frame_image: lastFrameImage } : {}), ...(referenceImages.length ? { reference_images: referenceImages } : {}),
-    ...(referenceVideos.length ? { reference_videos: referenceVideos } : {}), ...(referenceAudios.length ? { reference_audios: referenceAudios } : {}),
-    ...(seed == null ? {} : { seed }) };
+  generateAudio = false, watermark = false, outputFormat = 'mp4', seed, ...unknown } = {}) {
+  return resolveVideoModelRequest({provider:'replicate',model:'bytedance/seedance-2.5',request:{resolvedInputMode,prompt,resolution,aspectRatio,duration,image,lastFrameImage,referenceImages,referenceVideos,referenceAudios,generateAudio,watermark,outputFormat,seed,...unknown}}).providerInput;
 }
 
 class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
-  constructor({ family, ...options } = {}) { super(options); this.family = family; }
+  constructor({ family, modelContract=null, ...options } = {}) { super(options); this.family = family; this.modelContract=modelContract; }
   supports({ capability, model } = {}) {
     const supported = this.family === 'WAN_3' ? ['video-generation','TEXT_TO_VIDEO','IMAGE_TO_VIDEO']
       : this.family === 'WAN_2_7_R2V' ? ['REFERENCE_TO_VIDEO']
@@ -89,10 +78,10 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       negativePrompt: request?.negativePrompt || requirements.negative_prompt,
       enablePromptExpansion: resolved.enablePromptExpansion ?? requirements.enable_prompt_expansion ?? true })
       : this.family === 'WAN_2_7_R2V' ? buildWan27R2VInput({ ...common, shotType: request?.shotType || resolved.shotType || 'single', referenceImages: refs.referenceImages || [], referenceVideos: refs.referenceVideos || [], negativePrompt: request?.negativePrompt || requirements.negative_prompt })
-      : buildSeedance25Input({ ...common, image: refs.firstFrame || null, lastFrameImage: refs.lastFrame || null,
+      : request?.modelContractRequest?.providerInput||this.modelContract.mapRequest({resolvedInputMode:request?.resolvedInputMode,prompt:common.prompt,resolution:common.resolution,aspectRatio:common.aspectRatio,duration:common.duration,image:refs.firstFrame||null,lastFrameImage:refs.lastFrame||null,
         referenceImages: [...(refs.characterImages || []), ...(refs.styleImages || [])], referenceVideos: refs.referenceVideos || [],
         referenceAudios: refs.referenceAudios || [], generateAudio: request?.audio?.requested ?? resolved.generateAudio ?? false,
-        watermark: resolved.watermark ?? false });
+        watermark: resolved.watermark ?? false, outputFormat: request?.outputFormat || resolved.outputFormat || 'mp4', ...(request?.modelParameters||{}) });
     const enrich = (result) => Object.freeze({ ...result, provenance: Object.freeze({ ...(result.provenance || {}),
       capability: request?.capability || supportRequest.capability, requestedAspectRatio: common.aspectRatio,
       framingInheritedFrom: this.family === 'WAN_2_7_R2V' ? 'VERIFIED_REFERENCE_IMAGES' : refs.firstFrame ? 'VERIFIED_FIRST_FRAME' : 'ASPECT_RATIO_PARAMETER',

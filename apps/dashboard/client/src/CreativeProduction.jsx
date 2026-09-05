@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { VideoModelContractControls,modelContractDefaults } from './VideoModelContractControls';
 import { api } from './api';
 import './CreativeProduction.css';
 
@@ -28,7 +29,7 @@ const initialBrief = () => ({
   publicationPolicy: { humanApprovalRequired: true, autoPublish: false },
 });
 
-const emptyVideo = () => ({ provider: '', model: '', modelFamily: '', profile: '', resolution: null });
+const emptyVideo = () => ({ provider: '', model: '', modelFamily: '', profile: '', resolution: null,modelRequest:{} });
 const vague = /exactly as specified|operator(?:'s)? (?:creative )?brief|(?:awaits?|requires?) (?:the )?operator input|creative input required|\b(?:tbd|todo|placeholder)\b/i;
 const specific = (value, words = 2) => {
   const text = String(value || '').trim();
@@ -73,7 +74,7 @@ function normalizePersistedVideo(value = {}) {
   const profile = String(value.profile || '').toUpperCase() === 'QUALITY' ? 'STANDARD' : String(value.profile || '').toUpperCase();
   const rawResolution = String(value.resolution || '');
   return { provider: value.provider || '', model: value.model || '', modelFamily: value.modelFamily || '', profile,
-    resolution: LEGACY_CANVAS.has(rawResolution) ? null : (value.resolution || null) };
+    resolution: LEGACY_CANVAS.has(rawResolution) ? null : (value.resolution || null),modelRequest:{resolvedInputMode:value.resolvedInputMode||'TEXT_TO_VIDEO',durationSeconds:value.durationSeconds??5,resolution:value.resolution||'720p',aspectRatio:value.aspectRatio||'16:9',generateAudio:value.generateAudio===true,watermark:value.watermark===true,outputFormat:value.outputFormat||'mp4',seed:value.seed??null} };
 }
 function humanProviderState(provider) { return provider?.configured ? 'CONFIGURED' : 'NOT CONFIGURED'; }
 
@@ -109,6 +110,7 @@ export function CreativeProduction() {
   const selectedProvider = videoProviders.find((provider) => provider.id === video.provider) || null;
   const videoModels = (selectedProvider?.models || []).filter((model) => model.capabilities?.includes('TEXT_TO_VIDEO') && model.selectable !== false);
   const selectedModel = videoModels.find((model) => model.modelId === video.model) || null;
+  const modelContract=selectedModel?.modelContract||null;
   const profiles = Object.keys(selectedModel?.profiles || {});
   const effectiveResolution = resolvedResolution(selectedModel, video.profile);
   const continuityRequested = brief.storyboard.some((shot) => shot.referencePolicy !== 'NONE');
@@ -190,7 +192,7 @@ export function CreativeProduction() {
     const model = provider?.models?.find((item) => item.capabilities?.includes('TEXT_TO_VIDEO') && item.selectable !== false);
     const profile = defaultProfile(model);
     setVideo({ provider: providerId, model: model?.modelId || '', modelFamily: model?.modelFamily || '', profile,
-      resolution: resolvedResolution(model, profile) });
+      resolution: resolvedResolution(model, profile),modelRequest:modelContractDefaults(model?.modelContract) });
     invalidate();
   }
 
@@ -198,7 +200,7 @@ export function CreativeProduction() {
     const model = videoModels.find((item) => item.modelId === modelId);
     const profile = defaultProfile(model);
     setVideo((current) => ({ ...current, model: modelId, modelFamily: model?.modelFamily || '', profile,
-      resolution: resolvedResolution(model, profile) }));
+      resolution: resolvedResolution(model, profile),modelRequest:modelContractDefaults(model?.modelContract) }));
     invalidate();
   }
 
@@ -260,7 +262,7 @@ export function CreativeProduction() {
 
   function currentProviderSelection() {
     return routeReady ? { provider: video.provider, model: video.model, modelFamily: selectedModel?.modelFamily || null,
-      profile: video.profile, resolution: effectiveResolution || null } : {};
+      profile: video.profile, resolution: effectiveResolution || null,...video.modelRequest } : {};
   }
 
   async function persistDraft({ announce = true } = {}) {
@@ -551,6 +553,7 @@ export function CreativeProduction() {
           </SelectField>
           <label>RESOLVED OUTPUT<input aria-label="RESOLVED OUTPUT" readOnly value={effectiveResolution ? `${effectiveResolution} source · 9:16 · final master 1080×1920` : ''} /></label>
         </div>
+        <VideoModelContractControls contract={modelContract} value={video.modelRequest} onChange={(modelRequest)=>{setVideo((current)=>({...current,modelRequest}));invalidate();}}/>
         <div className="route-truth-grid">
           <div><span>MODEL FAMILY</span><strong>{selectedModel?.modelFamily || '—'}</strong></div>
           <div><span>CAPABILITIES</span><strong>{selectedModel?.capabilities?.filter((capability) => VIDEO_CAPABILITIES.includes(capability)).join(' · ') || '—'}</strong></div>

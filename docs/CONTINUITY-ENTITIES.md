@@ -1,0 +1,9 @@
+# Continuity entities and reference packs
+
+A continuity reference-pack revision is reusable production truth, separate from any one run. Supported explicit entity classes are `REAL_PERSON`, `SYNTHETIC_CHARACTER`, `OBJECT_PRODUCT`, and `ABSTRACT_VISUAL`. A revision freezes ordered immutable artifact IDs, versions, hashes, roles, restrictions, approval evidence, and a fingerprint.
+
+`REAL_PERSON` is only a binding to a specific Avatar Studio authority revision (avatar, identity version and Identity Lock where applicable). Generic code never recreates identity or broadens consent. Synthetic characters can bind appearance, turnaround, wardrobe, props and voice without biometric semantics. Products and abstract visuals use the same reference mechanism while their domain rules remain outside core.
+
+Shots bind one or more exact revisions in deterministic order. Multiple shots and productions may reuse the same revision; updating an entity creates another revision and historical workflows retain the old fingerprint. Provider resolution verifies exact artifact scope/version/SHA and creates immutable derivatives when needed.
+
+Default visibility is `BRAND_PRIVATE`. `WORKSPACE_SHARED_WITH_GRANTS` permits only explicit brand IDs in the same workspace. Cross-workspace resolution and implicit discovery are rejected. Real-person use must additionally pass the Avatar/consent policy at workflow preflight.

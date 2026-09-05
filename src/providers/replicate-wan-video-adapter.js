@@ -1,6 +1,7 @@
 'use strict';
 
 const { ProviderError, assertProviderResult } = require('./provider-contract');
+const crypto = require('node:crypto');
 
 const DEFAULT_MODEL = 'wan-video/wan-2.2-t2v-fast';
 const DEFAULT_BASE_URL = 'https://api.replicate.com/v1';
@@ -88,6 +89,22 @@ function outputUrl(prediction) {
   if (Array.isArray(output) && typeof output[0] === 'string' && output[0].length > 0) return output[0];
   if (output && typeof output.url === 'string' && output.url.length > 0) return output.url;
   return null;
+}
+function mediaEvidence(value) {
+  if (Buffer.isBuffer(value)) return { kind: 'BUFFER', byteSize: value.length,
+    sha256: crypto.createHash('sha256').update(value).digest('hex') };
+  const encoded = /^data:([^;,]+);base64,(.+)$/s.exec(String(value || ''));
+  if (encoded) {
+    const bytes = Buffer.from(encoded[2], 'base64');
+    return { kind: 'DATA_URI', mimeType: encoded[1], byteSize: bytes.length,
+      sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+  }
+  return { kind: 'REMOTE_REFERENCE', locatorHash: crypto.createHash('sha256').update(String(value || '')).digest('hex') };
+}
+function safeInputProvenance(input = {}) {
+  const media = new Set(['image','last_frame_image','reference_images','reference_videos','reference_audios']);
+  return Object.fromEntries(Object.entries(input).map(([name, value]) => [name,
+    media.has(name) ? (Array.isArray(value) ? value.map(mediaEvidence) : mediaEvidence(value)) : value]));
 }
 
 class ReplicateWanVideoAdapter {
@@ -243,8 +260,8 @@ class ReplicateWanVideoAdapter {
         model: this.model,
         predictionId,
         origin: 'replicate-api',
-        ...(input ? { input } : {}),
-        outputUrl: mediaUrl,
+        ...(input ? { input: safeInputProvenance(input) } : {}),
+        outputUrlHash: crypto.createHash('sha256').update(mediaUrl).digest('hex'),
         idempotencyKey: idempotencyKey || null,
       },
     });
@@ -334,4 +351,5 @@ module.exports = {
   buildWanInput,
   outputUrl,
   parseGenerationPrompt,
+  safeInputProvenance,
 };
