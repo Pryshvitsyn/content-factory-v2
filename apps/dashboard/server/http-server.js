@@ -5,7 +5,7 @@ const { URL } = require('node:url');
 const { ControlError } = require('./control-service');
 const { continuationPreflight, continueRecoveredV210 } = require('./v210-quality-resume');
 
-const BODY_LIMIT = 16 * 1024;
+const BODY_LIMIT = 1024 * 1024;
 const ASSET_BODY_LIMIT = 36 * 1024 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
