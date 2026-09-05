@@ -148,9 +148,10 @@ async function main() {
   assert.equal(canonical.canonicalRequest.creativeObjective, referencedBrief.objective);
   const secondAsset = canonical.input.assetPlan.assets.find((asset) => asset.asset_id === 'a2');
   assert.equal(secondAsset.generation_requirements.capability, CAPABILITIES.IMAGE_TO_VIDEO);
-  assert.deepEqual(secondAsset.generation_requirements.v210_reference, {
-    policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: 'a1',
-  });
+  assert.equal(secondAsset.generation_requirements.v210_reference.policy, 'PREVIOUS_SHOT_FRAME');
+  assert.equal(secondAsset.generation_requirements.v210_reference.previousAssetId, 'a1');
+  assert.equal(secondAsset.generation_requirements.v210_reference.dependencySpec.extractionContractVersion,
+    'previous-shot-reference-extractor@1');
 
   let preparedInput = null;
   const configResolver = (env, input) => ({
@@ -211,9 +212,16 @@ async function main() {
     selection() { throw new Error('selection is not used during reference materialization'); },
     identities() { throw new Error('identities are not used during reference materialization'); },
   };
+  const runtimeArtifacts = new Map([['media/a1', previousBytes]]);
+  const runtimeStorage = {
+    async get({ key }) { const value = runtimeArtifacts.get(key); if (!value) throw new Error(`missing ${key}`); return value; },
+    async exists({ key }) { return runtimeArtifacts.has(key); },
+    async put({ key, bytes }) { if (runtimeArtifacts.has(key)) throw Object.assign(new Error('exists'), { code: 'EEXIST' });
+      runtimeArtifacts.set(key, Buffer.from(bytes)); return { key, size: bytes.length }; },
+  };
   const referenceExecutor = new V210ReferenceAwareMediaExecutor({
     delegate,
-    storage: { async get({ key }) { assert.equal(key, 'media/a1'); return previousBytes; } },
+    storage: runtimeStorage,
     frameSampler: { async sample({ bytes }) {
       assert.equal(sha256(bytes), previousHash);
       return [{ jpeg: frameBytes, timestampMs: 4900, analysisHash: 'analysis-frame-1' }];
@@ -231,10 +239,11 @@ async function main() {
   assert.equal(materialized.generation_requirements.v210_reference_evidence.previousAssetId, 'a1');
   assert.equal(materialized.generation_requirements.v210_reference_evidence.sourceArtifactContentHash, previousHash);
   assert.equal(materialized.generation_requirements.v210_reference_evidence.referenceHash, sha256(frameBytes));
+  assert.ok(materialized.generation_requirements.runtime_dependency_snapshot.runtimeDependencyFingerprint);
 
   const corruptExecutor = new V210ReferenceAwareMediaExecutor({
     delegate,
-    storage: { async get() { return Buffer.from('mutated-bytes'); } },
+    storage: { async exists() { return false; }, async get() { return Buffer.from('mutated-bytes'); } },
     frameSampler: { async sample() { throw new Error('must not sample corrupt evidence'); } },
     geometryNormalizer: { async normalize() { throw new Error('must not normalize corrupt evidence'); },
       async probe() { throw new Error('must not probe corrupt evidence'); } },

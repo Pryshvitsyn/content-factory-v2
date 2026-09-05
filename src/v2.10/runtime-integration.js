@@ -40,6 +40,9 @@ const {
   compileReferenceInputPlan,
   providerNeutralReferences,
 } = require("../workflow/reference-input-plan");
+const {
+  previousShotDependencySpec,
+} = require("../workflow/previous-shot-dependency");
 
 const CANONICAL_OBJECTIVES = Object.freeze(
   new Set([
@@ -448,13 +451,13 @@ async function resolveAuthoritativeVideo({
       );
     }
     if (shot.referencePolicy === "PREVIOUS_SHOT_FRAME") {
+      const previousAssetId =
+        brief.storyboard[brief.storyboard.indexOf(shot) - 1]?.assetId || null;
       references.push(
         Object.freeze({
           role: "FIRST_FRAME",
           sourceType: "PREVIOUS_SHOT",
-          artifactId:
-            brief.storyboard[brief.storyboard.indexOf(shot) - 1]?.assetId ||
-            null,
+          artifactId: previousAssetId,
           artifactVersion: 1,
           sha256: "DEFERRED_PREVIOUS_SHOT_FRAME",
           mimeType: "image/jpeg",
@@ -960,11 +963,21 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
         if (!ref || ref.shot.referencePolicy === "NONE") return asset;
         const v210Reference =
           ref.shot.referencePolicy === "PREVIOUS_SHOT_FRAME"
-            ? {
-                policy: "PREVIOUS_SHOT_FRAME",
-                previousAssetId:
-                  brief.storyboard[ref.index - 1]?.assetId || null,
-              }
+            ? (() => {
+                const reference = {
+                  policy: "PREVIOUS_SHOT_FRAME",
+                  previousShotId:
+                    brief.storyboard[ref.index - 1]?.shotId || null,
+                  previousAssetId:
+                    brief.storyboard[ref.index - 1]?.assetId || null,
+                };
+                const dependencySpec = previousShotDependencySpec({
+                  asset,
+                  reference,
+                  requirements: asset.generation_requirements,
+                });
+                return { ...reference, dependencySpec };
+              })()
             : {
                 policy: "UPLOADED_REFERENCE",
                 artifact: ref.shot.referenceMedia,

@@ -18,6 +18,7 @@ const landscape={width:1280,height:720,aspectRatio:1.777778,orientation:'LANDSCA
 function asset(id='a2',previous='a1'){return{asset_id:id,kind:'video',description:'approved shot',required_for_shots:['s2'],generation_requirements:{provider:'replicate',model:'alibaba/wan-3',profile:'STANDARD',capability:'IMAGE_TO_VIDEO',aspect_ratio:'9:16',resolution:'720p',target_clip_duration_ms:5000,v210_reference:{policy:'PREVIOUS_SHOT_FRAME',previousAssetId:previous}}};}
 function normalizer(before,after=before,applied=false){return{async probe(){return before;},async normalize({bytes}){return{bytes:applied?Buffer.from('normalized'):bytes,contentType:'image/jpeg',before,after,normalizationApplied:applied,normalizationVersion:'test-v1',policy:applied?'PROPORTIONAL_SCALE_TO_FIT_THEN_PAD':'NONE_ALREADY_COMPATIBLE'};}};}
 function fakeDelegate(row){return{repository:{async get(){return row;}},artifactService:{},mediaInspector:{},assetRepository:{},selection(){return{};},identities(){return{};},async execute({asset:input}){return input;},async loadExisting(){throw new Error('unexpected');}};}
+function testStorage(source){const saved=new Map();return{async exists({key}){return saved.has(key);},async get({key}){return saved.has(key)?saved.get(key):source(key);},async put({key,bytes}){if(saved.has(key))throw Object.assign(new Error('exists'),{code:'EEXIST'});saved.set(key,Buffer.from(bytes));return{key,size:bytes.length};}};}
 function qualityFrame(i){return{ratio:i/6,timestampMs:i*700,analysisHash:`f${i}`,jpeg:Buffer.from(`f${i}`),differenceFromPrevious:i?8:null,metrics:{mean:100,standardDeviation:30,darkRatio:0,rowDarkRatios:Array(90).fill(0),columnDarkRatios:Array(160).fill(0)}};}
 
 async function main(){
@@ -38,18 +39,18 @@ async function main(){
 
   const video=Buffer.from('previous-video'),jpeg=Buffer.from('portrait-jpeg');
   const row={status:'SUCCEEDED',artifact_id:'artifact-a1',artifact_version:1,artifact_storage_key:'a1.mp4',artifact_content_hash:sha(video),content_type:'video/mp4',duration_ms:5000,media_probe:{durationMs:5000,width:720,height:1280}};
-  const executor=new V210ReferenceAwareMediaExecutor({delegate:fakeDelegate(row),storage:{async get(){return video;}},frameSampler:{async sample(){return[{jpeg,timestampMs:4900,analysisHash:'frame'}];}},geometryNormalizer:normalizer(portrait)});
+  const executor=new V210ReferenceAwareMediaExecutor({delegate:fakeDelegate(row),storage:testStorage(()=>video),frameSampler:{async sample(){return[{jpeg,timestampMs:4900,analysisHash:'frame'}];}},geometryNormalizer:normalizer(portrait)});
   const verified=await executor.materializeAsset({workspaceId:W,brandId:B,productionId:P,asset:asset()});
   assert.equal(verified.generation_requirements.v210_reference_evidence.orientation,'PORTRAIT');
   assert.equal(verified.generation_requirements.v210_reference_evidence.normalizationApplied,false);
 
-  const normalizedExecutor=new V210ReferenceAwareMediaExecutor({delegate:fakeDelegate(row),storage:{async get(){return video;}},frameSampler:{async sample(){return[{jpeg,timestampMs:4900,analysisHash:'frame'}];}},geometryNormalizer:normalizer(landscape,portrait,true)});
+  const normalizedExecutor=new V210ReferenceAwareMediaExecutor({delegate:fakeDelegate(row),storage:testStorage(()=>video),frameSampler:{async sample(){return[{jpeg,timestampMs:4900,analysisHash:'frame'}];}},geometryNormalizer:normalizer(landscape,portrait,true)});
   const normalized=await normalizedExecutor.materializeAsset({workspaceId:W,brandId:B,productionId:P,asset:asset()});
   assert.equal(normalized.generation_requirements.v210_reference_evidence.normalizationApplied,true);
   assert.equal(normalized.generation_requirements.v210_reference_evidence.referenceHash,sha(Buffer.from('normalized')));
 
   let calls=0;
-  const rejected=new V210ReferenceAwareMediaExecutor({delegate:{...fakeDelegate(row),async execute(){calls+=1;}},storage:{async get(){return video;}},frameSampler:{async sample(){return[{jpeg,timestampMs:4900,analysisHash:'frame'}];}},geometryNormalizer:{async normalize(){throw new ReferenceGeometryError('REFERENCE_GEOMETRY_MISMATCH','unsafe');},async probe(){return landscape;}}});
+  const rejected=new V210ReferenceAwareMediaExecutor({delegate:{...fakeDelegate(row),async execute(){calls+=1;}},storage:testStorage(()=>video),frameSampler:{async sample(){return[{jpeg,timestampMs:4900,analysisHash:'frame'}];}},geometryNormalizer:{async normalize(){throw new ReferenceGeometryError('REFERENCE_GEOMETRY_MISMATCH','unsafe');},async probe(){return landscape;}}});
   await assert.rejects(()=>rejected.execute({workspaceId:W,brandId:B,productionId:P,workerId:'w',asset:asset()}),{code:'REFERENCE_GEOMETRY_MISMATCH'});
   assert.equal(calls,0,'reference failure occurs before provider boundary');
   const uploadedBytes=Buffer.from('uploaded-landscape');const uploadedAsset=asset('uploaded','a1');
@@ -103,7 +104,7 @@ async function main(){
 
   const v2=Buffer.from('successful-v2'),replacementRow={id:'me2',status:'SUCCEEDED',source_asset_id:'a2',replacement_asset_id:replacementAsset.asset_id,revision_no:1,retry_reason:'WRONG_ORIENTATION',artifact_id:'artifact-a2',artifact_version:2,artifact_storage_key:'a2-v2.mp4',artifact_content_hash:sha(v2),content_type:'video/mp4',media_probe:{width:720,height:1280},provider:'replicate',model:'alibaba/wan-3'};
   const lineageDelegate=fakeDelegate(row);lineageDelegate.repository.latestSucceededReplacement=async({assetId})=>assetId==='a2'?replacementRow:null;
-  const lineage=new V210ReferenceAwareMediaExecutor({delegate:lineageDelegate,storage:{async get({key}){return key==='a2-v2.mp4'?v2:video;}},frameSampler:{async sample({bytes}){assert.equal(sha(bytes),sha(v2));return[{jpeg,timestampMs:4900,analysisHash:'v2'}];}},geometryNormalizer:normalizer(portrait)});
+  const lineage=new V210ReferenceAwareMediaExecutor({delegate:lineageDelegate,storage:testStorage((key)=>key==='a2-v2.mp4'?v2:video),frameSampler:{async sample({bytes}){assert.equal(sha(bytes),sha(v2));return[{jpeg,timestampMs:4900,analysisHash:'v2'}];}},geometryNormalizer:normalizer(portrait)});
   const shot3=await lineage.materializeAsset({workspaceId:W,brandId:B,productionId:P,asset:asset('a3','a2')});
   assert.equal(shot3.generation_requirements.v210_reference_evidence.resolvedPreviousAssetId,replacementAsset.asset_id);assert.equal(shot3.generation_requirements.v210_reference_evidence.sourceArtifactVersion,2);
   assert.equal(compatible(geometry(720,1280),'9:16'),true);

@@ -17,6 +17,12 @@ const { getVideoModelContract } = require("../v2.8/video-model-contracts");
 const {
   compileReferenceInputPlan,
 } = require("../workflow/reference-input-plan");
+const { ArtifactService } = require("../artifacts/artifact-service");
+const {
+  SNAPSHOT_SCHEMA_VERSION,
+  fingerprint,
+  previousShotDependencySpec,
+} = require("../workflow/previous-shot-dependency");
 
 function fail(code, message) {
   const error = new Error(message);
@@ -63,7 +69,9 @@ class V210ReferenceAwareMediaExecutor {
       });
     this.continuityAuthority = continuityAuthority;
     this.repository = delegate.repository;
-    this.artifactService = delegate.artifactService;
+    this.artifactService = delegate.artifactService?.createVersion
+      ? delegate.artifactService
+      : new ArtifactService({ storage });
     this.mediaInspector = delegate.mediaInspector;
     this.assetRepository = delegate.assetRepository;
     const priorValidator = delegate.outputValidator;
@@ -127,6 +135,147 @@ class V210ReferenceAwareMediaExecutor {
       throw error;
     }
   }
+  dependencyIdentity({ workspaceId, brandId, productionId, asset }) {
+    const slot = `${workspaceId}:${brandId}:${productionId}:${asset.asset_id}`;
+    return {
+      snapshotArtifactId: `runtime-dependency:${slot}`,
+      snapshotIdempotencyKey: `runtime-dependency:${slot}`,
+      derivedArtifactId: `runtime-dependency-frame:${slot}`,
+    };
+  }
+  async loadFrozenPrevious(args, spec) {
+    const identity = this.dependencyIdentity(args);
+    const artifact = await this.artifactService.getVersionByIdempotency({
+      artifactId: identity.snapshotArtifactId,
+      type: "text",
+      idempotencyKey: identity.snapshotIdempotencyKey,
+      provider: "content-factory",
+      model: SNAPSHOT_SCHEMA_VERSION,
+      validationStatus: "immutable_runtime_dependency",
+    });
+    if (!artifact) return null;
+    let snapshot;
+    try {
+      snapshot = JSON.parse(artifact.content.toString("utf8"));
+    } catch {
+      fail(
+        "RUNTIME_DEPENDENCY_INVALID",
+        "Runtime dependency snapshot is invalid",
+      );
+    }
+    if (snapshot.dependencySpecFingerprint !== spec.dependencySpecFingerprint)
+      fail(
+        "RUNTIME_DEPENDENCY_AUTHORITY_STALE",
+        "Frozen runtime dependency does not match human-approved dependency specification",
+      );
+    const bytes = await this.readVerified(
+      snapshot.derivedFrameArtifactStorageKey,
+      snapshot.derivedFrameSHA,
+      "RUNTIME_DEPENDENCY_ARTIFACT_MISSING",
+    );
+    if (
+      fingerprint({ ...snapshot, runtimeDependencyFingerprint: undefined }) !==
+      snapshot.runtimeDependencyFingerprint
+    )
+      fail(
+        "RUNTIME_DEPENDENCY_FINGERPRINT_MISMATCH",
+        "Frozen runtime dependency fingerprint is invalid",
+      );
+    return {
+      bytes,
+      contentType: snapshot.derivedFrameMime,
+      source: {
+        artifactId: snapshot.derivedFrameArtifactId,
+        version: snapshot.derivedFrameArtifactVersion,
+        contentHash: snapshot.derivedFrameSHA,
+      },
+      evidence: snapshot,
+      frozen: true,
+    };
+  }
+  async freezePrevious(args, spec, materialized) {
+    const identity = this.dependencyIdentity(args);
+    const source = materialized.evidence;
+    const derived = await this.artifactService.createVersion({
+      artifactId: identity.derivedArtifactId,
+      type: "binary",
+      content: materialized.bytes,
+      idempotencyKey: `${spec.dependencySpecFingerprint}:${source.sourceArtifactContentHash}`,
+      provider: "content-factory",
+      model: spec.extractionContractVersion,
+      validationStatus: "immutable_runtime_dependency_frame",
+    });
+    const base = {
+      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+      workspaceId: args.workspaceId,
+      brandId: args.brandId,
+      productionId: args.productionId,
+      downstreamAssetId: args.asset.asset_id,
+      downstreamShotId: spec.downstreamShotId,
+      requestedUpstreamShotId: spec.requestedUpstreamShotId,
+      requestedUpstreamAssetId: spec.requestedUpstreamAssetId,
+      previousAssetId: spec.requestedUpstreamAssetId,
+      resolvedUpstreamAssetId: source.resolvedPreviousAssetId,
+      resolvedPreviousAssetId: source.resolvedPreviousAssetId,
+      replacementAssetId: source.supersedesAssetId
+        ? source.resolvedPreviousAssetId
+        : null,
+      replacementRevision: source.replacementRevision || null,
+      sourceArtifactId: materialized.source.artifactId,
+      sourceArtifactVersion: materialized.source.version,
+      sourceArtifactSHA: source.sourceArtifactContentHash,
+      sourceArtifactContentHash: source.sourceArtifactContentHash,
+      sourceArtifactContentType: materialized.sourceVideo.contentType,
+      dependencySpecFingerprint: spec.dependencySpecFingerprint,
+      extractionContractVersion: spec.extractionContractVersion,
+      timestampMs: source.timestampMs,
+      analysisHash: source.analysisHash,
+      derivedFrameArtifactId: derived.artifactId,
+      derivedFrameArtifactVersion: derived.version,
+      derivedFrameArtifactStorageKey: derived.storageKey,
+      derivedFrameSHA: derived.contentHash,
+      referenceHash: derived.contentHash,
+      derivedFrameMime: materialized.contentType,
+      geometryEvidence: {
+        referenceWidth: source.referenceWidth,
+        referenceHeight: source.referenceHeight,
+        referenceAspectRatio: source.referenceAspectRatio,
+        expectedAspectRatio: source.expectedAspectRatio,
+        normalizationApplied: source.normalizationApplied,
+        normalizationVersion: source.normalizationVersion,
+        normalizationPolicy: source.normalizationPolicy,
+      },
+      referenceWidth: source.referenceWidth,
+      referenceHeight: source.referenceHeight,
+      referenceAspectRatio: source.referenceAspectRatio,
+      orientation: source.orientation,
+      expectedAspectRatio: source.expectedAspectRatio,
+      originalReferenceWidth: source.originalReferenceWidth,
+      originalReferenceHeight: source.originalReferenceHeight,
+      originalReferenceAspectRatio: source.originalReferenceAspectRatio,
+      normalizationApplied: source.normalizationApplied,
+      normalizationVersion: source.normalizationVersion,
+      normalizationPolicy: source.normalizationPolicy,
+    };
+    const snapshot = {
+      ...base,
+      runtimeDependencyFingerprint: fingerprint(base),
+    };
+    try {
+      await this.artifactService.createVersion({
+        artifactId: identity.snapshotArtifactId,
+        type: "text",
+        content: JSON.stringify(snapshot),
+        idempotencyKey: identity.snapshotIdempotencyKey,
+        provider: "content-factory",
+        model: SNAPSHOT_SCHEMA_VERSION,
+        validationStatus: "immutable_runtime_dependency",
+      });
+    } catch (error) {
+      if (error.code !== "ARTIFACT_IDEMPOTENCY_CONFLICT") throw error;
+    }
+    return this.loadFrozenPrevious(args, spec);
+  }
   async materializePrevious({
     workspaceId,
     brandId,
@@ -134,6 +283,18 @@ class V210ReferenceAwareMediaExecutor {
     asset,
     reference,
   }) {
+    const spec =
+      reference.dependencySpec ||
+      previousShotDependencySpec({
+        asset,
+        reference,
+        requirements: asset.generation_requirements || {},
+      });
+    const frozen = await this.loadFrozenPrevious(
+      { workspaceId, brandId, productionId, asset },
+      spec,
+    );
+    if (frozen) return frozen;
     const replacement = await this.latestReplacement({
       productionId,
       brandId,
@@ -206,7 +367,11 @@ class V210ReferenceAwareMediaExecutor {
         analysisHash: frame.analysisHash,
         referenceHash: hash(frame.jpeg),
         recoveryKind: replacement?.recovery_kind || null,
+        replacementRevision: replacement?.revision_no || null,
+        dependencySpecFingerprint: spec.dependencySpecFingerprint,
+        extractionContractVersion: spec.extractionContractVersion,
       },
+      dependencySpec: spec,
     };
   }
   async materializeUploaded(reference) {
@@ -343,7 +508,12 @@ class V210ReferenceAwareMediaExecutor {
       const expectedAspectRatio = requirements.aspect_ratio || "9:16",
         resolution = requirements.resolution || "720p";
       let normalized;
-      if (reference.policy === "PREVIOUS_SHOT_FRAME") {
+      if (reference.policy === "PREVIOUS_SHOT_FRAME" && materialized.frozen) {
+        normalized = {
+          bytes: materialized.bytes,
+          contentType: materialized.contentType,
+        };
+      } else if (reference.policy === "PREVIOUS_SHOT_FRAME") {
         const normalize =
           typeof this.geometryNormalizer.normalizePreviousShot === "function"
             ? this.geometryNormalizer.normalizePreviousShot.bind(
@@ -380,20 +550,29 @@ class V210ReferenceAwareMediaExecutor {
           policy: "VERIFY_ONLY",
         };
       }
-      materialized = {
-        ...materialized,
-        bytes: normalized.bytes,
-        contentType: normalized.contentType,
-        evidence: {
-          ...materialized.evidence,
-          ...referenceEvidence({
-            result: normalized,
-            expectedAspectRatio,
-            source: materialized.source,
-            referenceBytes: normalized.bytes,
-          }),
-        },
-      };
+      if (!materialized.frozen) {
+        materialized = {
+          ...materialized,
+          bytes: normalized.bytes,
+          contentType: normalized.contentType,
+          evidence: {
+            ...materialized.evidence,
+            ...referenceEvidence({
+              result: normalized,
+              expectedAspectRatio,
+              source: materialized.source,
+              referenceBytes: normalized.bytes,
+            }),
+          },
+        };
+        if (reference.policy === "PREVIOUS_SHOT_FRAME") {
+          materialized = await this.freezePrevious(
+            args,
+            materialized.dependencySpec,
+            materialized,
+          );
+        }
+      }
       const providerValue =
         requirements.provider === "replicate" &&
         requirements.model === "bytedance/seedance-2.5" &&
@@ -470,6 +649,19 @@ class V210ReferenceAwareMediaExecutor {
         v210_continuity_evidence: Object.freeze(continuityEvidence),
         ...(materialized
           ? { v210_reference_evidence: Object.freeze(materialized.evidence) }
+          : {}),
+        ...(materialized?.evidence?.runtimeDependencyFingerprint
+          ? {
+              runtime_dependency_snapshot: Object.freeze({
+                runtimeDependencyFingerprint:
+                  materialized.evidence.runtimeDependencyFingerprint,
+                derivedFrameArtifactId:
+                  materialized.evidence.derivedFrameArtifactId,
+                derivedFrameArtifactVersion:
+                  materialized.evidence.derivedFrameArtifactVersion,
+                derivedFrameSHA: materialized.evidence.derivedFrameSHA,
+              }),
+            }
           : {}),
       }),
     });

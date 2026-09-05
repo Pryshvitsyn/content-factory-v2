@@ -134,13 +134,7 @@ function harness({
           throw Object.assign(new Error("not found"), {
             code: "CONTINUITY_REVISION_NOT_FOUND",
           });
-        if (
-          p.ownerBrandId !== consumerBrandId &&
-          !(
-            p.visibility === "WORKSPACE_SHARED_WITH_GRANTS" &&
-            p.grantedBrandIds.includes(consumerBrandId)
-          )
-        )
+        if (p.ownerBrandId !== consumerBrandId)
           throw Object.assign(new Error("denied"), {
             code: "CONTINUITY_BRAND_ACCESS_DENIED",
           });
@@ -505,9 +499,32 @@ test("cross-brand access is resolved by injected authority and forged grant evid
     visibility: "WORKSPACE_SHARED_WITH_GRANTS",
     grants: ["brand-b"],
   });
+  assert.throws(
+    () =>
+      bindContinuityEntities({
+        workspaceId,
+        brandId: "brand-b",
+        bindings: [{ nodeId: "generate", pack: shared }],
+      }),
+    (e) => e.code === "CONTINUITY_DURABLE_AUTHORITY_REQUIRED",
+    "legacy grantedBrandIds metadata cannot authorize a new cross-brand binding",
+  );
+  const durableAuthority = {
+    resolve: async ({ consumerBrandId, packId, fingerprint }) => {
+      assert.equal(consumerBrandId, "brand-b");
+      assert.equal(packId, shared.revisionFingerprint);
+      assert.equal(fingerprint, shared.revisionFingerprint);
+      return {
+        row: { id: packId, owner_brand_id: shared.ownerBrandId },
+        pack: shared,
+        references: shared.references,
+      };
+    },
+  };
+  const authorized = harness({ continuityAuthority: durableAuthority });
   assert.equal(
     (
-      await h.value.resolveReferences({
+      await authorized.value.resolveReferences({
         workspaceId,
         brandId: "brand-b",
         continuityBindings: [

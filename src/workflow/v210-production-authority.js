@@ -12,6 +12,7 @@ const {
   getVideoModelContract,
 } = require("../v2.8/video-model-contracts");
 const { compileReferenceInputPlan } = require("./reference-input-plan");
+const { previousShotDependencySpec } = require("./previous-shot-dependency");
 
 class ProductionExecutionAuthority {
   constructor({ repository, storage } = {}) {
@@ -139,6 +140,14 @@ function operationPlans(canonical, revision) {
                 sha256: "DEFERRED_PREVIOUS_SHOT_FRAME",
               }
             : null;
+        const dependencySpec = requirements.v210_reference?.previousAssetId
+          ? requirements.v210_reference.dependencySpec ||
+            previousShotDependencySpec({
+              asset,
+              reference: requirements.v210_reference,
+              requirements,
+            })
+          : null;
         const resolvedInputMode =
           requirements.resolved_input_mode || requirements.capability;
         const contract = getVideoModelContract(
@@ -191,6 +200,9 @@ function operationPlans(canonical, revision) {
             ),
             ...(plannedReference ? [plannedReference] : []),
           ],
+          previousShotDependencySpec: dependencySpec,
+          previousShotDependencySpecFingerprint:
+            dependencySpec?.dependencySpecFingerprint || null,
           continuityPacks: continuityBindings.map((binding) => ({
             packId: binding.packId,
             packRevision: binding.packRevision,

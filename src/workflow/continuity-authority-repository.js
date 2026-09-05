@@ -249,21 +249,23 @@ class ContinuityAuthorityRepository {
     const rows = (
       await this.db.query(
         `SELECT p.*,
-      CASE WHEN p.owner_brand_id=$2 THEN 'BRAND_PRIVATE' ELSE COALESCE((SELECT e.decision
+      CASE WHEN p.owner_brand_id=$2 THEN 'BRAND_PRIVATE' ELSE effective.decision END AS access_status
+      FROM workflow_authority.continuity_reference_pack_revisions p
+      LEFT JOIN LATERAL (
+        SELECT e.decision
         FROM workflow_authority.continuity_reference_grant_events e
         WHERE e.workspace_id=p.workspace_id AND e.owner_brand_id=p.owner_brand_id
           AND e.consumer_brand_id=$2 AND e.pack_id=p.id AND e.pack_fingerprint=p.fingerprint
-        ORDER BY e.created_at DESC,e.id DESC LIMIT 1),'BLOCKED') END AS access_status
-      FROM workflow_authority.continuity_reference_pack_revisions p
-      WHERE p.workspace_id=$1 ORDER BY p.entity_id,p.revision DESC,p.created_at DESC`,
+        ORDER BY e.created_at DESC,e.id DESC LIMIT 1
+      ) effective ON true
+      WHERE p.workspace_id=$1
+        AND (p.owner_brand_id=$2 OR effective.decision='GRANTED')
+      ORDER BY p.entity_id,p.revision DESC,p.created_at DESC`,
         [workspaceId, consumerBrandId],
       )
     ).rows;
     const output = [];
     for (const row of rows) {
-      const accessible =
-        row.owner_brand_id === consumerBrandId ||
-        row.access_status === "GRANTED";
       const bytes = await this.storage.get({ key: row.artifact_storage_key });
       if (!Buffer.isBuffer(bytes))
         throw new ContinuityError(
@@ -272,7 +274,7 @@ class ContinuityAuthorityRepository {
         );
       const pack = referencePackRevision(JSON.parse(bytes.toString("utf8")));
       let authorityStatus =
-        accessible && pack.approval?.approved === true ? "READY" : "BLOCKED";
+        pack.approval?.approved === true ? "READY" : "BLOCKED";
       if (authorityStatus === "READY" && pack.entityType === "REAL_PERSON") {
         const verified = this.avatarAuthorityResolver?.verify
           ? await this.avatarAuthorityResolver.verify({
