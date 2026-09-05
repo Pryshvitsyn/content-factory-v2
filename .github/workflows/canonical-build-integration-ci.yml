@@ -112,8 +112,8 @@ jobs:
       - name: V2.10 continuity namespace and REAL_PERSON authority PostgreSQL
         run: |
           createdb --maintenance-db=postgres canonical_v210_continuity
-          PGDATABASE=canonical_v210_continuity node tests/v2.10-continuity-production-postgres-test.js
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/canonical_v210_continuity PGDATABASE=canonical_v210_continuity node tests/v2.10-continuity-production-postgres-test.js
       - name: V2.10 exact START and retry PostgreSQL
         run: |
           createdb --maintenance-db=postgres canonical_v210_exact_start
-          PGDATABASE=canonical_v210_exact_start node tests/v2.10-exact-retry-start-postgres-test.js
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/canonical_v210_exact_start PGDATABASE=canonical_v210_exact_start node tests/v2.10-exact-retry-start-postgres-test.js
