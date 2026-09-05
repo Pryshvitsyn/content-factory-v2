@@ -18,9 +18,10 @@ function same(a, b) { return JSON.stringify(a || {}) === JSON.stringify(b || {})
 
 class CreativeProductionService {
   constructor({ repository, brandRepository, providerCatalog = null, actor = 'local-operator', env = process.env,
-    previewProvider = null, storage = null, starter = null, audioInspector = null }) {
+    previewProvider = null, storage = null, starter = null, audioInspector = null, continuityAuthority = null }) {
     this.repository = repository; this.brandRepository = brandRepository; this.providerCatalog = providerCatalog;
     this.actor = actor; this.env = env; this.storage = storage; this.starter = starter; this.audioInspector = audioInspector;
+    this.continuityAuthority=continuityAuthority;
     this.voicePreviews = previewProvider ? new VoicePreviewService({ repository, providerGateway: previewProvider, mediaInspector: audioInspector }) : null;
   }
   async scope(brandId) {
@@ -64,7 +65,8 @@ class CreativeProductionService {
       'V2.10 canonical production starter is not configured');
     const brief = canonicalCreativeBrief(draft.creative_brief);
     const authoritativeVideo = await resolveAuthoritativeVideo({ catalog: this.providerCatalog,
-      workspaceId: scope.workspaceId, request: request.video || request, brief });
+      workspaceId: scope.workspaceId, brandId: scope.brandId, request: request.video || request, brief,
+      continuityAuthority:this.continuityAuthority });
     const voiceRuntime = await this.resolveVoiceRuntime(scope, brief);
     const quality = this.authoritativeQuality();
     const master = this.authoritativeMaster(brief);

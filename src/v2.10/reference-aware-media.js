@@ -23,10 +23,11 @@ class V210PostProductionRenderer {
 }
 
 class V210ReferenceAwareMediaExecutor {
-  constructor({ delegate, storage, frameSampler = null, geometryNormalizer = null } = {}) {
+  constructor({ delegate, storage, frameSampler = null, geometryNormalizer = null, continuityAuthority = null } = {}) {
     if (!delegate || !storage) throw new Error('delegate and storage are required');
     this.delegate = delegate; this.storage = storage; this.frameSampler = frameSampler || new FfmpegFrameSampler();
     this.geometryNormalizer = geometryNormalizer || new FfmpegReferenceGeometryNormalizer({ inspector: delegate.mediaInspector });
+    this.continuityAuthority=continuityAuthority;
     this.repository = delegate.repository; this.artifactService = delegate.artifactService;
     this.mediaInspector = delegate.mediaInspector; this.assetRepository = delegate.assetRepository;
     const priorValidator = delegate.outputValidator;
@@ -106,6 +107,31 @@ class V210ReferenceAwareMediaExecutor {
   }
   async materializeAsset(args) {
     const asset = args.asset;
+    const continuity=asset?.generation_requirements?.v210_continuity_binding;
+    if(continuity){
+      if(!this.continuityAuthority?.resolve)fail('CONTINUITY_AUTHORITY_REQUIRED','Durable continuity authority is unavailable at execution');
+      const current=await this.continuityAuthority.resolve({workspaceId:args.workspaceId,consumerBrandId:args.brandId,
+        packId:continuity.packId,fingerprint:continuity.packFingerprint});
+      const approved=JSON.stringify(continuity.references.map(({role,artifactId,artifactVersion,sha256})=>({role,artifactId,artifactVersion,sha256})));
+      const actual=JSON.stringify(current.references.map(({role,artifactId,artifactVersion,sha256})=>({role,artifactId,artifactVersion,sha256})));
+      if(approved!==actual)fail('CONTINUITY_AUTHORITY_STALE','Durable continuity references changed after final preflight');
+      const references={character_images:[],reference_videos:[],reference_audios:[]};
+      for(const reference of current.references){const bytes=await this.readVerified(reference.storageKey,reference.sha256,'CONTINUITY_REFERENCE_EVIDENCE_MISSING');
+        const providerValue=asset.generation_requirements.provider==='replicate'&&bytes.length>1024*1024
+          ? replicateFileMaterializer({provider:'replicate',model:asset.generation_requirements.model,bytes,
+            mimeType:reference.mimeType,sha256:reference.sha256,artifactId:reference.artifactId,
+            artifactVersion:reference.artifactVersion,purpose:'V2_10_CONTINUITY_REFERENCE'}).providerValue
+          : dataUri(reference.mimeType||'application/octet-stream',bytes);
+        if(reference.role==='FIRST_FRAME')references.first_frame=providerValue;
+        else if(reference.role==='REFERENCE_IMAGE')references.character_images.push(providerValue);
+        else if(reference.role==='REFERENCE_VIDEO')references.reference_videos.push(providerValue);
+        else if(reference.role==='REFERENCE_AUDIO')references.reference_audios.push(providerValue);
+        else fail('CONTINUITY_REFERENCE_ROLE_UNSUPPORTED',`Unsupported continuity reference role '${reference.role}'`);
+      }
+      return Object.freeze({...asset,generation_requirements:Object.freeze({...asset.generation_requirements,
+        references:Object.freeze(references),v210_continuity_evidence:Object.freeze({packId:continuity.packId,
+          packRevision:continuity.packRevision,packFingerprint:continuity.packFingerprint,references:current.references.map(({role,artifactId,artifactVersion,sha256})=>({role,artifactId,artifactVersion,sha256}))})})});
+    }
     const reference = asset?.generation_requirements?.v210_reference;
     if (!reference) return asset;
     let materialized;

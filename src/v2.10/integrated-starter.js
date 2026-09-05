@@ -78,12 +78,14 @@ function revisionSafeCanonical({ draft, preflight }) {
 }
 
 class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
+  constructor(options={}){super(options);this.continuityAuthority=options.continuityAuthority||null;}
   runtime(input, live) {
     const env = integratedEnvironment(this.env, input, live);
     const config = this.configResolver(env, input);
     const runtime = createProductionRuntime({ db: this.db, storage: this.storage, config, env, logger: this.logger,
       mediaInspector: this.mediaInspector,
-      mediaExecutorDecorator: (delegate) => new V210ReferenceAwareMediaExecutor({ delegate, storage: this.storage }),
+      mediaExecutorDecorator: (delegate) => new V210ReferenceAwareMediaExecutor({ delegate, storage: this.storage,
+        continuityAuthority:this.continuityAuthority }),
       masterRenderer: new V210PostProductionRenderer({ postProduction: input.postProduction || null }),
     });
     return { ...runtime, config, env };

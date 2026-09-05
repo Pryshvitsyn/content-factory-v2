@@ -33,6 +33,7 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
   if (!authoritativeVideo.provider || !authoritativeVideo.model || !authoritativeVideo.profile
     || authoritativeVideo.configurationStatus !== 'CONFIGURED') blockers.push('VIDEO_SELECTION_INCOMPLETE');
   if (voiceRuntime.status === 'BLOCKED') blockers.push(voiceRuntime.code || 'VOICE_RUNTIME_NOT_READY');
+  if (authoritativeVideo.continuityAuthorityStatus === 'BLOCKED') blockers.push(...authoritativeVideo.continuityAuthorityBlockers.map((item)=>item.code));
   if (plan.readiness === 'BLOCKED') blockers.push('CANONICAL_RUNTIME_BLOCKED');
   if (authoritativeVideo.modelContractVersion && authoritativeVideo.modelPricing?.status === 'UNKNOWN_CURRENT_PRICE') blockers.push('PRICE_NOT_VERIFIABLE');
   if (voiceEnabled && authoritativeVideo.shotModelRequests?.some((shot) => shot.modelRequest?.generateAudio === true)) blockers.push('AUDIO_OWNERSHIP_CONFLICT');
@@ -51,6 +52,9 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
     modelSchemaVersion: authoritativeVideo.modelSchemaVersion || null,
     modelPricing: authoritativeVideo.modelPricing || null,
     shotModelRequests: [...(authoritativeVideo.shotModelRequests || [])],
+    continuityAuthorityStatus:authoritativeVideo.continuityAuthorityStatus||'READY',
+    continuityAuthorityBlockers:[...(authoritativeVideo.continuityAuthorityBlockers||[])],
+    resolvedContinuityBindings:[...(authoritativeVideo.resolvedContinuityBindings||[])],
   };
   const masterResolved = { profile: master.profile || plan.masterAssemblyMode || 'SOCIAL_VERTICAL',
     resolution: master.resolution || '1080x1920', fps: Number(master.fps || 30), durationSeconds: brief.targetDurationSeconds,

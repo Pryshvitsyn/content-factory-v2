@@ -94,7 +94,11 @@ function fromAsset(asset) {
     provider: selection.provider, model: selection.model });
   return createCanonicalMediaRequest({
     capability, prompt, providerPrompt: translated.providerPrompt, negativeIntent: translated.negativeIntent,
-    negativePrompt: requirements.negative_prompt, durationSeconds: (requirements.target_clip_duration_ms || 0) / 1000 || null,
+    negativePrompt: requirements.negative_prompt,
+    durationSeconds: requirements.generation_duration_seconds
+      ?? requirements.resolved_settings?.durationSeconds
+      ?? requirements.resolved_settings?.duration
+      ?? ((requirements.target_clip_duration_ms || 0) / 1000 || null),
     aspectRatio: requirements.aspect_ratio, resolution: requirements.resolution, references: refs,
     resolvedInputMode: requirements.resolved_input_mode || requirements.resolvedInputMode,
     outputFormat: requirements.output_format || requirements.outputFormat,

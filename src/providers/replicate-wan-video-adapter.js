@@ -7,6 +7,7 @@ const DEFAULT_MODEL = 'wan-video/wan-2.2-t2v-fast';
 const DEFAULT_BASE_URL = 'https://api.replicate.com/v1';
 const PENDING_STATUSES = new Set(['queued', 'starting', 'processing']);
 const CANCELED_STATUSES = new Set(['canceled', 'aborted']);
+const FILE_EXPIRY_SAFETY_MS = 30 * 1000;
 
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -146,7 +147,11 @@ class ReplicateWanVideoAdapter {
     const actualHash = crypto.createHash('sha256').update(value.bytes).digest('hex');
     if (value.sha256 && value.sha256 !== actualHash) throw providerError('Provider file bytes do not match immutable source hash', 'REPLICATE_FILE_HASH_MISMATCH', { model: this.model });
     const cacheKey = `${actualHash}:replicate-files-api@1`;
-    if (this.fileMaterializations.has(cacheKey)) return this.fileMaterializations.get(cacheKey);
+    if (this.fileMaterializations.has(cacheKey)) {
+      const cached = await this.fileMaterializations.get(cacheKey);
+      if (Number.isFinite(cached.cacheExpiresAt) && this.now() + FILE_EXPIRY_SAFETY_MS < cached.cacheExpiresAt) return cached;
+      this.fileMaterializations.delete(cacheKey);
+    }
     const operation = (async () => {
       if (!this.apiToken) throw providerError('REPLICATE_API_TOKEN is required for file upload', 'REPLICATE_TOKEN_REQUIRED', { model: this.model });
       const form = new FormData();
@@ -157,14 +162,20 @@ class ReplicateWanVideoAdapter {
       const file = await this.requestJson(`${this.baseURL}/files`, { method: 'POST', headers: {
         Authorization: `Bearer ${this.apiToken}`, Accept: 'application/json' }, body: form });
       if (!file.id || !file.urls?.get || file.checksums?.sha256 !== actualHash) throw providerError('Replicate file upload returned invalid identity/checksum evidence', 'REPLICATE_FILE_UPLOAD_INVALID', { model: this.model });
-      return Object.freeze({ locator: file.urls.get, evidence: Object.freeze({ provider: 'replicate', method: 'REPLICATE_FILES_API',
+      const cacheExpiresAt = Date.parse(file.expires_at || '');
+      return Object.freeze({ locator: file.urls.get, cacheExpiresAt: Number.isFinite(cacheExpiresAt) ? cacheExpiresAt : null,
+        evidence: Object.freeze({ provider: 'replicate', method: 'REPLICATE_FILES_API',
         materializationContractVersion: 'replicate-files-api@1', providerFileId: file.id, sourceSha256: actualHash,
         sourceMime: value.mimeType || 'application/octet-stream', sourceByteSize: value.bytes.length,
         artifactId: value.artifactId || null, artifactVersion: value.artifactVersion || null,
         locatorHash: crypto.createHash('sha256').update(file.urls.get).digest('hex'), expiresAt: file.expires_at || null }) });
     })();
     this.fileMaterializations.set(cacheKey, operation);
-    try { return await operation; } catch (error) { this.fileMaterializations.delete(cacheKey); throw error; }
+    try {
+      const uploaded = await operation;
+      if (!Number.isFinite(uploaded.cacheExpiresAt)) this.fileMaterializations.delete(cacheKey);
+      return uploaded;
+    } catch (error) { this.fileMaterializations.delete(cacheKey); throw error; }
   }
 
   async materializeInput(input) {

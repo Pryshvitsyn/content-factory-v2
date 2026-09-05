@@ -41,14 +41,19 @@ function operationPlans(canonical, revision) {
   return Object.freeze(canonical.input.assetPlan.assets.filter((asset) => asset.kind === 'video').map((asset) => {
     const requirements = asset.generation_requirements || {};
     const reference = requirements.v210_reference?.artifact || null;
+    const continuityReferences=requirements.v210_continuity_binding?.references||[];
     const identity = { schemaVersion: 'production-operation-plan@1', operationNodeId: `generate:${asset.asset_id}`,
       shotId: asset.asset_id, assetId: asset.asset_id, provider: requirements.provider, model: requirements.model,
       modelContractVersion: requirements.model_contract_version || null,
       modelSchemaVersion: requirements.model_schema_version || null,
       resolvedInputMode: requirements.resolved_input_mode || requirements.capability,
       promptRevision: 'v2.10-approved-storyboard', promptHash: fingerprint(requirements.prompt || asset.description || ''),
-      orderedReferences: reference ? [{ artifactId: reference.artifactId || reference.id,
-        artifactVersion: reference.version || 1, sha256: reference.contentHash || reference.content_hash }] : [],
+      orderedReferences: continuityReferences.length?continuityReferences.map(({role,artifactId,artifactVersion,sha256})=>({role,artifactId,artifactVersion,sha256}))
+        : reference ? [{ artifactId: reference.artifactId || reference.id,
+          artifactVersion: reference.version || 1, sha256: reference.contentHash || reference.content_hash }] : [],
+      continuityPack:requirements.v210_continuity_binding?{packId:requirements.v210_continuity_binding.packId,
+        packRevision:requirements.v210_continuity_binding.packRevision,
+        packFingerprint:requirements.v210_continuity_binding.packFingerprint}:null,
       resolvedModelParameters: requirements.model_parameters || requirements.resolved_settings || {},
       requestPolicyFingerprint: requirements.request_policy_fingerprint || null,
       expectedProviderCalls: 1, workflowFingerprint: revision.workflowFingerprint };

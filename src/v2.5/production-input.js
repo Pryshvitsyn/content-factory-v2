@@ -283,6 +283,7 @@ function buildProductionInput(raw = {}) {
           ...(profile.seed !== undefined ? { seed: profile.seed } : {}),
           temporal: { startMs: 0, endMs: generationDurationMs, durationMs: generationDurationMs },
           target_clip_duration_ms: Math.round(durationSeconds * 1000),
+          generation_duration_seconds: profile.resolvedSettings.durationSeconds ?? profile.resolvedSettings.duration ?? durationSeconds,
           continuity: { ...continuity, shot: optionalText(shot.continuity) },
         },
         required_for_shots: [shotId],

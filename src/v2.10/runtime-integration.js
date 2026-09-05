@@ -48,6 +48,13 @@ function requestedVideoSelection(input = {}) {
   const supplied = input.modelRequest || Object.fromEntries(['resolvedInputMode','durationSeconds','resolution','aspectRatio',
     'generateAudio','watermark','outputFormat','seed'].filter((key) => Object.hasOwn(input, key)).map((key) => [key,input[key]]));
   let modelRequest = {};
+  const continuityBindings=Object.freeze((input.continuityBindings||[]).map((binding)=>Object.freeze({
+    shotId:String(binding.shotId||''),entityId:String(binding.entityId||''),packId:String(binding.packId||''),
+    packFingerprint:String(binding.packFingerprint||''),role:binding.role?String(binding.role):null,
+  })));
+  if(continuityBindings.some((binding)=>!binding.shotId||!binding.entityId||!binding.packId||!binding.packFingerprint)){
+    throw new V210RuntimeError('CONTINUITY_BINDING_INVALID','Continuity bindings require shotId, entityId, packId and packFingerprint');
+  }
   if (contract) {
     const allowed = new Set(['resolvedInputMode','durationSeconds','resolution','aspectRatio','generateAudio','watermark','outputFormat','seed']);
     const unknown = Object.keys(supplied).filter((key) => !allowed.has(key));
@@ -70,6 +77,7 @@ function requestedVideoSelection(input = {}) {
     resolution: input.resolution || null,
     allowExperimental: input.allowExperimental === true,
     modelRequest,
+    continuityBindings,
   });
 }
 
@@ -80,10 +88,11 @@ function requiredCapability(shot, capabilities = []) {
   return CAPABILITIES.IMAGE_TO_VIDEO;
 }
 
-async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief: input } = {}) {
+async function resolveAuthoritativeVideo({ catalog, workspaceId, brandId, request, brief: input, continuityAuthority = null } = {}) {
   if (!catalog) throw new V210RuntimeError('V210_PROVIDER_CATALOG_REQUIRED', 'Authoritative Provider Catalog is required');
   const brief = canonicalCreativeBrief(input);
   const requested = requestedVideoSelection(request);
+  const bindingShotIds=new Set(requested.continuityBindings.map((binding)=>binding.shotId));
   if (!requested.provider || !requested.model || !requested.profile) {
     throw new V210RuntimeError('VIDEO_SELECTION_INCOMPLETE', 'Explicit provider, model, and profile are required');
   }
@@ -97,7 +106,7 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
         `Shot ${shot.shotId} requires immutable uploaded reference artifactId, storageKey and contentHash`);
     }
     const advertised = scoped.listModels(requested.provider).find((item) => item.modelId === requested.model)?.capabilities || [];
-    const capability = requiredCapability(shot, advertised);
+    const capability = requiredCapability(bindingShotIds.has(shot.shotId)?{...shot,referencePolicy:'DURABLE_CONTINUITY_PACK'}:shot, advertised);
     const resolved = scoped.resolveSelection({ provider: requested.provider, model: requested.model,
       profile: requested.profile, capability, durationSeconds: shot.durationSeconds,
       resolution: requested.resolution, aspectRatio: '9:16', allowExperimental: requested.allowExperimental });
@@ -113,7 +122,7 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
     if (!contract) return Object.freeze({ shotId: shot.shotId, modelContractVersion: null, modelSchemaVersion: null,
       resolvedInputMode: null, modelRequest: Object.freeze({}) });
     let resolvedInputMode = requested.modelRequest.resolvedInputMode;
-    if (shot.referencePolicy === 'NONE') resolvedInputMode = INPUT_MODES.TEXT_TO_VIDEO;
+    if (shot.referencePolicy === 'NONE' && !bindingShotIds.has(shot.shotId)) resolvedInputMode = INPUT_MODES.TEXT_TO_VIDEO;
     else if (resolvedInputMode === INPUT_MODES.TEXT_TO_VIDEO) resolvedInputMode = INPUT_MODES.FIRST_FRAME_IMAGE_TO_VIDEO;
     if (shot.referencePolicy !== 'NONE' && resolvedInputMode === INPUT_MODES.FIRST_LAST_FRAME) {
       throw new V210RuntimeError('MODEL_INPUT_MODE_REFERENCE_MISMATCH','V2.10 single-reference shots cannot satisfy FIRST_LAST_FRAME');
@@ -134,10 +143,25 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
       requestPolicyFingerprint: modelFingerprint({ provider: requested.provider, model: requested.model, shotId: shot.shotId,
         prompt: buildShotPrompt(brief, shot), referenceMedia: shot.referenceMedia || null, modelRequest }) });
   });
+  const resolvedContinuityBindings=[];const continuityBlockers=[];
+  for(const binding of requested.continuityBindings){
+    try{
+      if(!continuityAuthority?.resolve)throw new V210RuntimeError('CONTINUITY_AUTHORITY_REQUIRED','Durable continuity authority is not configured');
+      const resolved=await continuityAuthority.resolve({workspaceId,consumerBrandId:brandId,packId:binding.packId,fingerprint:binding.packFingerprint});
+      if(resolved.pack.entityId!==binding.entityId)throw new V210RuntimeError('CONTINUITY_ENTITY_MISMATCH','Continuity pack entity does not match binding');
+      const contractLimits=contract?.limits||{};const counts={REFERENCE_IMAGE:0,REFERENCE_VIDEO:0,REFERENCE_AUDIO:0};
+      for(const reference of resolved.references)if(Object.hasOwn(counts,reference.role))counts[reference.role]++;
+      if(counts.REFERENCE_IMAGE>Number(contractLimits.referenceImages??Infinity)||counts.REFERENCE_VIDEO>Number(contractLimits.referenceVideos??Infinity)||counts.REFERENCE_AUDIO>Number(contractLimits.referenceAudios??Infinity))throw new V210RuntimeError('CONTINUITY_REFERENCE_LIMIT_EXCEEDED','Continuity pack exceeds selected model limits');
+      resolvedContinuityBindings.push(Object.freeze({...binding,ownerBrandId:resolved.row.owner_brand_id,
+        packRevision:resolved.pack.revision,entityType:resolved.pack.entityType,authorityBinding:resolved.pack.authorityBinding,
+        references:resolved.references.map((reference)=>Object.freeze({...reference}))}));
+    }catch(error){continuityBlockers.push(Object.freeze({code:error.code||'CONTINUITY_AUTHORITY_INVALID',shotId:binding.shotId,message:error.message}));}
+  }
   return Object.freeze({ ...base, shotCapabilities: Object.freeze(shotCapabilities), requested,
     modelContractVersion: contract?.contractVersion || null, modelSchemaVersion: contract?.provenance.providerSchemaVersion || null,
     modelPricing: contract?.pricing || null,
-    shotModelRequests: Object.freeze(shotModelRequests) });
+    shotModelRequests: Object.freeze(shotModelRequests),resolvedContinuityBindings:Object.freeze(resolvedContinuityBindings),
+    continuityAuthorityStatus:continuityBlockers.length?'BLOCKED':'READY',continuityAuthorityBlockers:Object.freeze(continuityBlockers) });
 }
 
 async function resolveAuthoritativeVoice({ catalog, workspaceId, brief: input, repository = null } = {}) {
@@ -219,6 +243,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
   const qualityProfile = qualityProfileFromSelection(video);
   const capabilities = new Map((video.shotCapabilities || []).map((item) => [item.shotId, item.capability]));
   const shotModelRequests = new Map((video.shotModelRequests || []).map((item) => [item.shotId, item]));
+  const continuityBindings = new Map((video.resolvedContinuityBindings || []).map((item) => [item.shotId,item]));
   const copy = sceneCopy(brief);
   const approvedSpokenCopy = copy.filter(Boolean).join(' ').trim();
   const voiceEnabled = Boolean(brief.voice.sourceType && approvedSpokenCopy);
@@ -232,6 +257,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     const numFrames = Math.max(2, Math.round(shot.durationSeconds * fps) + 1);
     const capability = capabilities.get(shot.shotId) || CAPABILITIES.TEXT_TO_VIDEO;
     const contractRequest = shotModelRequests.get(shot.shotId) || null;
+    const continuityBinding=continuityBindings.get(shot.shotId)||null;
     return {
       scene_id: `v210-scene-${index + 1}`, duration_seconds: shot.durationSeconds,
       location: shot.environment, visual: `${shot.purpose}. ${shot.action}`, emotional_intent: shot.emotionalIntent,
@@ -312,7 +338,14 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     return Object.freeze({ ...asset, generation_requirements: Object.freeze({ ...asset.generation_requirements,
       v210_reference: Object.freeze(v210Reference) }) });
   })) });
-  const normalized = { ...base, assetPlan, productionNamespace: 'v2.7-operator', postProduction: brief.postProduction };
+  const continuityAssetPlan=Object.freeze({...assetPlan,assets:Object.freeze(assetPlan.assets.map((asset)=>{
+    if(asset.kind!=='video')return asset;const shotId=asset.required_for_shots?.[0];const binding=continuityBindings.get(shotId);
+    const sourceShot=brief.storyboard.find((shot)=>shot.shotId===shotId);const contractDriven=Boolean(asset.generation_requirements.model_contract_version);
+    const requirements={...asset.generation_requirements,...(contractDriven&&sourceShot?{prompt:buildShotPrompt(brief,sourceShot)}:{}),
+      ...(binding?{v210_continuity_binding:Object.freeze(binding)}:{})};
+    return Object.freeze({...asset,generation_requirements:Object.freeze(requirements)});
+  }))});
+  const normalized = { ...base, assetPlan:continuityAssetPlan, productionNamespace: 'v2.7-operator', postProduction: brief.postProduction };
   delete normalized.fingerprint;
   const input = Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
   return Object.freeze({ raw: Object.freeze(raw), input, canonicalRequest: canonicalRequestForDraft(draft, brief, video) });

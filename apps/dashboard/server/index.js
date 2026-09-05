@@ -30,6 +30,7 @@ const { PassportExecutionService } = require('../../../src/avatar-studio/passpor
 const { AvatarL2Service } = require('../../../src/avatar-studio/l2-service');
 const { AvatarMotionPilotService } = require('../../../src/avatar-studio/motion-pilot-service');
 const { createDefaultProviderGateway } = require('../../../src/providers/default-provider-gateway');
+const { AvatarStudioContinuityAuthorityResolver, ContinuityAuthorityRepository } = require('../../../src/workflow/continuity-authority-repository');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
   if (!commandService || !qualityRecoveryService) throw new Error('commandService and qualityRecoveryService are required');
@@ -95,13 +96,16 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   });
   const audioInspector = new FfprobeMediaInspector();
   const v210Repository = new HardenedQualityScriptFirstPostgresRepository({ db, storage });
+  const avatarRepository = new AvatarStudioPostgresRepository({ db });
+  const continuityAuthority = new ContinuityAuthorityRepository({ db, storage,
+    avatarAuthorityResolver: new AvatarStudioContinuityAuthorityResolver({ repository: avatarRepository }) });
   const resolvedPreviewProvider = previewProvider || createVoicePreviewGateway({ env });
   const resolvedStarter = creativeStarter || new V210IntegratedProductionStarter({
-    db, storage, repository: v210Repository, env, logger: console, mediaInspector: audioInspector,
+    db, storage, repository: v210Repository, env, logger: console, mediaInspector: audioInspector, continuityAuthority,
   });
   const creativeService = new QualityCreativeProductionService({ repository: v210Repository,
     brandRepository: repository, providerCatalog, actor, env, storage, audioInspector,
-    previewProvider: resolvedPreviewProvider, starter: resolvedStarter });
+    previewProvider: resolvedPreviewProvider, starter: resolvedStarter, continuityAuthority });
   const qualityDirectorService = new HardenedQualityScriptFirstService({ repository: v210Repository,
     brandRepository: repository, actor });
   const lockedKeyframeService = new HardenedQualityLockedKeyframeService({ repository: v210Repository,
@@ -109,7 +113,6 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
     imageInspector: audioInspector, actor, env,
     imageGateway: keyframeImageGateway || createKeyframeImageGateway({ env }),
     stillEvaluator: semanticStillEvaluator || createSemanticStillEvaluator({ env: lockedKeyframeSemanticEnvironment(env) }) });
-  const avatarRepository = new AvatarStudioPostgresRepository({ db });
   const avatarAssetIntakeService = new AvatarAssetIntakeService({ repository: avatarRepository,
     artifactService: new ArtifactService({ storage }), storage, mediaInspector: audioInspector,
     safeUrlImporter: new SafeUrlImporter(), actor });

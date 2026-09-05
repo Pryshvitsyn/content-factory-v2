@@ -3,6 +3,24 @@
 const { ArtifactService } = require('../artifacts/artifact-service');
 const { referencePackRevision, ContinuityError } = require('./continuity-entities');
 
+class AvatarStudioContinuityAuthorityResolver {
+  constructor({repository}={}){if(!repository?.getCharacter)throw new Error('Avatar Studio repository is required');this.repository=repository;}
+  async verify({workspaceId,brandId,ownerBrandId,authorityBinding}){
+    const avatar=await this.repository.getCharacter({id:authorityBinding.avatarId,brandId:ownerBrandId});
+    if(!avatar||avatar.workspaceId!==workspaceId)return Object.freeze({identityCurrent:false,identityLockCurrent:false,consentValid:false});
+    const consent=avatar.consent;const allowedBrands=consent?.allowedBrandIds||consent?.allowed_brand_ids||[];
+    const allowedVerticals=consent?.allowedVerticals||consent?.allowed_verticals||[];const vertical=authorityBinding.vertical||avatar.vertical;
+    const allowedUseTypes=consent?.allowedUseTypes||consent?.allowed_use_types||[];
+    const requiredUseType=authorityBinding.useType||null;
+    const notExpired=!consent?.expiresAt||new Date(consent.expiresAt)>new Date();
+    return Object.freeze({identityCurrent:avatar.identityVersionId===authorityBinding.identityVersionId,
+      identityLockCurrent:avatar.identityLocks?.[0]?.id===authorityBinding.identityLockId,
+      consentValid:Boolean(consent&&consent.modality==='FACE'&&consent.status==='APPROVED'&&notExpired
+        &&allowedBrands.includes(brandId)&&allowedVerticals.includes(vertical)
+        &&(!requiredUseType||allowedUseTypes.includes(requiredUseType)))});
+  }
+}
+
 class ContinuityAuthorityRepository {
   constructor({ db, storage, avatarAuthorityResolver = null } = {}) {
     if (!db || !storage) throw new Error('db and storage are required');
@@ -46,12 +64,25 @@ class ContinuityAuthorityRepository {
     if (crypto.createHash('sha256').update(bytes).digest('hex') !== row.artifact_content_hash) throw new ContinuityError('CONTINUITY_ARTIFACT_HASH_MISMATCH','Durable continuity artifact hash mismatch');
     const pack = referencePackRevision(JSON.parse(bytes.toString('utf8')));
     if (pack.revisionFingerprint !== row.fingerprint) throw new ContinuityError('CONTINUITY_REVISION_FINGERPRINT_MISMATCH','Durable continuity fingerprint mismatch');
+    if (pack.approval?.approved !== true) throw new ContinuityError('CONTINUITY_REVISION_APPROVAL_REQUIRED','Durable continuity revision is not approved');
     if (pack.entityType === 'REAL_PERSON') {
       if (!this.avatarAuthorityResolver?.verify) throw new ContinuityError('AVATAR_AUTHORITY_RESOLVER_REQUIRED','REAL_PERSON requires current read-only Avatar Studio authority');
-      const verified = await this.avatarAuthorityResolver.verify({ workspaceId, brandId: consumerBrandId, authorityBinding: pack.authorityBinding });
+      const verified = await this.avatarAuthorityResolver.verify({ workspaceId, brandId: consumerBrandId,
+        ownerBrandId: row.owner_brand_id, authorityBinding: pack.authorityBinding });
       if (!verified?.identityCurrent || !verified?.identityLockCurrent || !verified?.consentValid) throw new ContinuityError('AVATAR_AUTHORITY_INVALID','Avatar identity/lock/consent authority is not current for this use scope');
     }
     return Object.freeze({ row, pack });
   }
+  async resolve({ workspaceId, consumerBrandId, packId, fingerprint }) {
+    const loaded=await this.load({workspaceId,consumerBrandId,packId,fingerprint});
+    const crypto=require('node:crypto');const references=[];
+    for(const reference of loaded.pack.references){
+      if(!reference.storageKey)throw new ContinuityError('CONTINUITY_REFERENCE_STORAGE_REQUIRED','Durable continuity reference has no immutable storage locator');
+      const bytes=await this.storage.get({key:reference.storageKey});
+      if(!Buffer.isBuffer(bytes)||crypto.createHash('sha256').update(bytes).digest('hex')!==reference.sha256)throw new ContinuityError('CONTINUITY_REFERENCE_HASH_MISMATCH','Durable continuity reference bytes do not match approved SHA');
+      references.push(Object.freeze({...reference,byteSize:bytes.length}));
+    }
+    return Object.freeze({...loaded,references:Object.freeze(references)});
+  }
 }
-module.exports = { ContinuityAuthorityRepository };
+module.exports = { AvatarStudioContinuityAuthorityResolver, ContinuityAuthorityRepository };

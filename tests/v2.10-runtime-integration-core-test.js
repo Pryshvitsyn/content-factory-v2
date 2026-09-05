@@ -126,6 +126,14 @@ async function main() {
   assert.equal(persistedRequirements.resolved_input_mode, 'MULTIMODAL_REFERENCE');
   assert.equal(persistedRequirements.model_contract_version, 'replicate-seedance-2.5@1');
   assert.equal(persistedRequirements.request_policy_fingerprint, seedance.shotModelRequests[1].requestPolicyFingerprint);
+  for (const mode of ['VIDEO_EDITING','VIDEO_EXTENSION']) {
+    const editingBrief=brief('UPLOADED_REFERENCE');
+    editingBrief.storyboard[1].referenceMedia={artifactId:'video-reference',storageKey:'references/video.mp4',contentHash:'hash',contentType:'video/mp4'};
+    const editing=await resolveAuthoritativeVideo({catalog,workspaceId:'workspace-1',brief:editingBrief,
+      request:{provider:'replicate',model:'bytedance/seedance-2.5',profile:'STANDARD',modelRequest:{resolvedInputMode:mode,
+        durationSeconds:5,resolution:'720p',aspectRatio:'adaptive',generateAudio:false,watermark:false,outputFormat:'mp4'}}});
+    assert.equal(editing.shotModelRequests[1].modelRequest.durationSeconds,-1);
+  }
 
   assert.equal(canonicalObjective('ORGANIC REACH'), 'ORGANIC_REACH');
   assert.equal(canonicalObjective(referencedBrief.objective), 'EXPERIMENT');
