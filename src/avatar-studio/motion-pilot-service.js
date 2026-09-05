@@ -50,6 +50,18 @@ class AvatarMotionPilotService {
     if(!intake||intake.effectiveGate0Status!=='PASS') throw new AvatarStudioError(409,'GATE0_INVALIDATED','The certified CHEST_UP_NEUTRAL intake must remain Gate 0 PASS');
     return Object.freeze({avatar,passport,identityLock,certification,candidate,intake});
   }
+  async qualityBatchState(scope={}) {
+    for(const field of ['workspaceId','brandId','vertical','avatarId','identityVersionId'])if(!scope[field])throw new AvatarStudioError(400,'MOTION_QUALITY_BATCH_SCOPE_REQUIRED',`Explicit ${field} is required`);
+    const batch=await this.repository.latestMotionPilotQualityBatch(scope);if(!batch)return null;
+    const [preflight,children]=await Promise.all([this.repository.latestMotionPilotQualityBatchPreflight({batchId:batch.id}),this.repository.motionPilotQualityBatchChildren({batchId:batch.id})]);
+    const approval=batch.approvalMetadata||null;
+    let readiness=preflight?.snapshot||null,preflightCurrent=false,approvalCurrent=false,restoredStatus=batch.status;
+    if(preflight){readiness=await this.batchReadiness(batch);preflightCurrent=readiness.status==='READY'&&readiness.scopeFingerprint===preflight.snapshot?.scopeFingerprint;if(!preflightCurrent&&!['SUCCEEDED','FAILED','STOPPED'].includes(batch.status))restoredStatus='STALE';}
+    if(preflightCurrent&&approval)approvalCurrent=approval.preflightId===preflight.id&&Number(approval.preflightRevision)===Number(preflight.revision)&&approval.preflightFingerprint===preflight.snapshotFingerprint;
+    if(batch.status==='APPROVED'&&!approvalCurrent)restoredStatus='STALE';
+    const spent=Number(batch.cumulativeActualKnownCostUsd||0),maximum=Number(batch.maximumTotalCostUsd||0);
+    return Object.freeze({batch:{...batch,status:restoredStatus},preflight:preflight?{batchId:batch.id,preflightId:preflight.id,revision:preflight.revision,status:preflightCurrent&&preflight.status==='READY'?'READY_FOR_APPROVAL':'STALE',readiness}:null,approval:approval?{...approval,current:approvalCurrent}:null,children,childrenCount:children.length,providerCallsExecuted:children.filter(item=>item.providerRequestId).length,spentCostUsd:spent,remainingBudgetUsd:Math.max(0,maximum-spent),selectedResultId:batch.selectedResultId||null,terminalReason:batch.stopReason||null,startable:batch.status==='APPROVED'&&approvalCurrent,providerCalls:0,externalGenerationCalls:0});
+  }
   routes() { return Object.freeze(Object.values(POLICY.routes).map((route)=>Object.freeze({...route}))); }
   routeForExecution(execution,plan=null) { const routeId=execution?.preflightSnapshot?.routeId||plan?.routeId||plan?.route?.id; const exact=routeId&&POLICY.routes[routeId]; if(exact)return Object.freeze({...exact,profile:'STANDARD',audioRequested:false}); const historical=Object.values(POLICY.routes).find((route)=>route.provider===execution?.provider&&route.model===execution?.model&&route.capability===execution?.capability); if(!historical)throw new AvatarStudioError(409,'MOTION_PILOT_ROUTE_UNSUPPORTED','The persisted Motion Pilot route is not supported for local output handling'); return Object.freeze({...historical,profile:'STANDARD',audioRequested:false}); }
   selection(route=ROUTE) { try{return this.providerCatalog.resolveSelection(route);}catch(error){if(error.code==='CREDENTIALS_MISSING') return Object.freeze({provider:route.provider,model:route.model,profile:route.profile||'STANDARD',capability:route.capability,adapterFamily:route.adapterFamily});throw new AvatarStudioError(error.status||409,error.code||'MOTION_PILOT_PROVIDER_UNAVAILABLE',error.message,error.details);} }

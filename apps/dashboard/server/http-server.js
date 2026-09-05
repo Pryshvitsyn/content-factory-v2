@@ -121,6 +121,8 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
       }
       if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'motion-pilot-routes' && segments.length === 3) return json(response,200,await avatarService.motionPilotRoutes());
+      if (avatarService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'motion-quality-batches' && segments.length === 5) return json(response,200,await avatarService.motionQualityBatchState({avatarId:segments[3],workspaceId:url.searchParams.get('workspaceId'),brandId:url.searchParams.get('brandId'),vertical:url.searchParams.get('vertical'),identityVersionId:url.searchParams.get('identityVersionId')}));
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments.length === 5) {
         const body = await readJson(request);

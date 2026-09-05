@@ -29,6 +29,7 @@ async function main() {
     async bodyExpressionsLab(value) { calls.push(['l2Lab',value]); return {id:value.avatarId,currentLevel:1}; },
     async smokeReadiness(value) { calls.push(['smokeReadiness',value]); return {ready:false,checks:{OPENAI_API_KEY:'NO'},externalGenerationCalls:0}; },
     async motionPilotRoutes() { calls.push(['motionPilotRoutes']); return [{id:'WAN_27_R2V_MULTI_REFERENCE'},{id:'WAN_3_I2V_CERTIFIED_START_FRAME'}]; },
+    async motionQualityBatchState(value) { calls.push(['motionQualityBatchState',value]); return {batch:{id:'batch-1',status:'APPROVED'},startable:true,providerCalls:0}; },
     async motionPilotState(value) { calls.push(['motionPilotState',value]); return { execution:{id:value.executionId||'11111111-1111-4111-8111-111111111111'} }; },
     async reviewMotionPilotIdentity(value) { calls.push(['motionPilotIdentityReview',value]); return { identity:'FAIL',motionPilotQualityStatus:'REJECTED' }; },
     async motionPilotAutomaticQaReadiness(value) { calls.push(['motionPilotAutomaticQaReadiness',value]); return {status:'BLOCKED',blockers:[{code:'PROVIDER_CREDENTIAL_UNAVAILABLE'}],externalGenerationCalls:0}; },
@@ -86,6 +87,8 @@ async function main() {
     const motionRoutes=await request(server,'GET','/api/avatar-studio/motion-pilot-routes');assert.equal(motionRoutes.status,200);assert.deepEqual(motionRoutes.payload.map((route)=>route.id),['WAN_27_R2V_MULTI_REFERENCE','WAN_3_I2V_CERTIFIED_START_FRAME']);
     const motionScope={workspaceId:'workspace-1',brandId:'brand-1',vertical:'TRAVEL',identityVersionId:'11111111-1111-4111-8111-111111111111'};
     const validMotionExecution='11111111-1111-4111-8111-111111111111',validMotionAttempt='22222222-2222-4222-8222-222222222222';
+    const qualityBatchState=await request(server,'GET','/api/avatar-studio/avatars/avatar-1/motion-quality-batches?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1');
+    assert.equal(qualityBatchState.status,200);assert.equal(qualityBatchState.payload.batch.status,'APPROVED');
     assert.equal((await request(server,'GET',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1`)).status,200);
     assert.equal((await request(server,'GET','/api/avatar-studio/avatars/avatar-1/motion-pilot-qa-readiness?workspaceId=workspace-1&brandId=brand-1&vertical=TRAVEL&identityVersionId=identity-1&routeId=WAN_27_R2V_MULTI_REFERENCE')).status,200);
     assert.equal((await request(server,'POST',`/api/avatar-studio/avatars/avatar-1/motion-pilot-executions/${validMotionExecution}/automatic-qa`,motionScope)).status,201);
@@ -162,6 +165,7 @@ async function main() {
     assert.equal(calls.find(([name]) => name === 'sourceViewpoint')[1].value, 'FRONTAL');
     assert.equal(calls.find(([name])=>name==='passportPreflight')[1].generationSpecId,'plan-1');
     assert.equal(calls.find(([name])=>name==='motionPilotIdentityReview')[1].executionId,validMotionExecution);
+    assert.deepEqual(calls.find(([name])=>name==='motionQualityBatchState')[1],{workspaceId:'workspace-1',brandId:'brand-1',vertical:'TRAVEL',avatarId:'avatar-1',identityVersionId:'identity-1'});
     assert.equal(calls.some(([name])=>name==='motionPilotIdentityReview'&&String(name).includes('undefined')),false);
     assert.equal(calls.find(([name])=>name==='passportGenerate')[1].executionId,'execution-1');
     assert.equal(providerCalls, 2,'only explicit Passport and L2 Generate actions reach mocked execution boundaries');

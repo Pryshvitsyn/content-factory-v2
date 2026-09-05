@@ -341,6 +341,7 @@ class AvatarStudioService {
   async motionPilotAutomaticQaReadiness(input={}) { return this.requireMotionPilot().automaticQaReadiness(input); }
   async assessMotionPilotAutomaticQa(input={}) { return this.requireMotionPilot().assessAutomaticQa(input); }
   async planMotionQualityBatch(input={}) { return this.requireMotionPilot().planQualityBatch(input); }
+  async motionQualityBatchState(input={}) { return this.requireMotionPilot().qualityBatchState(input); }
   async preflightMotionQualityBatch(input={}) { return this.requireMotionPilot().preflightQualityBatch(input); }
   async approveMotionQualityBatch(input={}) { return this.requireMotionPilot().approveQualityBatch(input); }
   async startMotionQualityBatch(input={}) { return this.requireMotionPilot().startQualityBatch(input); }

@@ -105,6 +105,39 @@ describe('Avatar Studio dashboard', () => {
     expect(fetch.mock.calls.some(([url])=>/generate|predictions/.test(String(url)))).toBe(false);
   });
 
+  it('restores the durable approved Quality Batch after reload and keeps legacy execution non-actionable', async () => {
+    const avatar={id:'avatar-batch',internalName:'Andrii',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'},batch={id:'batch-1',status:'APPROVED',preferredRouteId:'WAN_27_R2V_MULTI_REFERENCE',allowedRouteIds:['WAN_27_R2V_MULTI_REFERENCE'],maximumVariants:2,maximumTotalCostUsd:'1.000000'};
+    fetch.mockImplementation((url)=>{
+      if(String(url)==='/api/avatar-studio/motion-pilot-routes')return response([{id:'WAN_27_R2V_MULTI_REFERENCE',label:'Wan 2.7 R2V',provider:'replicate',model:'wan-video/wan-2.7-r2v',capability:'REFERENCE_TO_VIDEO',referenceStrategy:'CERTIFIED_CHEST_UP_PLUS_THREE_IDENTITY_REFERENCES',exactReferenceCount:4,durationSeconds:5,resolution:'720p',aspectRatio:'9:16',costExpectationUsd:.5}]);
+      if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([avatar]);
+      if(String(url)===`/api/avatar-studio/avatars/${avatar.id}?brandId=${brand.id}`)return response(avatar);
+      if(String(url).includes('/motion-quality-batches?'))return response({batch,preflight:{preflightId:'preflight-11',revision:11,status:'READY_FOR_APPROVAL',readiness:{dimensions:{PROVIDER_INPUT_IDENTITY_QA:'PASS'},routeScope:[],blockers:[]}},approval:{approvalId:'approval-1',current:true},children:[],spentCostUsd:0,remainingBudgetUsd:1,startable:true});
+      if(String(url).includes('/motion-pilot-qa-readiness?'))return response({status:'READY',taskProfile:{minimumUsableBodyReferences:3},runtime:{identity:{status:'READY'},pose:{status:'READY'}},bodyReferenceSet:{readiness:'READY',references:[{},{},{}]},blockers:[]});
+      if(String(url).includes('/motion-pilot-executions?'))return response({status:'AWAITING_APPROVAL',execution:{id:'legacy-1'}});
+      return response([]);
+    });
+    const view=render(<MotionPilot brands={[brand]}/>);fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Andrii'});fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});
+    await screen.findByRole('button',{name:'START AUTOMATIC QUALITY LOOP'});expect(screen.getByText(/Preferred route: WAN_27_R2V_MULTI_REFERENCE · STATUS APPROVED · BATCH batch-1 · ALLOWED WAN_27_R2V_MULTI_REFERENCE · PLANNED \$0.00 · ACTUAL \$0.00 · REMAINING \$1.00 · CHILDREN 0 · PROVIDER CALLS 0 · SELECTED NONE · TERMINAL NONE · maximum variants 2 · approved spending ceiling \$1.00/)).toBeTruthy();expect(screen.queryByRole('button',{name:'APPROVE QUALITY BATCH'})).toBeNull();expect(screen.queryByRole('button',{name:'APPROVE EXACT PILOT'})).toBeNull();expect(fetch.mock.calls.some(([url])=>String(url).includes('/motion-pilot-executions?'))).toBe(false);
+    view.unmount();render(<MotionPilot brands={[brand]}/>);fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Andrii'});fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});await screen.findByRole('button',{name:'START AUTOMATIC QUALITY LOOP'});expect(screen.queryByRole('button',{name:'APPROVE QUALITY BATCH'})).toBeNull();expect(fetch.mock.calls.some(([url,options])=>options?.method==='POST'||/generate|predictions/.test(String(url)))).toBe(false);
+  });
+
+  it('refreshes approval from the durable batch read model instead of retaining stale READY_FOR_APPROVAL UI', async () => {
+    const avatar={id:'avatar-approve-batch',internalName:'Andrii',workspaceId:'workspace-1',vertical:'TRAVEL',identityVersionId:'identity-1'};let approved=false;
+    fetch.mockImplementation((url,options={})=>{
+      if(String(url)==='/api/avatar-studio/motion-pilot-routes')return response([{id:'WAN_27_R2V_MULTI_REFERENCE',label:'Wan 2.7 R2V',provider:'replicate',model:'wan-video/wan-2.7-r2v',capability:'REFERENCE_TO_VIDEO',referenceStrategy:'CERTIFIED_CHEST_UP_PLUS_THREE_IDENTITY_REFERENCES',exactReferenceCount:4,durationSeconds:5,resolution:'720p',aspectRatio:'9:16',costExpectationUsd:.5}]);
+      if(String(url).startsWith('/api/avatar-studio/avatars?'))return response([avatar]);
+      if(String(url)===`/api/avatar-studio/avatars/${avatar.id}?brandId=${brand.id}`)return response(avatar);
+      if(String(url).includes('/motion-quality-batches?'))return response(approved?{batch:{id:'batch-1',status:'APPROVED',preferredRouteId:'WAN_27_R2V_MULTI_REFERENCE',maximumVariants:2,maximumTotalCostUsd:1},preflight:{status:'READY_FOR_APPROVAL'},approval:{current:true},children:[],startable:true}:{batch:null});
+      if(String(url).includes('/motion-pilot-qa-readiness?'))return response({status:'READY',taskProfile:{minimumUsableBodyReferences:3},runtime:{identity:{status:'READY'},pose:{status:'READY'}},bodyReferenceSet:{readiness:'READY',references:[{},{},{}]},blockers:[]});
+      if(String(url).endsWith('/motion-quality-batches')&&options.method==='POST')return response({id:'batch-1',status:'AWAITING_APPROVAL',preferredRouteId:'WAN_27_R2V_MULTI_REFERENCE',maximumVariants:2,maximumTotalCostUsd:1});
+      if(String(url).endsWith('/preflight')&&options.method==='POST')return response({status:'READY_FOR_APPROVAL',readiness:{preferredRouteId:'WAN_27_R2V_MULTI_REFERENCE',routeScope:[{provider:'replicate',model:'wan-video/wan-2.7-r2v',inputs:[]}],dimensions:{PROVIDER_INPUT_IDENTITY_QA:'PASS',CONSENT:'VALID',IDENTITY_LOCK:'CURRENT'},costPerVariantUsd:.5,proposedWorstCaseCostUsd:1,blockers:[]}});
+      if(String(url).endsWith('/approve')&&options.method==='POST'){approved=true;return response({status:'APPROVED'});}
+      if(String(url).includes('/motion-pilot-executions?'))return response(null);
+      return response([]);
+    });
+    render(<MotionPilot brands={[brand]}/>);fireEvent.change(screen.getByLabelText('Brand'),{target:{value:brand.id}});await screen.findByRole('option',{name:'Andrii'});fireEvent.change(screen.getByLabelText('Avatar'),{target:{value:avatar.id}});await screen.findByRole('button',{name:'PLAN QUALITY BATCH · ZERO CALLS'});fireEvent.click(screen.getByRole('button',{name:'PLAN QUALITY BATCH · ZERO CALLS'}));await screen.findByRole('button',{name:'ZERO-CALL BATCH PREFLIGHT'});fireEvent.click(screen.getByRole('button',{name:'ZERO-CALL BATCH PREFLIGHT'}));await screen.findByRole('button',{name:'APPROVE QUALITY BATCH'});fireEvent.click(screen.getByRole('button',{name:'APPROVE QUALITY BATCH'}));await screen.findByRole('button',{name:'START AUTOMATIC QUALITY LOOP'});expect(screen.queryByRole('button',{name:'APPROVE QUALITY BATCH'})).toBeNull();
+  });
+
   it('uses current Passport candidates and does not offer a broken Level 0 approval', () => {
     const blockedL0={currentLevel:0,currentLevelName:'IDENTITY',nextLevel:{level:0,name:'IDENTITY'},levels:[
       {level:0,status:'BLOCKED'},{level:1,status:'BLOCKED'},{level:2,status:'BLOCKED'}],missingRequirements:['IDENTITY_HUMAN_CONFIRMATION']};
