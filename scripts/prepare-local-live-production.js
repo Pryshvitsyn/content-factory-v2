@@ -47,6 +47,7 @@ const V210_MIGRATIONS = [
   'migrations/20260903_avatar_studio_source_viewpoint_classification.sql',
   'migrations/20260904_avatar_motion_pilot.sql',
   'migrations/20260905_avatar_motion_pilot_raw_provider_output.sql',
+  'migrations/20260905_production_continuity_authority.sql',
   'migrations/20260906_avatar_motion_pilot_identity_reviews.sql',
   'migrations/20260907_avatar_motion_pilot_identity_review_immutable.sql',
   'migrations/20260908_avatar_motion_pilot_reference_to_video.sql',
@@ -55,7 +56,6 @@ const V210_MIGRATIONS = [
   'migrations/20260911_avatar_motion_pilot_automatic_qa.sql',
   'migrations/20260912_avatar_motion_quality_batch_preflight.sql',
   'migrations/20260913_avatar_provider_reference_canonical.sql',
-  'migrations/20260914_production_continuity_authority.sql',
 ];
 
 function discoverDatabaseUrl(env = process.env) {
