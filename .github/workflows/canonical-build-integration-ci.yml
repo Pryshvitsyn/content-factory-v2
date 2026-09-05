@@ -108,7 +108,7 @@ jobs:
       - name: Durable continuity authority PostgreSQL
         run: |
           createdb --maintenance-db=postgres canonical_continuity_authority
-          PGDATABASE=canonical_continuity_authority node tests/production-continuity-authority-postgres-test.js
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/canonical_continuity_authority PGDATABASE=canonical_continuity_authority node tests/production-continuity-authority-postgres-test.js
       - name: V2.10 continuity namespace and REAL_PERSON authority PostgreSQL
         run: |
           createdb --maintenance-db=postgres canonical_v210_continuity
