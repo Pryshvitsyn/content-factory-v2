@@ -1,5 +1,11 @@
 # Replicate Seedance 2.5
 
+## Production transport and gating
+
+References at or below 1 MB use data URIs. Larger immutable image, video, and audio inputs use Replicate's official `POST /v1/files` multipart API (files must be less than 100 MB); the returned file-resource URL is inserted only into the ephemeral prediction payload. Durable evidence records the Factory artifact/version/SHA/MIME/size, Replicate file ID, locator hash, expiry, and materialization-contract version—never bytes, base64, or a raw signed locator. Identical SHA inputs share one upload within an exact adapter lifecycle. Upload failure is pre-prediction and cannot create a paid job.
+
+Current Seedance pricing remains `UNKNOWN_CURRENT_PRICE`. V2.10 exposes exact per-shot contract requests but blocks START with `PRICE_NOT_VERIFIABLE`; no guessed price or silent route fallback is permitted.
+
 - Provider: `replicate`
 - Model: `bytedance/seedance-2.5`
 - Local contract: `replicate-seedance-2.5@1`

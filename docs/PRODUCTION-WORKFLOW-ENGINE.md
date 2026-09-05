@@ -1,5 +1,11 @@
 # Durable media production workflow engine
 
+## Durable production authority
+
+V2.10 remains the production entry point and V2.1/V2.5 remains the sole durable paid-media state machine. A workflow definition describes intent; it does not authorize execution. Final preflight stores the immutable workflow artifact ID/version/fingerprint and every exact `GENERATE_VIDEO` operation request fingerprint. Explicit human START is recorded in `v2_10.start_attempts`, binding the persisted preflight and canonical-input fingerprints. Immediately before canonical production creation, `ProductionExecutionAuthority` reloads that durable attempt and reconstructs the operation identities. Browser objects and caller-supplied `approved: true` values are never execution authority.
+
+Continuity authority is separately resolved from immutable pack artifacts plus append-only grant events. Provider materialization is transport only: canonical Factory artifacts remain truth, while V2.5 owns provider-boundary state, request-ID persistence, reconciliation, artifact adoption, and QA.
+
 Content Factory remains one engine. The certified V2.1 runtime is the execution compatibility boundary:
 
 | Definition/runtime concept | Existing authority |

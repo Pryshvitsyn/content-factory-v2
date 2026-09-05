@@ -631,6 +631,7 @@ export function CreativeProduction() {
             <div className="key-value"><span>MASTER</span><p>{preflight.master?.profile} · {preflight.master?.resolution} · {preflight.master?.fps} fps</p></div>
             <div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {preflight.costStatus}</p></div>
           </div>
+          {preflight.operationPlans?.length ? <div className="collection"><h3>EXACT VIDEO OPERATIONS</h3>{preflight.operationPlans.map((operation)=><div className="key-value" key={operation.operationNodeId}><span>{operation.shotId}</span><p>{operation.provider} · {operation.model} · {operation.modelContractVersion || 'legacy contract'} · {operation.resolvedInputMode} · {operation.resolvedModelParameters?.durationSeconds ?? operation.resolvedModelParameters?.duration ?? 'shot duration'}s · {operation.resolvedModelParameters?.resolution || 'provider resolution'} · {operation.resolvedModelParameters?.aspectRatio || 'provider aspect'} · audio {operation.resolvedModelParameters?.generateAudio ? 'ON' : 'OFF'} · calls {operation.expectedProviderCalls} · request {operation.requestFingerprint}</p></div>)}</div> : null}
           <button className="start" onClick={start} disabled={preflight.status !== 'READY' || completeness.status === 'FAIL' || !voiceReady || busy}>{busy === 'start' ? 'STARTING…' : 'START PRODUCTION'}</button>
         </> : <p>No final preflight yet. Editing creative, route or voice invalidates the previous fingerprint.</p>}
       </section>

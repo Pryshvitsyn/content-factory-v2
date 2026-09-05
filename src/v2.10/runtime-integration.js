@@ -11,6 +11,7 @@ const { FfprobeMediaInspector } = require('../v2.5/media-validator');
 const { createProductionRuntime } = require('../v2.7/production-runtime');
 const { qualityProfileFromSelection } = require('../v2.7/quality-video-profile');
 const { CAPABILITIES } = require('../v2.8/capabilities');
+const { getVideoModelContract, fingerprint: modelFingerprint, INPUT_MODES } = require('../v2.8/video-model-contracts');
 const { canonicalFingerprint } = require('../../worker/v2.1-master-production');
 const { canonicalCreativeBrief, buildShotPrompt } = require('./creative-contract');
 
@@ -43,12 +44,32 @@ function normalizeVoiceProvider(provider) {
 }
 
 function requestedVideoSelection(input = {}) {
+  const contract = getVideoModelContract(input.provider, input.model);
+  const supplied = input.modelRequest || Object.fromEntries(['resolvedInputMode','durationSeconds','resolution','aspectRatio',
+    'generateAudio','watermark','outputFormat','seed'].filter((key) => Object.hasOwn(input, key)).map((key) => [key,input[key]]));
+  let modelRequest = {};
+  if (contract) {
+    const allowed = new Set(['resolvedInputMode','durationSeconds','resolution','aspectRatio','generateAudio','watermark','outputFormat','seed']);
+    const unknown = Object.keys(supplied).filter((key) => !allowed.has(key));
+    if (unknown.length) throw new V210RuntimeError('UNSUPPORTED_MODEL_PARAMETER', `Unsupported model request parameter(s): ${unknown.join(', ')}`);
+    modelRequest = Object.freeze({
+      resolvedInputMode: supplied.resolvedInputMode || INPUT_MODES.TEXT_TO_VIDEO,
+      durationSeconds: supplied.durationSeconds ?? contract.parameters.duration.contentFactoryDefault,
+      resolution: supplied.resolution || contract.parameters.resolution.contentFactoryDefault,
+      aspectRatio: supplied.aspectRatio || contract.parameters.aspectRatio.contentFactoryDefault,
+      generateAudio: supplied.generateAudio ?? contract.parameters.generateAudio.contentFactoryDefault,
+      watermark: supplied.watermark ?? contract.parameters.watermark.contentFactoryDefault,
+      outputFormat: supplied.outputFormat || contract.parameters.outputFormat.contentFactoryDefault,
+      ...(supplied.seed == null ? {} : { seed: supplied.seed }),
+    });
+  }
   return Object.freeze({
     provider: String(input.provider || '').toLowerCase(),
     model: String(input.model || ''),
     profile: String(input.profile || '').toUpperCase(),
     resolution: input.resolution || null,
     allowExperimental: input.allowExperimental === true,
+    modelRequest,
   });
 }
 
@@ -87,7 +108,36 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
     }
     shotCapabilities.push(Object.freeze({ shotId: shot.shotId, capability: resolved.capability }));
   }
-  return Object.freeze({ ...base, shotCapabilities: Object.freeze(shotCapabilities), requested });
+  const contract = getVideoModelContract(requested.provider, requested.model);
+  const shotModelRequests = brief.storyboard.map((shot) => {
+    if (!contract) return Object.freeze({ shotId: shot.shotId, modelContractVersion: null, modelSchemaVersion: null,
+      resolvedInputMode: null, modelRequest: Object.freeze({}) });
+    let resolvedInputMode = requested.modelRequest.resolvedInputMode;
+    if (shot.referencePolicy === 'NONE') resolvedInputMode = INPUT_MODES.TEXT_TO_VIDEO;
+    else if (resolvedInputMode === INPUT_MODES.TEXT_TO_VIDEO) resolvedInputMode = INPUT_MODES.FIRST_FRAME_IMAGE_TO_VIDEO;
+    if (shot.referencePolicy !== 'NONE' && resolvedInputMode === INPUT_MODES.FIRST_LAST_FRAME) {
+      throw new V210RuntimeError('MODEL_INPUT_MODE_REFERENCE_MISMATCH','V2.10 single-reference shots cannot satisfy FIRST_LAST_FRAME');
+    }
+    const referenceType=String(shot.referenceMedia?.contentType||shot.referenceMedia?.content_type||'image/');
+    if (shot.referencePolicy !== 'NONE' && [INPUT_MODES.FIRST_FRAME_IMAGE_TO_VIDEO].includes(resolvedInputMode) && !referenceType.startsWith('image/')) {
+      throw new V210RuntimeError('MODEL_INPUT_MODE_REFERENCE_MISMATCH','First-frame mode requires an image reference');
+    }
+    if (shot.referencePolicy !== 'NONE' && [INPUT_MODES.VIDEO_EDITING,INPUT_MODES.VIDEO_EXTENSION].includes(resolvedInputMode) && !referenceType.startsWith('video/')) {
+      throw new V210RuntimeError('MODEL_INPUT_MODE_REFERENCE_MISMATCH',`${resolvedInputMode} requires a video reference`);
+    }
+    const adaptive = [INPUT_MODES.FIRST_LAST_FRAME,INPUT_MODES.VIDEO_EDITING,INPUT_MODES.VIDEO_EXTENSION].includes(resolvedInputMode);
+    const modelRequest = Object.freeze({ ...requested.modelRequest, resolvedInputMode,
+      durationSeconds: resolvedInputMode === INPUT_MODES.VIDEO_EDITING || resolvedInputMode === INPUT_MODES.VIDEO_EXTENSION
+        ? -1 : shot.durationSeconds, aspectRatio: adaptive ? 'adaptive' : requested.modelRequest.aspectRatio });
+    return Object.freeze({ shotId: shot.shotId, modelContractVersion: contract.contractVersion,
+      modelSchemaVersion: contract.provenance.providerSchemaVersion, resolvedInputMode, modelRequest,
+      requestPolicyFingerprint: modelFingerprint({ provider: requested.provider, model: requested.model, shotId: shot.shotId,
+        prompt: buildShotPrompt(brief, shot), referenceMedia: shot.referenceMedia || null, modelRequest }) });
+  });
+  return Object.freeze({ ...base, shotCapabilities: Object.freeze(shotCapabilities), requested,
+    modelContractVersion: contract?.contractVersion || null, modelSchemaVersion: contract?.provenance.providerSchemaVersion || null,
+    modelPricing: contract?.pricing || null,
+    shotModelRequests: Object.freeze(shotModelRequests) });
 }
 
 async function resolveAuthoritativeVoice({ catalog, workspaceId, brief: input, repository = null } = {}) {
@@ -168,6 +218,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
   }
   const qualityProfile = qualityProfileFromSelection(video);
   const capabilities = new Map((video.shotCapabilities || []).map((item) => [item.shotId, item.capability]));
+  const shotModelRequests = new Map((video.shotModelRequests || []).map((item) => [item.shotId, item]));
   const copy = sceneCopy(brief);
   const approvedSpokenCopy = copy.filter(Boolean).join(' ').trim();
   const voiceEnabled = Boolean(brief.voice.sourceType && approvedSpokenCopy);
@@ -180,6 +231,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     const fps = qualityProfile.framesPerSecond || 24;
     const numFrames = Math.max(2, Math.round(shot.durationSeconds * fps) + 1);
     const capability = capabilities.get(shot.shotId) || CAPABILITIES.TEXT_TO_VIDEO;
+    const contractRequest = shotModelRequests.get(shot.shotId) || null;
     return {
       scene_id: `v210-scene-${index + 1}`, duration_seconds: shot.durationSeconds,
       location: shot.environment, visual: `${shot.purpose}. ${shot.action}`, emotional_intent: shot.emotionalIntent,
@@ -189,11 +241,17 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
         video: { provider: video.provider, vendor: video.vendor || null, model: video.model,
           model_family: video.modelFamily || null, provider_model_id: video.providerModelId || video.model,
           model_version: video.modelVersion || null, profile: video.profile, capability,
-          resolved_settings: { ...(video.resolvedSettings || {}), duration: shot.durationSeconds },
-          prompt: buildShotPrompt(brief, shot), resolution: video.resolvedSettings?.resolution || qualityProfile.resolution,
-          aspect_ratio: '9:16', num_frames: numFrames, frames_per_second: fps,
+          resolved_settings: { ...(video.resolvedSettings || {}), ...(contractRequest?.modelRequest || {}), duration: shot.durationSeconds },
+          prompt: buildShotPrompt(brief, shot), resolution: contractRequest?.modelRequest.resolution || video.resolvedSettings?.resolution || qualityProfile.resolution,
+          aspect_ratio: contractRequest?.modelRequest.aspectRatio || '9:16', num_frames: numFrames, frames_per_second: fps,
           go_fast: qualityProfile.goFast === true, optimize_prompt: qualityProfile.optimizePrompt,
-          interpolate_output: qualityProfile.interpolateOutput, sample_shift: qualityProfile.sampleShift },
+          interpolate_output: qualityProfile.interpolateOutput, sample_shift: qualityProfile.sampleShift,
+          ...(contractRequest ? { resolved_input_mode: contractRequest.resolvedInputMode,
+            duration: contractRequest.modelRequest.durationSeconds, generate_audio: contractRequest.modelRequest.generateAudio,
+            watermark: contractRequest.modelRequest.watermark, output_format: contractRequest.modelRequest.outputFormat,
+            seed: contractRequest.modelRequest.seed ?? null, model_parameters: {},
+            model_contract_version: contractRequest.modelContractVersion, model_schema_version: contractRequest.modelSchemaVersion,
+            request_policy_fingerprint: contractRequest.requestPolicyFingerprint } : {}) },
       }],
     };
   });
@@ -225,7 +283,8 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
       resolvedSettings: video.resolvedSettings }, media_stack: mediaStack,
     provider_selection: { provider: video.provider, vendor: video.vendor || null, model: video.model,
       model_version: video.modelVersion || null, profile: video.profile, capability: video.capability,
-      resolved_settings: video.resolvedSettings || {} }, scenes,
+      resolved_settings: video.resolvedSettings || {}, model_request: video.requested?.modelRequest || {},
+      model_contract_version: video.modelContractVersion || null, model_schema_version: video.modelSchemaVersion || null }, scenes,
     voiceover: { enabled: voiceEnabled, asset_id: 'voiceover-main', provider: voiceExecutionProvider,
       model: voiceModel || 'none', voice: voiceId || 'none', voice_id: voiceId || 'none',
       language: brief.voice.language || 'en', instructions: brief.voice.instructions || null,
@@ -248,7 +307,8 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     if (!ref || ref.shot.referencePolicy === 'NONE') return asset;
     const v210Reference = ref.shot.referencePolicy === 'PREVIOUS_SHOT_FRAME'
       ? { policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: brief.storyboard[ref.index - 1]?.assetId || null }
-      : { policy: 'UPLOADED_REFERENCE', artifact: ref.shot.referenceMedia };
+      : { policy: 'UPLOADED_REFERENCE', artifact: ref.shot.referenceMedia,
+        resolvedInputMode: asset.generation_requirements.resolved_input_mode || null };
     return Object.freeze({ ...asset, generation_requirements: Object.freeze({ ...asset.generation_requirements,
       v210_reference: Object.freeze(v210Reference) }) });
   })) });

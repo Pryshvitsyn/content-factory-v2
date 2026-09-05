@@ -5,6 +5,7 @@ const { FfmpegMasterRenderer } = require('../v2.1/ffmpeg-master-renderer');
 const { FfmpegFrameSampler } = require('../v2.9/frame-sampler');
 const { FfmpegReferenceGeometryNormalizer, ReferenceGeometryError, compatible, referenceEvidence } = require('../v2.10.2/reference-geometry');
 const { DurableMediaError } = require('../v2.5/durable-media-executor');
+const { replicateFileMaterializer } = require('../workflow/provider-media-resolver');
 
 function fail(code, message) { const error = new Error(message); error.code = code; throw error; }
 function hash(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
@@ -140,10 +141,22 @@ class V210ReferenceAwareMediaExecutor {
     materialized = { ...materialized, bytes: normalized.bytes, contentType: normalized.contentType,
       evidence: { ...materialized.evidence, ...referenceEvidence({ result: normalized, expectedAspectRatio,
         source: materialized.source, referenceBytes: normalized.bytes }) } };
-    const capability = reference.capability || asset.generation_requirements?.capability || 'IMAGE_TO_VIDEO';
-    const uri = dataUri(materialized.contentType, materialized.bytes);
+    const mode = asset.generation_requirements?.resolved_input_mode || reference.resolvedInputMode;
+    const capability = reference.capability || (mode === 'MULTIMODAL_REFERENCE' ? 'REFERENCE_TO_VIDEO'
+      : ['VIDEO_EDITING','VIDEO_EXTENSION'].includes(mode) ? 'VIDEO_TO_VIDEO'
+        : asset.generation_requirements?.capability || 'IMAGE_TO_VIDEO');
+    const requirements = asset.generation_requirements || {};
+    const uri = requirements.provider === 'replicate' && requirements.model === 'bytedance/seedance-2.5'
+      && materialized.bytes.length > 1024 * 1024
+      ? replicateFileMaterializer({ provider: requirements.provider, model: requirements.model,
+        bytes: materialized.bytes, mimeType: materialized.contentType, sha256: hash(materialized.bytes),
+        artifactId: materialized.source.artifactId, artifactVersion: materialized.source.version,
+        purpose: 'V2_10_VIDEO_REFERENCE' }).providerValue
+      : dataUri(materialized.contentType, materialized.bytes);
     const references = capability === 'REFERENCE_TO_VIDEO'
-      ? { character_images: [uri] }
+      ? (String(materialized.contentType).startsWith('video/') ? { reference_videos: [uri] }
+        : String(materialized.contentType).startsWith('audio/') ? { reference_audios: [uri] } : { character_images: [uri] })
+      : capability === 'VIDEO_TO_VIDEO' ? { reference_videos: [uri] }
       : { first_frame: uri };
     return Object.freeze({ ...asset, generation_requirements: Object.freeze({
       ...asset.generation_requirements, capability, references: Object.freeze(references),

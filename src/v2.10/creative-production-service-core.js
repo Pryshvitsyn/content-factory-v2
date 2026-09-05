@@ -70,10 +70,11 @@ class CreativeProductionService {
     const master = this.authoritativeMaster(brief);
     const preliminary = buildProductionPreflight({ brief, authoritativeVideo, voiceRuntime, quality, master,
       timingToleranceSeconds: Number(request.timingToleranceSeconds || 0) });
-    if (preliminary.status === 'BLOCKED') return { preflight: preliminary, canonical: null };
+    if (preliminary.status === 'BLOCKED' && preliminary.blockers.some((code) => code !== 'PRICE_NOT_VERIFIABLE')) return { preflight: preliminary, canonical: null };
     const canonical = await this.starter.preflight({ draft, preflight: preliminary });
     const final = buildProductionPreflight({ brief, authoritativeVideo, voiceRuntime, quality, master,
       canonicalPlan: canonical.plan, canonicalInputFingerprint: canonical.canonicalInputFingerprint,
+      workflowAuthority: canonical.workflowAuthority,
       timingToleranceSeconds: Number(request.timingToleranceSeconds || 0) });
     return { preflight: final, canonical };
   }

@@ -107,6 +107,13 @@ function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
     generateAudio: video.generate_audio === true,
     audioStrategy: optionalText(video.audio_strategy),
     dialogueOwner: optionalText(video.dialogue_owner),
+    resolvedInputMode: optionalText(video.resolved_input_mode),
+    outputFormat: optionalText(video.output_format),
+    watermark: video.watermark === true,
+    modelParameters: video.model_parameters ? structuredClone(video.model_parameters) : {},
+    modelContractVersion: optionalText(video.model_contract_version),
+    modelSchemaVersion: optionalText(video.model_schema_version),
+    requestPolicyFingerprint: optionalText(video.request_policy_fingerprint),
   };
   if (renderMode === 'QUALITY' && !KEY_PATTERN.test(profile.provider)) throw new ProductionInputError('shot.video.provider is invalid');
   if (!Number.isInteger(profile.numFrames) || !Number.isInteger(profile.framesPerSecond)) {
@@ -260,6 +267,13 @@ function buildProductionInput(raw = {}) {
           generate_audio: profile.generateAudio,
           audio_strategy: profile.audioStrategy,
           dialogue_owner: profile.dialogueOwner,
+          resolved_input_mode: profile.resolvedInputMode,
+          output_format: profile.outputFormat,
+          watermark: profile.watermark,
+          model_parameters: profile.modelParameters,
+          model_contract_version: profile.modelContractVersion,
+          model_schema_version: profile.modelSchemaVersion,
+          request_policy_fingerprint: profile.requestPolicyFingerprint,
           num_frames: profile.numFrames,
           frames_per_second: profile.framesPerSecond,
           go_fast: profile.goFast,

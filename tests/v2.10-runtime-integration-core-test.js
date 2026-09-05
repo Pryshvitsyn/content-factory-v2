@@ -107,6 +107,26 @@ async function main() {
     { shotId: 's2', capability: CAPABILITIES.IMAGE_TO_VIDEO },
   ]);
 
+  const seedance = await resolveAuthoritativeVideo({ catalog, workspaceId: 'workspace-1', brief: referencedBrief,
+    request: { provider: 'replicate', model: 'bytedance/seedance-2.5', profile: 'STANDARD',
+      modelRequest: { resolvedInputMode: 'MULTIMODAL_REFERENCE', durationSeconds: 9, resolution: '1080p',
+        aspectRatio: '3:4', generateAudio: true, watermark: true, outputFormat: 'mp4', seed: 42 } } });
+  assert.equal(seedance.requested.modelRequest.seed, 42);
+  assert.equal(seedance.shotModelRequests[0].resolvedInputMode, 'TEXT_TO_VIDEO');
+  assert.equal(seedance.shotModelRequests[1].resolvedInputMode, 'MULTIMODAL_REFERENCE');
+  const seedanceCanonical = buildCanonicalV210Input({ draft: { id: DRAFT_ID, brand_id: BRAND_ID,
+    creative_brief: referencedBrief }, preflight: { authoritativeVideo: seedance, quality: {} } });
+  const [firstSeedance, secondSeedance] = seedanceCanonical.raw.scenes.map((scene) => scene.shots[0].video);
+  assert.equal(firstSeedance.resolved_input_mode, 'TEXT_TO_VIDEO');
+  assert.equal(secondSeedance.resolved_input_mode, 'MULTIMODAL_REFERENCE');
+  assert.deepEqual({ resolution: secondSeedance.resolution, aspect: secondSeedance.aspect_ratio,
+    audio: secondSeedance.generate_audio, watermark: secondSeedance.watermark, format: secondSeedance.output_format,
+    seed: secondSeedance.seed }, { resolution: '1080p', aspect: '3:4', audio: true, watermark: true, format: 'mp4', seed: 42 });
+  const persistedRequirements = seedanceCanonical.input.assetPlan.assets.find((asset) => asset.asset_id === 'a2').generation_requirements;
+  assert.equal(persistedRequirements.resolved_input_mode, 'MULTIMODAL_REFERENCE');
+  assert.equal(persistedRequirements.model_contract_version, 'replicate-seedance-2.5@1');
+  assert.equal(persistedRequirements.request_policy_fingerprint, seedance.shotModelRequests[1].requestPolicyFingerprint);
+
   assert.equal(canonicalObjective('ORGANIC REACH'), 'ORGANIC_REACH');
   assert.equal(canonicalObjective(referencedBrief.objective), 'EXPERIMENT');
   const preflight = {
