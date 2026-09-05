@@ -229,6 +229,9 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         return json(response, 200, await creativeService.listDrafts({ brandId: url.searchParams.get('brandId'),
           limit: url.searchParams.get('limit') || 20 }));
       }
+      if (creativeService && request.method === 'GET' && url.pathname === '/api/v2.10/continuity-entities') {
+        return json(response,200,await creativeService.continuityOptions({brandId:url.searchParams.get('brandId')}));
+      }
       if (creativeService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments.length === 4) {
         return json(response, 200, await creativeService.getDraft({ id: segments[3], brandId: url.searchParams.get('brandId') }));

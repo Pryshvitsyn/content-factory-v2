@@ -1,5 +1,7 @@
 # Continuity entities and reference packs
 
+One shot may bind multiple immutable pack revisions. Binding order and every exact reference role, artifact version, and SHA are fingerprinted. New V2.10 assets use plural `v210_continuity_bindings`; historical singular evidence remains readable. Pack visibility is immutable policy metadata, while actual cross-brand authorization comes only from durable grant/revoke events. Legacy `grantedBrandIds` is descriptive compatibility data and cannot authorize durable production.
+
 Production never treats caller-supplied pack JSON, `grantedBrandIds`, or grant evidence as authority. It loads an exact immutable reference-pack artifact through `workflow_authority.continuity_reference_pack_revisions`; cross-brand use requires the latest append-only exact-pack grant event to be `GRANTED`. Revocation blocks new preflight while historical events remain readable. `REAL_PERSON` packs additionally require a read-only Avatar Studio resolver to prove current identity version, Identity Lock, and in-scope consent. Synthetic characters, products, and abstract visuals retain their domain-specific approval policy without biometric requirements.
 
 A continuity reference-pack revision is reusable production truth, separate from any one run. Supported explicit entity classes are `REAL_PERSON`, `SYNTHETIC_CHARACTER`, `OBJECT_PRODUCT`, and `ABSTRACT_VISUAL`. A revision freezes ordered immutable artifact IDs, versions, hashes, roles, restrictions, approval evidence, and a fingerprint.

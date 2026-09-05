@@ -10,6 +10,7 @@ const {
   V210ReferenceAwareMediaExecutor,
 } = require("../src/v2.10/reference-aware-media");
 const { fromAsset } = require("../src/v2.8/canonical-media-request");
+const { operationPlans } = require("../src/workflow/v210-production-authority");
 const {
   ReplicateUniversalVideoAdapter,
 } = require("../src/providers/replicate-universal-video-adapter");
@@ -79,23 +80,24 @@ function response(value, type = "application/json") {
 }
 async function main() {
   let avatarLookup;
+  const avatarFixture = {
+    workspaceId: WORKSPACE,
+    vertical: "beauty",
+    identityVersionId: "identity-v3",
+    identityLocks: [{ id: "lock-v3" }],
+    consent: {
+      modality: "FACE",
+      status: "APPROVED",
+      allowedBrandIds: [BRAND],
+      allowedVerticals: ["beauty"],
+      allowedUseTypes: ["VIDEO_PRODUCTION"],
+    },
+  };
   const avatarAuthority = new AvatarStudioContinuityAuthorityResolver({
     repository: {
       async getCharacter(args) {
         avatarLookup = args;
-        return {
-          workspaceId: WORKSPACE,
-          vertical: "beauty",
-          identityVersionId: "identity-v3",
-          identityLocks: [{ id: "lock-v3" }],
-          consent: {
-            modality: "FACE",
-            status: "APPROVED",
-            allowedBrandIds: [BRAND],
-            allowedVerticals: ["beauty"],
-            allowedUseTypes: ["VIDEO_PRODUCTION"],
-          },
-        };
+        return structuredClone(avatarFixture);
       },
     },
   });
@@ -135,7 +137,65 @@ async function main() {
     ).consentValid,
     false,
   );
+  avatarFixture.identityVersionId = "stale";
+  assert.equal(
+    (
+      await avatarAuthority.verify({
+        workspaceId: WORKSPACE,
+        ownerBrandId: "owner-brand",
+        brandId: BRAND,
+        authorityBinding: {
+          avatarId: "avatar-v3",
+          identityVersionId: "identity-v3",
+          identityLockId: "lock-v3",
+          vertical: "beauty",
+          useType: "VIDEO_PRODUCTION",
+        },
+      })
+    ).identityCurrent,
+    false,
+  );
+  avatarFixture.identityVersionId = "identity-v3";
+  avatarFixture.identityLocks = [{ id: "stale-lock" }];
+  assert.equal(
+    (
+      await avatarAuthority.verify({
+        workspaceId: WORKSPACE,
+        ownerBrandId: "owner-brand",
+        brandId: BRAND,
+        authorityBinding: {
+          avatarId: "avatar-v3",
+          identityVersionId: "identity-v3",
+          identityLockId: "lock-v3",
+          vertical: "beauty",
+          useType: "VIDEO_PRODUCTION",
+        },
+      })
+    ).identityLockCurrent,
+    false,
+  );
+  avatarFixture.identityLocks = [{ id: "lock-v3" }];
+  avatarFixture.consent.status = "REVOKED";
+  assert.equal(
+    (
+      await avatarAuthority.verify({
+        workspaceId: WORKSPACE,
+        ownerBrandId: "owner-brand",
+        brandId: BRAND,
+        authorityBinding: {
+          avatarId: "avatar-v3",
+          identityVersionId: "identity-v3",
+          identityLockId: "lock-v3",
+          vertical: "beauty",
+          useType: "VIDEO_PRODUCTION",
+        },
+      })
+    ).consentValid,
+    false,
+  );
+  avatarFixture.consent.status = "APPROVED";
   const image = Buffer.from("image"),
+    productImage = Buffer.from("product-image"),
     video = Buffer.from("video"),
     audio = Buffer.from("audio");
   const references = [
@@ -164,19 +224,33 @@ async function main() {
       storageKey: "hero/audio",
     },
   ];
+  const productReferences = [
+    {
+      role: "REFERENCE_IMAGE",
+      artifactId: "product-image",
+      artifactVersion: 8,
+      sha256: sha(productImage),
+      mimeType: "image/png",
+      storageKey: "product/image",
+    },
+  ];
   let resolutions = 0;
   const authority = {
-    async resolve() {
+    async resolve({ packId }) {
       resolutions++;
+      const product = packId === "product-pack-8";
       return {
-        row: { owner_brand_id: BRAND },
+        row: { id: packId, owner_brand_id: BRAND },
         pack: {
-          entityId: "hero-a",
-          revision: 3,
-          entityType: "SYNTHETIC_CHARACTER",
+          entityId: product ? "product-x" : "hero-a",
+          revision: product ? 8 : 3,
+          entityType: product ? "OBJECT_PRODUCT" : "SYNTHETIC_CHARACTER",
+          revisionFingerprint: product
+            ? "product-fingerprint"
+            : "pack-fingerprint",
           authorityBinding: null,
         },
-        references,
+        references: product ? productReferences : references,
       };
     },
   };
@@ -201,6 +275,12 @@ async function main() {
         packFingerprint: "pack-fingerprint",
       },
       {
+        shotId: "one",
+        entityId: "product-x",
+        packId: "product-pack-8",
+        packFingerprint: "product-fingerprint",
+      },
+      {
         shotId: "two",
         entityId: "hero-a",
         packId: "pack-3",
@@ -220,7 +300,7 @@ async function main() {
     continuityAuthority: authority,
   });
   assert.equal(authoritative.continuityAuthorityStatus, "READY");
-  assert.equal(resolutions, 2);
+  assert.equal(resolutions, 3);
   for (const [index, productionId] of [
     "production-1",
     "production-2",
@@ -238,21 +318,38 @@ async function main() {
       (x) => x.kind === "video",
     )) {
       assert.equal(
-        asset.generation_requirements.v210_continuity_binding.packRevision,
+        asset.generation_requirements.v210_continuity_bindings[0].packRevision,
         3,
       );
       assert.deepEqual(
-        asset.generation_requirements.v210_continuity_binding.references.map(
+        asset.generation_requirements.v210_continuity_bindings[0].references.map(
           (x) => x.sha256,
         ),
         references.map((x) => x.sha256),
       );
     }
+    assert.equal(
+      canonical.input.assetPlan.assets.find((x) => x.asset_id === "asset-one")
+        .generation_requirements.v210_continuity_bindings.length,
+      2,
+    );
+    const firstOperation = operationPlans(canonical, {
+      workflowFingerprint: "workflow-fixture",
+    }).find((item) => item.assetId === "asset-one");
+    assert.deepEqual(
+      firstOperation.continuityPacks.map((item) => item.entityId),
+      ["hero-a", "product-x"],
+    );
+    assert.equal(firstOperation.orderedReferences.length, 4);
     if (productionId === "production-1") {
       let materialized;
       const delegate = {
         mediaInspector: {},
-        repository: { async latestSucceededReplacement() { return null; } },
+        repository: {
+          async latestSucceededReplacement() {
+            return null;
+          },
+        },
         async execute(args) {
           materialized = args.asset;
           return { provider: "fixture", model: "fixture" };
@@ -267,6 +364,7 @@ async function main() {
               "hero/image": image,
               "hero/video": video,
               "hero/audio": audio,
+              "product/image": productImage,
             }[key];
           },
         },
@@ -281,7 +379,7 @@ async function main() {
       assert.equal(request.resolvedInputMode, "MULTIMODAL_REFERENCE");
       assert.deepEqual(
         request.modelContractRequest.providerInput.reference_images.length,
-        1,
+        2,
       );
       assert.deepEqual(
         request.modelContractRequest.providerInput.reference_videos.length,

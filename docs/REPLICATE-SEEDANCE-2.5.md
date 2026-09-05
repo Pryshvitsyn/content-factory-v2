@@ -1,5 +1,7 @@
 # Replicate Seedance 2.5
 
+Creative Production persists and restores the complete nested Seedance `modelRequest`. Multiple ordered continuity entities flow through `ReferenceInputPlan`; unsupported role combinations block during authoritative preflight. Editing and extension retain provider duration `-1` independently from positive editorial duration.
+
 ## Production transport and gating
 
 References at or below 1 MB use data URIs. Larger immutable image, video, and audio inputs use Replicate's official `POST /v1/files` multipart API (files must be less than 100 MB); the returned file-resource URL is inserted only into the ephemeral prediction payload. Durable evidence records the Factory artifact/version/SHA/MIME/size, Replicate file ID, locator hash, expiry, and materialization-contract version—never bytes, base64, or a raw signed locator. Identical SHA inputs share one upload within an exact adapter lifecycle. Upload failure is pre-prediction and cannot create a paid job.

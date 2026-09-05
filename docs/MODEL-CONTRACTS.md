@@ -1,5 +1,7 @@
 # Model contracts
 
+`ReferenceInputPlan` supplies the same ordered provider-neutral reference structure to authoritative preflight and provider execution. The selected Model Contract remains the sole source of model-specific input-mode compatibility, cardinality, duration, and schema mapping; provider adapters remain transport-only.
+
 Model contracts are plugins beneath typed GENERATE operations. They declare reviewed provider/model identity, contract and provider-schema versions, capabilities, explicit input modes, fields/defaults/ranges, compatibility and media limits, request mapping, output expectations, pricing status, adapter family, and compatible QA profiles.
 
 Provider adapters own authentication, transport, provider job lifecycle, recovery, output retrieval, and provider errors. Workflows own purpose, continuity, approval, budgets, and domain QA. A contract owns neither.

@@ -1,5 +1,7 @@
 # Durable media production workflow engine
 
+V2.1/V2.5 remain the only durable execution runtime. Immutable Workflow Revisions and typed operation plans define and authorize work above that runtime; they do not introduce a second run state machine. `ReferenceInputPlan` is the canonical provider-neutral compiler used during preflight and immediately before execution. It preserves approved ordering and composes multiple continuity entities with uploaded, previous-shot, and locked-keyframe sources. Injected execution and continuity authorities—not caller claims—authorize paid work and reference access. No automatic paid retry is permitted.
+
 ## Durable production authority
 
 V2.10 remains the production entry point and V2.1/V2.5 remains the sole durable paid-media state machine. A workflow definition describes intent; it does not authorize execution. Final preflight stores the immutable workflow artifact ID/version/fingerprint and every exact `GENERATE_VIDEO` operation request fingerprint. Explicit human START is recorded in `v2_10.start_attempts`, binding the persisted preflight and canonical-input fingerprints. Immediately before canonical production creation, `ProductionExecutionAuthority` reloads that durable attempt and reconstructs the operation identities. Browser objects and caller-supplied `approved: true` values are never execution authority.

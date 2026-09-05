@@ -1,21 +1,21 @@
-'use strict';
+"use strict";
 
-const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const fs = require('node:fs/promises');
-const { Pool } = require('pg');
+const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
+const fs = require("node:fs/promises");
+const { Pool } = require("pg");
 const {
   ContinuityAuthorityRepository,
-} = require('../src/workflow/continuity-authority-repository');
-const { ProviderCatalog } = require('../src/v2.8/provider-catalog');
+} = require("../src/workflow/continuity-authority-repository");
+const { ProviderCatalog } = require("../src/v2.8/provider-catalog");
 const {
   buildCanonicalV210Input,
   resolveAuthoritativeVideo,
-} = require('../src/v2.10/runtime-integration');
+} = require("../src/v2.10/runtime-integration");
 
-const WORKSPACE_ID = '52000000-0000-4000-8000-000000000001';
-const OWNER_BRAND_ID = '52000000-0000-4000-8000-000000000011';
-const CONSUMER_BRAND_ID = '52000000-0000-4000-8000-000000000012';
+const WORKSPACE_ID = "52000000-0000-4000-8000-000000000001";
+const OWNER_BRAND_ID = "52000000-0000-4000-8000-000000000011";
+const CONSUMER_BRAND_ID = "52000000-0000-4000-8000-000000000012";
 
 class MemoryStorage {
   constructor() {
@@ -28,8 +28,8 @@ class MemoryStorage {
 
   async put({ key, bytes }) {
     if (this.values.has(key)) {
-      const error = new Error('exists');
-      error.code = 'EEXIST';
+      const error = new Error("exists");
+      error.code = "EEXIST";
       throw error;
     }
     this.values.set(key, Buffer.from(bytes));
@@ -43,10 +43,10 @@ class MemoryStorage {
 
 function requireDisposableDatabase() {
   if (
-    process.env.CONTENT_FACTORY_TEST_DATABASE !== '1' ||
-    new URL(process.env.DATABASE_URL).pathname.slice(1) === 'content_os'
+    process.env.CONTENT_FACTORY_TEST_DATABASE !== "1" ||
+    new URL(process.env.DATABASE_URL).pathname.slice(1) === "content_os"
   ) {
-    throw new Error('disposable DB required');
+    throw new Error("disposable DB required");
   }
 }
 
@@ -56,44 +56,44 @@ function brief() {
     assetId: `asset-${id}`,
     durationSeconds: 5,
     roles,
-    purpose: 'Advance exact beat',
-    subject: 'Synthetic Hero A',
-    action: 'Performs a restrained motion',
-    environment: 'Warm studio',
-    emotionalIntent: 'Calm',
-    framing: 'Vertical medium',
-    camera: 'Stable slow move',
-    lensComposition: 'Centered natural',
-    lighting: 'Warm soft light',
-    continuity: 'Same hero',
-    negativeGuidance: ['text'],
-    referencePolicy: 'NONE',
-    voiceoverSegment: '',
+    purpose: "Advance exact beat",
+    subject: "Synthetic Hero A",
+    action: "Performs a restrained motion",
+    environment: "Warm studio",
+    emotionalIntent: "Calm",
+    framing: "Vertical medium",
+    camera: "Stable slow move",
+    lensComposition: "Centered natural",
+    lighting: "Warm soft light",
+    continuity: "Same hero",
+    negativeGuidance: ["text"],
+    referencePolicy: "NONE",
+    voiceoverSegment: "",
   });
   return {
-    title: 'Hero campaign',
-    objective: 'Reuse exact hero',
-    targetPlatform: 'Reels',
+    title: "Hero campaign",
+    objective: "Reuse exact hero",
+    targetPlatform: "Reels",
     targetDurationSeconds: 10,
-    hook: 'Exact hook',
-    coreMessage: 'Exact continuity',
-    cta: 'Continue',
-    audienceIntent: 'Campaign audience',
-    creativeConcept: 'Two connected beats',
-    visualStyle: 'Clean realism',
+    hook: "Exact hook",
+    coreMessage: "Exact continuity",
+    cta: "Continue",
+    audienceIntent: "Campaign audience",
+    creativeConcept: "Two connected beats",
+    visualStyle: "Clean realism",
     storyboard: [
-      shot('one', ['HOOK', 'TENSION', 'INSIGHT']),
-      shot('two', ['ACTION', 'RESOLUTION', 'CTA']),
+      shot("one", ["HOOK", "TENSION", "INSIGHT"]),
+      shot("two", ["ACTION", "RESOLUTION", "CTA"]),
     ],
     continuity: {
-      identity: 'Hero A',
-      appearance: 'Exact design',
-      wardrobe: 'Neutral suit',
-      environment: 'Studio',
-      props: 'One prop',
-      lightingColorLanguage: 'Warm',
-      cameraLanguage: 'Stable',
-      referencePolicy: 'NONE',
+      identity: "Hero A",
+      appearance: "Exact design",
+      wardrobe: "Neutral suit",
+      environment: "Studio",
+      props: "One prop",
+      lightingColorLanguage: "Warm",
+      cameraLanguage: "Stable",
+      referencePolicy: "NONE",
     },
     voice: { sourceType: null, approved: false },
     postProduction: { endTitle: { enabled: false } },
@@ -107,24 +107,30 @@ async function main() {
   const storage = new MemoryStorage();
   try {
     await db.query(
-      'DROP SCHEMA IF EXISTS workflow_authority CASCADE; DROP SCHEMA IF EXISTS v2_2 CASCADE; DROP TABLE IF EXISTS workspaces CASCADE',
+      "DROP SCHEMA IF EXISTS workflow_authority CASCADE; DROP SCHEMA IF EXISTS v2_2 CASCADE; DROP TABLE IF EXISTS workspaces CASCADE",
     );
     await db.query(
-      'CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE workspaces(id uuid PRIMARY KEY, name text); CREATE SCHEMA v2_2; CREATE TABLE v2_2.brands(id uuid PRIMARY KEY, workspace_id uuid REFERENCES workspaces(id), name text)',
+      "CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE workspaces(id uuid PRIMARY KEY, name text); CREATE SCHEMA v2_2; CREATE TABLE v2_2.brands(id uuid PRIMARY KEY, workspace_id uuid REFERENCES workspaces(id), name text)",
     );
-    await db.query('INSERT INTO workspaces VALUES($1, $2)', [WORKSPACE_ID, 'w']);
-    await db.query(
-      'INSERT INTO v2_2.brands VALUES($1, $2, $3), ($4, $2, $5)',
-      [OWNER_BRAND_ID, WORKSPACE_ID, 'a', CONSUMER_BRAND_ID, 'b'],
-    );
+    await db.query("INSERT INTO workspaces VALUES($1, $2)", [
+      WORKSPACE_ID,
+      "w",
+    ]);
+    await db.query("INSERT INTO v2_2.brands VALUES($1, $2, $3), ($4, $2, $5)", [
+      OWNER_BRAND_ID,
+      WORKSPACE_ID,
+      "a",
+      CONSUMER_BRAND_ID,
+      "b",
+    ]);
     const sql = await fs.readFile(
-      'migrations/20260905_production_continuity_authority.sql',
-      'utf8',
+      "migrations/20260905_production_continuity_authority.sql",
+      "utf8",
     );
     await db.query(sql);
 
-    const bytes = Buffer.from('hero-reference');
-    await storage.put({ key: 'refs/hero.png', bytes });
+    const bytes = Buffer.from("hero-reference");
+    await storage.put({ key: "refs/hero.png", bytes });
     let avatarValid = false;
     let avatarChecks = 0;
     const repo = new ContinuityAuthorityRepository({
@@ -144,46 +150,48 @@ async function main() {
     const base = {
       workspaceId: WORKSPACE_ID,
       ownerBrandId: OWNER_BRAND_ID,
-      entityId: 'hero-a',
-      entityType: 'SYNTHETIC_CHARACTER',
+      entityId: "hero-a",
+      entityType: "SYNTHETIC_CHARACTER",
       revision: 3,
-      visibility: 'WORKSPACE_SHARED_WITH_GRANTS',
+      visibility: "WORKSPACE_SHARED_WITH_GRANTS",
       approval: { approved: true },
       references: [
         {
-          role: 'REFERENCE_IMAGE',
-          artifactId: 'hero-image',
+          role: "REFERENCE_IMAGE",
+          artifactId: "hero-image",
           artifactVersion: 7,
-          sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
-          mimeType: 'image/png',
-          storageKey: 'refs/hero.png',
+          sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+          mimeType: "image/png",
+          storageKey: "refs/hero.png",
         },
       ],
     };
-    const saved = await repo.savePack(base, 'owner');
+    const saved = await repo.savePack(base, "owner");
     const selection = {
-      provider: 'replicate',
-      model: 'bytedance/seedance-2.5',
-      profile: 'STANDARD',
+      provider: "replicate",
+      model: "bytedance/seedance-2.5",
+      profile: "STANDARD",
       modelRequest: {
-        resolvedInputMode: 'MULTIMODAL_REFERENCE',
+        resolvedInputMode: "MULTIMODAL_REFERENCE",
         durationSeconds: 5,
-        resolution: '720p',
-        aspectRatio: '9:16',
+        resolution: "720p",
+        aspectRatio: "9:16",
         generateAudio: false,
         watermark: false,
-        outputFormat: 'mp4',
+        outputFormat: "mp4",
       },
       continuityBindings: [
         {
-          shotId: 'one',
-          entityId: 'hero-a',
+          shotId: "one",
+          entityId: "hero-a",
           packId: saved.row.id,
           packFingerprint: saved.pack.revisionFingerprint,
         },
       ],
     };
-    const catalog = new ProviderCatalog({ env: { REPLICATE_API_TOKEN: 'fixture' } });
+    const catalog = new ProviderCatalog({
+      env: { REPLICATE_API_TOKEN: "fixture" },
+    });
     const resolve = () =>
       resolveAuthoritativeVideo({
         catalog,
@@ -194,22 +202,40 @@ async function main() {
         continuityAuthority: repo,
       });
 
-    assert.equal((await resolve()).continuityAuthorityStatus, 'BLOCKED');
+    assert.equal((await resolve()).continuityAuthorityStatus, "BLOCKED");
+    assert.equal(
+      (
+        await repo.listAccessible({
+          workspaceId: WORKSPACE_ID,
+          consumerBrandId: CONSUMER_BRAND_ID,
+        })
+      )[0].authorityStatus,
+      "BLOCKED",
+    );
     await repo.grant({
       workspaceId: WORKSPACE_ID,
       ownerBrandId: OWNER_BRAND_ID,
       consumerBrandId: CONSUMER_BRAND_ID,
       packId: saved.row.id,
       packFingerprint: saved.pack.revisionFingerprint,
-      decision: 'GRANTED',
-      actor: 'owner',
-      reason: 'campaign',
+      decision: "GRANTED",
+      actor: "owner",
+      reason: "campaign",
     });
     const allowed = await resolve();
-    assert.equal(allowed.continuityAuthorityStatus, 'READY');
+    assert.equal(allowed.continuityAuthorityStatus, "READY");
+    assert.equal(
+      (
+        await repo.listAccessible({
+          workspaceId: WORKSPACE_ID,
+          consumerBrandId: CONSUMER_BRAND_ID,
+        })
+      )[0].authorityStatus,
+      "READY",
+    );
     const historical = buildCanonicalV210Input({
       draft: {
-        id: '52000000-0000-4000-8000-000000000021',
+        id: "52000000-0000-4000-8000-000000000021",
         workspace_id: WORKSPACE_ID,
         brand_id: CONSUMER_BRAND_ID,
         creative_brief: brief(),
@@ -217,8 +243,8 @@ async function main() {
       preflight: { authoritativeVideo: allowed, quality: {} },
     });
     assert.equal(
-      historical.input.assetPlan.assets[0].generation_requirements.v210_continuity_binding
-        .packRevision,
+      historical.input.assetPlan.assets[0].generation_requirements
+        .v210_continuity_bindings[0].packRevision,
       3,
     );
     await repo.grant({
@@ -227,31 +253,40 @@ async function main() {
       consumerBrandId: CONSUMER_BRAND_ID,
       packId: saved.row.id,
       packFingerprint: saved.pack.revisionFingerprint,
-      decision: 'REVOKED',
-      actor: 'owner',
-      reason: 'ended',
+      decision: "REVOKED",
+      actor: "owner",
+      reason: "ended",
     });
-    assert.equal((await resolve()).continuityAuthorityStatus, 'BLOCKED');
+    assert.equal((await resolve()).continuityAuthorityStatus, "BLOCKED");
     assert.equal(
-      historical.input.assetPlan.assets[0].generation_requirements.v210_continuity_binding
-        .packRevision,
+      (
+        await repo.listAccessible({
+          workspaceId: WORKSPACE_ID,
+          consumerBrandId: CONSUMER_BRAND_ID,
+        })
+      )[0].authorityStatus,
+      "BLOCKED",
+    );
+    assert.equal(
+      historical.input.assetPlan.assets[0].generation_requirements
+        .v210_continuity_bindings[0].packRevision,
       3,
     );
 
     const real = await repo.savePack(
       {
         ...base,
-        entityId: 'person',
-        entityType: 'REAL_PERSON',
+        entityId: "person",
+        entityType: "REAL_PERSON",
         revision: 1,
         authorityBinding: {
-          authority: 'AVATAR_STUDIO',
-          avatarId: 'avatar',
-          identityVersionId: 'identity',
-          identityLockId: 'lock',
+          authority: "AVATAR_STUDIO",
+          avatarId: "avatar",
+          identityVersionId: "identity",
+          identityLockId: "lock",
         },
       },
-      'owner',
+      "owner",
     );
     await assert.rejects(
       () =>
@@ -261,7 +296,7 @@ async function main() {
           packId: real.row.id,
           fingerprint: real.pack.revisionFingerprint,
         }),
-      (error) => error.code === 'AVATAR_AUTHORITY_INVALID',
+      (error) => error.code === "AVATAR_AUTHORITY_INVALID",
     );
     avatarValid = true;
     assert.equal(
@@ -273,14 +308,16 @@ async function main() {
           fingerprint: real.pack.revisionFingerprint,
         })
       ).pack.entityType,
-      'REAL_PERSON',
+      "REAL_PERSON",
     );
     assert.equal(avatarChecks, 2);
     console.log(
-      'V2.10 PostgreSQL continuity production: deny/grant/revoke, immutable historical evidence, exact pack, and REAL_PERSON resolver passed.',
+      "V2.10 PostgreSQL continuity production: deny/grant/revoke, immutable historical evidence, exact pack, and REAL_PERSON resolver passed.",
     );
   } finally {
-    await db.query('DROP SCHEMA IF EXISTS workflow_authority CASCADE').catch(() => {});
+    await db
+      .query("DROP SCHEMA IF EXISTS workflow_authority CASCADE")
+      .catch(() => {});
     await db.end();
   }
 }
