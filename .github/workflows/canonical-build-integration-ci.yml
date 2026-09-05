@@ -1,0 +1,119 @@
+name: Canonical Build Integration CI
+
+on:
+  pull_request:
+    branches:
+      - feat/avatar-studio-v1-canonical-build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canonical-build-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LIVE_PAID_GENERATION: "false"
+  PAID_PROVIDER_CALLS: "0"
+  EXTERNAL_GENERATION_CALLS: "0"
+
+jobs:
+  zero-call-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Focused workflow, references, Seedance, QA, and transport contracts
+        run: |
+          node tests/reference-input-plan-test.js
+          node tests/production-workflow-engine-test.js
+          node tests/video-model-contracts-seedance-2.5-test.js
+          node tests/v2.10-continuity-production-integration-test.js
+          node tests/v2.10-seedance-duration-boundary-test.js
+          node --test tests/replicate-files-api-transport-test.js
+          node tests/universal-video-qa-test.js
+      - name: Durable V2.1 boundary regressions
+        run: |
+          npm run test:v2.1:provider-contract
+          npm run test:v2.1:routing
+          npm run test:v2.1:reconciliation
+          npm run test:v2.1:crash-consistency
+          npm run test:v2.1:recovery-executor
+          npm run test:v2.1:artifact-idempotency
+          npm run test:v2.1:media-generation
+          npm run test:v2.1:replicate-video
+          npm run test:v2.1:master-renderer
+      - name: Certified Content Factory suites
+        run: |
+          npm run test:v2.5
+          npm run test:v2.8
+          npm run test:v2.9.2
+          npm run test:v2.10
+          npm run test:v2.10.1
+          npm run test:v2.10.2
+          npm run test:v2.10.3
+          npm run test:v2.10.4
+      - name: Avatar Studio regression
+        run: npm run test:avatar-studio
+      - name: Dashboard build
+        run: npm run dashboard:build
+      - name: Confirm zero-call CI policy
+        run: |
+          test "$LIVE_PAID_GENERATION" = "false"
+          test "$PAID_PROVIDER_CALLS" = "0"
+          test "$EXTERNAL_GENERATION_CALLS" = "0"
+
+  continuity-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      CONTENT_FACTORY_TEST_DATABASE: "1"
+      LIVE_PAID_GENERATION: "false"
+      PAID_PROVIDER_CALLS: "0"
+      EXTERNAL_GENERATION_CALLS: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Durable continuity authority PostgreSQL
+        run: |
+          createdb --maintenance-db=postgres canonical_continuity_authority
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/canonical_continuity_authority PGDATABASE=canonical_continuity_authority node tests/production-continuity-authority-postgres-test.js
+      - name: V2.10 continuity namespace and REAL_PERSON authority PostgreSQL
+        run: |
+          createdb --maintenance-db=postgres canonical_v210_continuity
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/canonical_v210_continuity PGDATABASE=canonical_v210_continuity node tests/v2.10-continuity-production-postgres-test.js
+      - name: V2.10 exact START and retry PostgreSQL
+        run: |
+          createdb --maintenance-db=postgres canonical_v210_exact_start
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/canonical_v210_exact_start PGDATABASE=canonical_v210_exact_start node tests/v2.10-exact-retry-start-postgres-test.js

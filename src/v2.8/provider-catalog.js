@@ -2,6 +2,7 @@
 
 const { PROVIDERS, MODELS } = require('./provider-definitions');
 const { normalizeCapability } = require('./capabilities');
+const { getVideoModelContract } = require('./video-model-contracts');
 
 const AVAILABILITY = Object.freeze(['NOT_CONFIGURED','CONFIGURED_NOT_PROBED','READY','DEGRADED','UNAVAILABLE','EXPERIMENTAL']);
 const PRESETS = Object.freeze({
@@ -110,11 +111,12 @@ class ProviderCatalog {
     });
   }
   listModels(provider) { return this.allModels().filter((model) => model.provider === String(provider).toLowerCase() && model.enabled !== false)
-    .map((model) => Object.freeze({ ...clone(model), modelFamily: model.modelFamily || null,
+    .map((model) => {const contract=getVideoModelContract(model.provider,model.modelId);return Object.freeze({ ...clone(model), modelFamily: model.modelFamily || null,
       providerModelId: model.providerModelId || model.modelId, supportStatus: model.supportStatus || 'SUPPORTED',
+      modelContract:contract?clone({contractVersion:contract.contractVersion,providerSchemaVersion:contract.provenance.providerSchemaVersion,provenance:contract.provenance,inputModes:contract.inputModes,capabilities:contract.capabilities,parameters:contract.parameters,limits:contract.limits,output:contract.output,pricing:contract.pricing,technicalQa:contract.technicalQa,workflowCompatibility:contract.workflowCompatibility}):null,
       configurationStatus: credentialConfigured(this.providers.find((item) => item.id === model.provider), this.env) ? 'CONFIGURED' : 'NOT_CONFIGURED',
       selectable: (model.supportStatus || 'SUPPORTED') === 'SUPPORTED' && model.deprecated !== true
-        && (model.experimental !== true || this.env.V28_ALLOW_EXPERIMENTAL_MODELS === 'true') })); }
+        && (model.experimental !== true || this.env.V28_ALLOW_EXPERIMENTAL_MODELS === 'true') });}); }
   preferredModel({ provider = null, capability, profile = null } = {}) {
     const normalizedCapability = normalizeCapability(capability);
     const providerIds = provider ? [String(provider).toLowerCase()] : [...new Set(this.providers.map((item) => item.id))];
@@ -166,7 +168,7 @@ class ProviderCatalog {
     const constraints = modelDefinition.constraints || {};
     const effectiveDuration = durationSeconds ?? (Number(String(settings.duration || '').replace(/s$/, '')) || null);
     const effectiveResolution = resolution || settings.resolution || null;
-    if (effectiveDuration != null && constraints.durationRange
+    if (effectiveDuration != null && effectiveDuration !== constraints.intelligentDuration && constraints.durationRange
       && (effectiveDuration < constraints.durationRange[0] || effectiveDuration > constraints.durationRange[1])) {
       throw new ProviderCatalogError('UNSUPPORTED_DURATION', `${modelDefinition.displayName} supports ${constraints.durationRange[0]}-${constraints.durationRange[1]}s`);
     }

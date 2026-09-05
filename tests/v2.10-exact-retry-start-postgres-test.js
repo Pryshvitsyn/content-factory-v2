@@ -140,6 +140,12 @@ class ExactFlowStarter extends V210IntegratedProductionStarter {
     };
   }
 }
+class MemoryStorage {
+  constructor(){this.values=new Map();}
+  async exists({key}){return this.values.has(key);}
+  async put({key,bytes}){if(this.values.has(key)){const error=new Error('exists');error.code='EEXIST';throw error;}this.values.set(key,Buffer.from(bytes));return {key,size:bytes.length};}
+  async get({key}){return this.values.get(key);}
+}
 
 async function main() {
   safe();
@@ -161,7 +167,7 @@ async function main() {
     const env = { LIVE_PAID_GENERATION: 'true', REPLICATE_API_TOKEN: 'test-replicate', OPENAI_API_KEY: 'test-openai' };
     const providerCatalog = new ProviderCatalog({ env });
     const scheduled = [];
-    const starter = new ExactFlowStarter({ db, storage: {}, repository, env, logger: { error() {} },
+    const starter = new ExactFlowStarter({ db, storage: new MemoryStorage(), repository, env, logger: { error() {} },
       credentialCheck: () => true, mediaInspector: {}, scheduler: (task) => scheduled.push(task) });
     const brandRepository = { async getBrand(id) { return id === B ? { id: B, workspaceId: W, name: 'Attune' } : null; } };
     const service = new CreativeProductionService({ repository, brandRepository, providerCatalog, starter,
@@ -224,6 +230,10 @@ async function main() {
     assert.equal(final.pricing.components.find((item) => item.component === 'SEMANTIC_CRITIC').status, 'UNKNOWN');
     assert.equal(final.humanApprovalRequired, true);
     assert.equal(final.autoPublish, false);
+    assert.match(final.workflowAuthority.workflowArtifactId,/^workflow:/);
+    assert.equal(final.workflowAuthority.workflowFingerprint.length,64);
+    assert.equal(final.operationPlans.length,3);
+    assert.equal(new Set(final.operationPlans.map((item)=>item.requestFingerprint)).size,3);
 
     state = await repository.getDraft({ id: created.id, workspaceId: W, brandId: B });
     assert.equal(state.status, 'PREFLIGHT_READY');
@@ -237,6 +247,10 @@ async function main() {
     assert.equal(started.accepted, true);
     assert.equal(started.humanApprovalRequired, true);
     assert.equal(started.autoPublish, false);
+    const durableAttempts=await repository.startAttempts({id:created.id,workspaceId:W,brandId:B});
+    assert.equal(durableAttempts[0].actor,ACTOR);
+    assert.equal(durableAttempts[0].preflight_fingerprint,final.fingerprint);
+    assert.equal(durableAttempts[0].canonical_input_fingerprint,final.canonicalInputFingerprint);
     assert.equal(started.publicationTriggered, false);
     assert.ok(started.productionId);
     assert.equal(scheduled.length, 1, 'canonical run may be scheduled only after a successful exact START claim');

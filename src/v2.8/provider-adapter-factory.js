@@ -4,6 +4,7 @@ const { AsyncMediaProviderAdapter } = require('./async-media-provider-adapter');
 const { PROTOCOLS, createAlibabaProtocol } = require('./provider-protocols');
 const { ReplicateWanVideoAdapter } = require('../providers/replicate-wan-video-adapter');
 const { ReplicateUniversalVideoAdapter } = require('../providers/replicate-universal-video-adapter');
+const { getVideoModelContract } = require('./video-model-contracts');
 
 function credential(provider, env) {
   if (provider === 'fal') return env.FAL_KEY;
@@ -21,9 +22,10 @@ function createVideoAdapter(selection, { env = process.env, fetchImpl = global.f
       fetchImpl, ...(sleep ? { sleep } : {}), ...(now ? { now } : {}),
       ...(pollIntervalMs ? { pollIntervalMs } : {}), ...(timeoutMs ? { timeoutMs } : {}) });
   }
-  if (selection.provider === 'replicate' && ['replicate-wan-3','replicate-wan-2.7-r2v','replicate-seedance-2.5'].includes(selection.adapterFamily)) {
+  const modelContract=getVideoModelContract(selection.provider,selection.model);
+  if (selection.provider === 'replicate' && (modelContract || ['replicate-wan-3','replicate-wan-2.7-r2v'].includes(selection.adapterFamily))) {
     return new ReplicateUniversalVideoAdapter({ apiToken: env.REPLICATE_API_TOKEN, model: selection.model,
-      family: selection.adapterFamily === 'replicate-wan-3' ? 'WAN_3' : selection.adapterFamily === 'replicate-wan-2.7-r2v' ? 'WAN_2_7_R2V' : 'SEEDANCE_2_5', fetchImpl,
+      family: modelContract ? 'MODEL_CONTRACT' : selection.adapterFamily === 'replicate-wan-3' ? 'WAN_3' : 'WAN_2_7_R2V', modelContract, fetchImpl,
       ...(sleep ? { sleep } : {}), ...(now ? { now } : {}), ...(pollIntervalMs ? { pollIntervalMs } : {}), ...(timeoutMs ? { timeoutMs } : {}) });
   }
   const baseProtocol = selection.provider === 'alibaba'

@@ -5,6 +5,7 @@ const { createProductionRuntime } = require('../v2.7/production-runtime');
 const { V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input } = require('./runtime-integration');
 const { V210PostProductionRenderer, V210ReferenceAwareMediaExecutor } = require('./reference-aware-media');
 const { buildFirstVideoStagePlan, LockedKeyframeError } = require('./locked-keyframe-contract');
+const { ProductionExecutionAuthority, persistV210WorkflowRevision } = require('../workflow/v210-production-authority');
 
 // Bump only when durable canonical execution-identity semantics change. The
 // version is salted into the deterministic identity hash while preserving the
@@ -77,12 +78,14 @@ function revisionSafeCanonical({ draft, preflight }) {
 }
 
 class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
+  constructor(options={}){super(options);this.continuityAuthority=options.continuityAuthority||null;}
   runtime(input, live) {
     const env = integratedEnvironment(this.env, input, live);
     const config = this.configResolver(env, input);
     const runtime = createProductionRuntime({ db: this.db, storage: this.storage, config, env, logger: this.logger,
       mediaInspector: this.mediaInspector,
-      mediaExecutorDecorator: (delegate) => new V210ReferenceAwareMediaExecutor({ delegate, storage: this.storage }),
+      mediaExecutorDecorator: (delegate) => new V210ReferenceAwareMediaExecutor({ delegate, storage: this.storage,
+        continuityAuthority:this.continuityAuthority }),
       masterRenderer: new V210PostProductionRenderer({ postProduction: input.postProduction || null }),
     });
     return { ...runtime, config, env };
@@ -92,8 +95,9 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
     const canonical = revisionSafeCanonical({ draft, preflight });
     const runtime = this.runtime(canonical.input, false);
     const prepared = await runtime.service.prepare({ input: canonical.input, config: runtime.config });
+    const workflowAuthority = await persistV210WorkflowRevision({ storage: this.storage, draft, canonical });
     return Object.freeze({ canonicalInputFingerprint: canonical.input.fingerprint, plan: prepared.plan,
-      providerExecutions: 0, canonical });
+      providerExecutions: 0, canonical, workflowAuthority });
   }
 
   lockedFirstVideoProjection({ draft, preflight, keyframe }) {
@@ -161,6 +165,7 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
         'LIVE_PAID_GENERATION=true is required after reviewing the final V2.10 preflight');
     }
     const canonical = revisionSafeCanonical({ draft, preflight });
+    await new ProductionExecutionAuthority({ repository: this.repository, storage: this.storage }).assertAuthorized({ draft, preflight, canonical });
     const runtime = this.runtime(canonical.input, true);
     try { this.credentialCheck({ config: runtime.config, input: canonical.input, env: runtime.env }); }
     catch (error) {

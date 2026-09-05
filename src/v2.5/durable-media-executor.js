@@ -296,7 +296,8 @@ class DurableMediaExecutor {
         content: JSON.stringify({ schemaVersion: 2, brandId, productionId, assetId: asset.asset_id,
           contentType: media.contentType, provider: media.provider, model: media.model, requestId: media.requestId,
           usage: media.usage, provenance: media.provenance, mediaProbe: probe,
-          sourceMediaUrl: media.mediaUrl, mediaArtifactStorageKey: artifact.storageKey }),
+          sourceMediaUrlHash: media.mediaUrl ? crypto.createHash('sha256').update(media.mediaUrl).digest('hex') : null,
+          mediaArtifactStorageKey: artifact.storageKey }),
         idempotencyKey: identities.provenanceIdempotencyKey, provider: media.provider, model: media.model, validationStatus: 'recorded',
       });
       const resolved = Object.freeze({ ...media, brandId, artifact, provenanceArtifact, mediaProbe: probe });

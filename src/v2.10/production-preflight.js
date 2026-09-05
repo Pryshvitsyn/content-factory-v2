@@ -7,7 +7,7 @@ const { validateConsent, validateVoiceTiming } = require('./voice-studio');
 const { estimateMediaStack } = require('../v2.9.2/pricing-registry');
 
 function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voiceRuntime = {}, quality = {}, master = {},
-  canonicalPlan = null, canonicalInputFingerprint = null, timingToleranceSeconds = 0 } = {}) {
+  canonicalPlan = null, canonicalInputFingerprint = null, workflowAuthority = null, timingToleranceSeconds = 0 } = {}) {
   const brief = canonicalCreativeBrief(input);
   const creative = validateCreativeCompleteness(brief);
   const continuity = validateContinuity(brief, authoritativeVideo);
@@ -33,7 +33,10 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
   if (!authoritativeVideo.provider || !authoritativeVideo.model || !authoritativeVideo.profile
     || authoritativeVideo.configurationStatus !== 'CONFIGURED') blockers.push('VIDEO_SELECTION_INCOMPLETE');
   if (voiceRuntime.status === 'BLOCKED') blockers.push(voiceRuntime.code || 'VOICE_RUNTIME_NOT_READY');
+  if (authoritativeVideo.continuityAuthorityStatus === 'BLOCKED') blockers.push(...authoritativeVideo.continuityAuthorityBlockers.map((item)=>item.code));
   if (plan.readiness === 'BLOCKED') blockers.push('CANONICAL_RUNTIME_BLOCKED');
+  if (authoritativeVideo.modelContractVersion && authoritativeVideo.modelPricing?.status === 'UNKNOWN_CURRENT_PRICE') blockers.push('PRICE_NOT_VERIFIABLE');
+  if (voiceEnabled && authoritativeVideo.shotModelRequests?.some((shot) => shot.modelRequest?.generateAudio === true)) blockers.push('AUDIO_OWNERSHIP_CONFLICT');
   const authoritative = {
     provider: authoritativeVideo.provider || null, providerDisplayName: authoritativeVideo.providerDisplayName || null,
     providerType: authoritativeVideo.providerType || null, vendor: authoritativeVideo.vendor || null,
@@ -45,6 +48,13 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
     resolvedSettings: { ...(authoritativeVideo.resolvedSettings || {}) }, configurationStatus: authoritativeVideo.configurationStatus || null,
     availability: authoritativeVideo.availability || null, costStatus: authoritativeVideo.costStatus || 'UNKNOWN',
     experimental: authoritativeVideo.experimental === true,
+    modelContractVersion: authoritativeVideo.modelContractVersion || null,
+    modelSchemaVersion: authoritativeVideo.modelSchemaVersion || null,
+    modelPricing: authoritativeVideo.modelPricing || null,
+    shotModelRequests: [...(authoritativeVideo.shotModelRequests || [])],
+    continuityAuthorityStatus:authoritativeVideo.continuityAuthorityStatus||'READY',
+    continuityAuthorityBlockers:[...(authoritativeVideo.continuityAuthorityBlockers||[])],
+    resolvedContinuityBindings:[...(authoritativeVideo.resolvedContinuityBindings||[])],
   };
   const masterResolved = { profile: master.profile || plan.masterAssemblyMode || 'SOCIAL_VERTICAL',
     resolution: master.resolution || '1080x1920', fps: Number(master.fps || 30), durationSeconds: brief.targetDurationSeconds,
@@ -93,11 +103,14 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
       : 'Total estimated cost is fully encoded by the pricing registry.',
     canonicalInputFingerprint: canonicalInputFingerprint || null,
     canonicalReadiness: plan.readiness || null,
+    workflowAuthority: workflowAuthority || null,
+    operationPlans: workflowAuthority?.operationPlans || [],
     humanApprovalRequired: true, autoPublish: false,
   };
   result.fingerprint = fingerprint({ brief, authoritativeVideo: authoritative, voiceRuntime, quality: result.quality,
     master: masterResolved, timingToleranceSeconds, canonicalInputFingerprint: result.canonicalInputFingerprint,
-    canonicalReadiness: result.canonicalReadiness });
+    canonicalReadiness: result.canonicalReadiness, workflowAuthority: result.workflowAuthority,
+    operationPlans: result.operationPlans });
   return Object.freeze(result);
 }
 

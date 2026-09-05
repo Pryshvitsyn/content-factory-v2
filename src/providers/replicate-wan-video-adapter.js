@@ -1,11 +1,13 @@
 'use strict';
 
 const { ProviderError, assertProviderResult } = require('./provider-contract');
+const crypto = require('node:crypto');
 
 const DEFAULT_MODEL = 'wan-video/wan-2.2-t2v-fast';
 const DEFAULT_BASE_URL = 'https://api.replicate.com/v1';
 const PENDING_STATUSES = new Set(['queued', 'starting', 'processing']);
 const CANCELED_STATUSES = new Set(['canceled', 'aborted']);
+const FILE_EXPIRY_SAFETY_MS = 30 * 1000;
 
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -89,6 +91,25 @@ function outputUrl(prediction) {
   if (output && typeof output.url === 'string' && output.url.length > 0) return output.url;
   return null;
 }
+function mediaEvidence(value) {
+  if (value?.__factoryProviderFile) return { kind: 'PROVIDER_FILE', byteSize: value.bytes?.length || null,
+    sha256: value.sha256 || null, artifactId: value.artifactId || null, artifactVersion: value.artifactVersion || null,
+    materializationMethod: 'REPLICATE_FILES_API' };
+  if (Buffer.isBuffer(value)) return { kind: 'BUFFER', byteSize: value.length,
+    sha256: crypto.createHash('sha256').update(value).digest('hex') };
+  const encoded = /^data:([^;,]+);base64,(.+)$/s.exec(String(value || ''));
+  if (encoded) {
+    const bytes = Buffer.from(encoded[2], 'base64');
+    return { kind: 'DATA_URI', mimeType: encoded[1], byteSize: bytes.length,
+      sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+  }
+  return { kind: 'REMOTE_REFERENCE', locatorHash: crypto.createHash('sha256').update(String(value || '')).digest('hex') };
+}
+function safeInputProvenance(input = {}) {
+  const media = new Set(['image','last_frame_image','reference_images','reference_videos','reference_audios']);
+  return Object.fromEntries(Object.entries(input).map(([name, value]) => [name,
+    media.has(name) ? (Array.isArray(value) ? value.map(mediaEvidence) : mediaEvidence(value)) : value]));
+}
 
 class ReplicateWanVideoAdapter {
   constructor({
@@ -117,6 +138,55 @@ class ReplicateWanVideoAdapter {
     this.sleep = sleep;
     this.now = now;
     this.inflight = new Map();
+    this.fileMaterializations = new Map();
+  }
+
+  async uploadProviderFile(value) {
+    if (!value?.__factoryProviderFile || !Buffer.isBuffer(value.bytes)) return value;
+    if (value.bytes.length >= 100 * 1024 * 1024) throw providerError('Replicate Files API inputs must be less than 100MB', 'REPLICATE_FILE_TOO_LARGE', { model: this.model });
+    const actualHash = crypto.createHash('sha256').update(value.bytes).digest('hex');
+    if (value.sha256 && value.sha256 !== actualHash) throw providerError('Provider file bytes do not match immutable source hash', 'REPLICATE_FILE_HASH_MISMATCH', { model: this.model });
+    const cacheKey = `${actualHash}:replicate-files-api@1`;
+    if (this.fileMaterializations.has(cacheKey)) {
+      const cached = await this.fileMaterializations.get(cacheKey);
+      if (Number.isFinite(cached.cacheExpiresAt) && this.now() + FILE_EXPIRY_SAFETY_MS < cached.cacheExpiresAt) return cached;
+      this.fileMaterializations.delete(cacheKey);
+    }
+    const operation = (async () => {
+      if (!this.apiToken) throw providerError('REPLICATE_API_TOKEN is required for file upload', 'REPLICATE_TOKEN_REQUIRED', { model: this.model });
+      const form = new FormData();
+      const extension = String(value.mimeType || '').split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin';
+      form.append('content', new Blob([value.bytes], { type: value.mimeType || 'application/octet-stream' }), `factory-${actualHash.slice(0, 16)}.${extension}`);
+      form.append('metadata', JSON.stringify({ source_sha256: actualHash, artifact_id: value.artifactId || null,
+        artifact_version: value.artifactVersion || null, purpose: value.purpose || null }));
+      const file = await this.requestJson(`${this.baseURL}/files`, { method: 'POST', headers: {
+        Authorization: `Bearer ${this.apiToken}`, Accept: 'application/json' }, body: form });
+      if (!file.id || !file.urls?.get || file.checksums?.sha256 !== actualHash) throw providerError('Replicate file upload returned invalid identity/checksum evidence', 'REPLICATE_FILE_UPLOAD_INVALID', { model: this.model });
+      const cacheExpiresAt = Date.parse(file.expires_at || '');
+      return Object.freeze({ locator: file.urls.get, cacheExpiresAt: Number.isFinite(cacheExpiresAt) ? cacheExpiresAt : null,
+        evidence: Object.freeze({ provider: 'replicate', method: 'REPLICATE_FILES_API',
+        materializationContractVersion: 'replicate-files-api@1', providerFileId: file.id, sourceSha256: actualHash,
+        sourceMime: value.mimeType || 'application/octet-stream', sourceByteSize: value.bytes.length,
+        artifactId: value.artifactId || null, artifactVersion: value.artifactVersion || null,
+        locatorHash: crypto.createHash('sha256').update(file.urls.get).digest('hex'), expiresAt: file.expires_at || null }) });
+    })();
+    this.fileMaterializations.set(cacheKey, operation);
+    try {
+      const uploaded = await operation;
+      if (!Number.isFinite(uploaded.cacheExpiresAt)) this.fileMaterializations.delete(cacheKey);
+      return uploaded;
+    } catch (error) { this.fileMaterializations.delete(cacheKey); throw error; }
+  }
+
+  async materializeInput(input) {
+    const evidence = [];
+    const visit = async (value) => {
+      if (value?.__factoryProviderFile) { const uploaded = await this.uploadProviderFile(value); evidence.push(uploaded.evidence); return uploaded.locator; }
+      if (Array.isArray(value)) return Promise.all(value.map(visit));
+      if (value && typeof value === 'object') { const out = {}; for (const [key, child] of Object.entries(value)) out[key] = await visit(child); return out; }
+      return value;
+    };
+    return { input: await visit(input), evidence: Object.freeze(evidence) };
   }
 
   supports({ capability, model } = {}) {
@@ -243,8 +313,8 @@ class ReplicateWanVideoAdapter {
         model: this.model,
         predictionId,
         origin: 'replicate-api',
-        ...(input ? { input } : {}),
-        outputUrl: mediaUrl,
+        ...(input ? { input: safeInputProvenance(input) } : {}),
+        outputUrlHash: crypto.createHash('sha256').update(mediaUrl).digest('hex'),
         idempotencyKey: idempotencyKey || null,
       },
     });
@@ -260,17 +330,20 @@ class ReplicateWanVideoAdapter {
       Accept: 'application/json',
       'Cancel-After': `${Math.max(5, Math.ceil(this.timeoutMs / 1000))}s`,
     };
+    const materialized = await this.materializeInput(input);
+    const predictionInput = materialized.input;
     const predictionUrl = `${this.baseURL}/models/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/predictions`;
     let prediction = await this.requestJson(predictionUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ input }),
+      body: JSON.stringify({ input: predictionInput }),
     });
     if (!prediction.id || typeof prediction.status !== 'string') {
       throw providerError('Replicate prediction response is missing id or status', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model });
     }
     if (onProviderRequest) await onProviderRequest({ requestId: prediction.id, status: prediction.status, provider: 'replicate', model: this.model });
-    return this.finishPrediction({ prediction, headers, input, idempotencyKey });
+    return this.finishPrediction({ prediction, headers, input: { ...predictionInput,
+      ...(materialized.evidence.length ? { _factoryProviderFiles: materialized.evidence } : {}) }, idempotencyKey });
   }
 
   async recover({ capability, model, requestId } = {}) {
@@ -334,4 +407,5 @@ module.exports = {
   buildWanInput,
   outputUrl,
   parseGenerationPrompt,
+  safeInputProvenance,
 };

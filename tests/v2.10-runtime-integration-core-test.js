@@ -107,6 +107,34 @@ async function main() {
     { shotId: 's2', capability: CAPABILITIES.IMAGE_TO_VIDEO },
   ]);
 
+  const seedance = await resolveAuthoritativeVideo({ catalog, workspaceId: 'workspace-1', brief: referencedBrief,
+    request: { provider: 'replicate', model: 'bytedance/seedance-2.5', profile: 'STANDARD',
+      modelRequest: { resolvedInputMode: 'MULTIMODAL_REFERENCE', durationSeconds: 9, resolution: '1080p',
+        aspectRatio: '3:4', generateAudio: true, watermark: true, outputFormat: 'mp4', seed: 42 } } });
+  assert.equal(seedance.requested.modelRequest.seed, 42);
+  assert.equal(seedance.shotModelRequests[0].resolvedInputMode, 'TEXT_TO_VIDEO');
+  assert.equal(seedance.shotModelRequests[1].resolvedInputMode, 'MULTIMODAL_REFERENCE');
+  const seedanceCanonical = buildCanonicalV210Input({ draft: { id: DRAFT_ID, brand_id: BRAND_ID,
+    creative_brief: referencedBrief }, preflight: { authoritativeVideo: seedance, quality: {} } });
+  const [firstSeedance, secondSeedance] = seedanceCanonical.raw.scenes.map((scene) => scene.shots[0].video);
+  assert.equal(firstSeedance.resolved_input_mode, 'TEXT_TO_VIDEO');
+  assert.equal(secondSeedance.resolved_input_mode, 'MULTIMODAL_REFERENCE');
+  assert.deepEqual({ resolution: secondSeedance.resolution, aspect: secondSeedance.aspect_ratio,
+    audio: secondSeedance.generate_audio, watermark: secondSeedance.watermark, format: secondSeedance.output_format,
+    seed: secondSeedance.seed }, { resolution: '1080p', aspect: '3:4', audio: true, watermark: true, format: 'mp4', seed: 42 });
+  const persistedRequirements = seedanceCanonical.input.assetPlan.assets.find((asset) => asset.asset_id === 'a2').generation_requirements;
+  assert.equal(persistedRequirements.resolved_input_mode, 'MULTIMODAL_REFERENCE');
+  assert.equal(persistedRequirements.model_contract_version, 'replicate-seedance-2.5@1');
+  assert.equal(persistedRequirements.request_policy_fingerprint, seedance.shotModelRequests[1].requestPolicyFingerprint);
+  for (const mode of ['VIDEO_EDITING','VIDEO_EXTENSION']) {
+    const editingBrief=brief('UPLOADED_REFERENCE');
+    editingBrief.storyboard[1].referenceMedia={artifactId:'video-reference',storageKey:'references/video.mp4',contentHash:'hash',contentType:'video/mp4'};
+    const editing=await resolveAuthoritativeVideo({catalog,workspaceId:'workspace-1',brief:editingBrief,
+      request:{provider:'replicate',model:'bytedance/seedance-2.5',profile:'STANDARD',modelRequest:{resolvedInputMode:mode,
+        durationSeconds:5,resolution:'720p',aspectRatio:'adaptive',generateAudio:false,watermark:false,outputFormat:'mp4'}}});
+    assert.equal(editing.shotModelRequests[1].modelRequest.durationSeconds,-1);
+  }
+
   assert.equal(canonicalObjective('ORGANIC REACH'), 'ORGANIC_REACH');
   assert.equal(canonicalObjective(referencedBrief.objective), 'EXPERIMENT');
   const preflight = {
@@ -120,9 +148,10 @@ async function main() {
   assert.equal(canonical.canonicalRequest.creativeObjective, referencedBrief.objective);
   const secondAsset = canonical.input.assetPlan.assets.find((asset) => asset.asset_id === 'a2');
   assert.equal(secondAsset.generation_requirements.capability, CAPABILITIES.IMAGE_TO_VIDEO);
-  assert.deepEqual(secondAsset.generation_requirements.v210_reference, {
-    policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: 'a1',
-  });
+  assert.equal(secondAsset.generation_requirements.v210_reference.policy, 'PREVIOUS_SHOT_FRAME');
+  assert.equal(secondAsset.generation_requirements.v210_reference.previousAssetId, 'a1');
+  assert.equal(secondAsset.generation_requirements.v210_reference.dependencySpec.extractionContractVersion,
+    'previous-shot-reference-extractor@1');
 
   let preparedInput = null;
   const configResolver = (env, input) => ({
@@ -183,9 +212,16 @@ async function main() {
     selection() { throw new Error('selection is not used during reference materialization'); },
     identities() { throw new Error('identities are not used during reference materialization'); },
   };
+  const runtimeArtifacts = new Map([['media/a1', previousBytes]]);
+  const runtimeStorage = {
+    async get({ key }) { const value = runtimeArtifacts.get(key); if (!value) throw new Error(`missing ${key}`); return value; },
+    async exists({ key }) { return runtimeArtifacts.has(key); },
+    async put({ key, bytes }) { if (runtimeArtifacts.has(key)) throw Object.assign(new Error('exists'), { code: 'EEXIST' });
+      runtimeArtifacts.set(key, Buffer.from(bytes)); return { key, size: bytes.length }; },
+  };
   const referenceExecutor = new V210ReferenceAwareMediaExecutor({
     delegate,
-    storage: { async get({ key }) { assert.equal(key, 'media/a1'); return previousBytes; } },
+    storage: runtimeStorage,
     frameSampler: { async sample({ bytes }) {
       assert.equal(sha256(bytes), previousHash);
       return [{ jpeg: frameBytes, timestampMs: 4900, analysisHash: 'analysis-frame-1' }];
@@ -203,10 +239,11 @@ async function main() {
   assert.equal(materialized.generation_requirements.v210_reference_evidence.previousAssetId, 'a1');
   assert.equal(materialized.generation_requirements.v210_reference_evidence.sourceArtifactContentHash, previousHash);
   assert.equal(materialized.generation_requirements.v210_reference_evidence.referenceHash, sha256(frameBytes));
+  assert.ok(materialized.generation_requirements.runtime_dependency_snapshot.runtimeDependencyFingerprint);
 
   const corruptExecutor = new V210ReferenceAwareMediaExecutor({
     delegate,
-    storage: { async get() { return Buffer.from('mutated-bytes'); } },
+    storage: { async exists() { return false; }, async get() { return Buffer.from('mutated-bytes'); } },
     frameSampler: { async sample() { throw new Error('must not sample corrupt evidence'); } },
     geometryNormalizer: { async normalize() { throw new Error('must not normalize corrupt evidence'); },
       async probe() { throw new Error('must not probe corrupt evidence'); } },

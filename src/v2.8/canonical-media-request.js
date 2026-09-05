@@ -2,6 +2,7 @@
 
 const { CAPABILITIES, normalizeCapability } = require('./capabilities');
 const { DEFAULT_NEGATIVE_INTENT, translateProviderPrompt } = require('../v2.9/negative-intent');
+const { getVideoModelContract,resolveVideoModelRequest } = require('./video-model-contracts');
 
 class CanonicalMediaRequestError extends Error {
   constructor(code, message, details = null) {
@@ -29,12 +30,9 @@ function hasReferences(value) {
 function createCanonicalMediaRequest(raw = {}) {
   const capability = normalizeCapability(raw.capability || CAPABILITIES.TEXT_TO_VIDEO);
   const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : '';
-  if (!prompt && capability !== CAPABILITIES.FAST_RENDER) {
-    throw new CanonicalMediaRequestError('CANONICAL_PROMPT_REQUIRED', 'Canonical media prompt is required');
-  }
   const durationSeconds = raw.durationSeconds == null ? null : Number(raw.durationSeconds);
-  if (durationSeconds != null && (!Number.isFinite(durationSeconds) || durationSeconds <= 0)) {
-    throw new CanonicalMediaRequestError('UNSUPPORTED_DURATION', 'durationSeconds must be positive');
+  if (durationSeconds != null && (!Number.isFinite(durationSeconds) || (durationSeconds <= 0 && durationSeconds !== -1))) {
+    throw new CanonicalMediaRequestError('UNSUPPORTED_DURATION', 'durationSeconds must be positive or -1 when the selected model contract supports intelligent duration');
   }
   const refs = references(raw.references);
   if (hasReferences(refs) && capability === CAPABILITIES.TEXT_TO_VIDEO) {
@@ -44,16 +42,25 @@ function createCanonicalMediaRequest(raw = {}) {
   if (!selection.provider || !selection.model || !selection.profile) {
     throw new CanonicalMediaRequestError('PROVIDER_SELECTION_REQUIRED', 'provider, model, and profile are required');
   }
+  const selectedContract=getVideoModelContract(selection.provider,selection.model);
+  if (durationSeconds === -1 && selectedContract?.parameters?.duration?.values?.intelligent !== -1) {
+    throw new CanonicalMediaRequestError('UNSUPPORTED_DURATION', 'Intelligent duration (-1) is not supported by the selected model contract');
+  }
+  if (!prompt && capability !== CAPABILITIES.FAST_RENDER && !(selectedContract && hasReferences(refs))) {
+    throw new CanonicalMediaRequestError('CANONICAL_PROMPT_REQUIRED', 'Canonical media prompt or model-supported media input is required');
+  }
   const seed = raw.seed == null ? null : Number(raw.seed);
   if (seed != null && (!Number.isInteger(seed) || seed < 0)) {
     throw new CanonicalMediaRequestError('CANONICAL_SEED_INVALID', 'seed must be a non-negative integer');
   }
-  return Object.freeze({
+  const base={
     schemaVersion: '2.9.2', capability, prompt, canonicalPrompt: prompt,
     providerPrompt: typeof raw.providerPrompt === 'string' && raw.providerPrompt.trim() ? raw.providerPrompt.trim() : prompt,
     negativeIntent: Object.freeze(structuredClone(raw.negativeIntent || DEFAULT_NEGATIVE_INTENT)),
     negativePrompt: typeof raw.negativePrompt === 'string' ? raw.negativePrompt.trim() : '',
     durationSeconds, aspectRatio: raw.aspectRatio || null, resolution: raw.resolution || null,
+    resolvedInputMode: raw.resolvedInputMode || null, outputFormat: raw.outputFormat || null,
+    modelParameters: Object.freeze({ ...(raw.modelParameters || {}) }),
     references: refs, audio: Object.freeze({ requested: raw.audio?.requested === true,
       strategy: raw.audio?.strategy || 'EXTERNAL_VOICE', dialogueOwner: raw.audio?.dialogueOwner || null }),
     camera: Object.freeze({ ...(raw.camera || {}) }), continuity: Object.freeze({ ...(raw.continuity || {}) }),
@@ -63,7 +70,10 @@ function createCanonicalMediaRequest(raw = {}) {
       modelFamily: selection.modelFamily || null, providerModelId: selection.providerModelId || selection.model,
       profile: String(selection.profile).toUpperCase() }),
     resolvedSettings: Object.freeze({ ...(raw.resolvedSettings || {}) }),
-  });
+  };
+  const contract=selectedContract;
+  const modelContractRequest=contract&&base.resolvedInputMode?resolveVideoModelRequest({provider:base.providerSelection.provider,model:base.providerSelection.model,request:{resolvedInputMode:base.resolvedInputMode,prompt:base.providerPrompt,duration:base.durationSeconds,resolution:base.resolution,aspectRatio:base.aspectRatio,generateAudio:base.audio.requested,watermark:base.resolvedSettings.watermark,outputFormat:base.outputFormat,seed:base.seed,image:base.references.firstFrame,lastFrameImage:base.references.lastFrame,referenceImages:[...base.references.characterImages,...base.references.styleImages],referenceVideos:base.references.referenceVideos,referenceAudios:base.references.referenceAudios,...base.modelParameters}}):null;
+  return Object.freeze({...base,modelContractRequest});
 }
 
 function fromAsset(asset) {
@@ -84,8 +94,15 @@ function fromAsset(asset) {
     provider: selection.provider, model: selection.model });
   return createCanonicalMediaRequest({
     capability, prompt, providerPrompt: translated.providerPrompt, negativeIntent: translated.negativeIntent,
-    negativePrompt: requirements.negative_prompt, durationSeconds: (requirements.target_clip_duration_ms || 0) / 1000 || null,
+    negativePrompt: requirements.negative_prompt,
+    durationSeconds: requirements.generation_duration_seconds
+      ?? requirements.resolved_settings?.durationSeconds
+      ?? requirements.resolved_settings?.duration
+      ?? ((requirements.target_clip_duration_ms || 0) / 1000 || null),
     aspectRatio: requirements.aspect_ratio, resolution: requirements.resolution, references: refs,
+    resolvedInputMode: requirements.resolved_input_mode || requirements.resolvedInputMode,
+    outputFormat: requirements.output_format || requirements.outputFormat,
+    modelParameters: requirements.model_parameters || requirements.modelParameters,
     audio: { requested: requirements.generate_audio === true, strategy: requirements.audio_strategy,
       dialogueOwner: requirements.dialogue_owner }, camera: requirements.camera,
     continuity: requirements.continuity, seed: requirements.seed,

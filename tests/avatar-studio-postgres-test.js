@@ -46,6 +46,16 @@ async function main() {
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_body_expressions_lab.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'), 'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260903_avatar_studio_source_viewpoint_classification.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260904_avatar_motion_pilot.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260905_avatar_motion_pilot_raw_provider_output.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260906_avatar_motion_pilot_identity_reviews.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260907_avatar_motion_pilot_identity_review_immutable.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260908_avatar_motion_pilot_reference_to_video.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260909_avatar_studio_identity_intake_v1.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260910_avatar_motion_pilot_route_variants.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260911_avatar_motion_pilot_automatic_qa.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260912_avatar_motion_quality_batch_preflight.sql'), 'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260913_avatar_provider_reference_canonical.sql'), 'utf8'));
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Avatar Studio disposable') ON CONFLICT(id) DO NOTHING`, [WORKSPACE_ID]);
     await db.query(`INSERT INTO v2_2.brands(id,workspace_id,name,slug,status) VALUES($1,$2,'Attune Avatar Test','attune-avatar-test','ACTIVE')
       ON CONFLICT(id) DO UPDATE SET status='ACTIVE'`, [BRAND_ID, WORKSPACE_ID]);

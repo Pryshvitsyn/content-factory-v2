@@ -83,11 +83,11 @@ async function main() {
 
   assert.deepEqual(buildWan3Input({ prompt: 'A clean product reveal', image: 'https://example.invalid/start.png', duration: 6 }), {
     prompt: 'A clean product reveal', resolution: '720p', duration: 6, image: 'https://example.invalid/start.png', enable_prompt_expansion: true });
-  const seedanceInput = buildSeedance25Input({ prompt: 'A dialogue scene', referenceVideos: ['https://example.invalid/ref.mp4'],
+  const seedanceInput = buildSeedance25Input({ resolvedInputMode:'MULTIMODAL_REFERENCE',prompt: 'A dialogue scene', referenceVideos: ['https://example.invalid/ref.mp4'],
     referenceAudios: ['https://example.invalid/ref.mp3'], generateAudio: true });
   assert.equal(seedanceInput.generate_audio, true);
   assert.equal(seedanceInput.reference_audios.length, 1);
-  assert.throws(() => buildSeedance25Input({ prompt: 'invalid refs', image: 'a', referenceVideos: ['b'] }), /cannot be combined/);
+  assert.throws(() => buildSeedance25Input({ resolvedInputMode:'MULTIMODAL_REFERENCE',prompt: 'invalid refs', image: 'a', referenceVideos: ['b'] }), (error)=>error.code==='SEEDANCE_INPUT_MODE_CONFLICT');
   const wan3Adapter = createVideoAdapter(catalog.resolveSelection({ provider: 'replicate', model: 'alibaba/wan-3', profile: 'STANDARD' }), {
     env, fetchImpl: async () => response({ json: { id: 'never-called', status: 'failed' } }) });
   assert.equal(wan3Adapter.supports({ capability: 'TEXT_TO_VIDEO', model: 'alibaba/wan-3' }), true);

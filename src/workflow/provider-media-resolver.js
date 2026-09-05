@@ -1,0 +1,12 @@
+'use strict';
+const crypto=require('node:crypto');
+class ProviderMediaResolutionError extends Error{constructor(code,message,details=null){super(message);this.name='ProviderMediaResolutionError';this.code=code;this.status=409;this.details=details;}}
+class ProviderCompatibleMediaResolver{
+  constructor({materialize=replicateFileMaterializer,smallDataUriLimit=1024*1024}={}){this.materialize=materialize;this.smallDataUriLimit=smallDataUriLimit;}
+  async resolve({artifact,reference,provider,model,purpose}){const bytes=artifact?.bytes;if(!Buffer.isBuffer(bytes)||!bytes.length)throw new ProviderMediaResolutionError('REFERENCE_BYTES_REQUIRED','Immutable reference bytes are required');const evidence={artifactId:reference.artifactId,artifactVersion:reference.artifactVersion,sha256:reference.sha256,mimeType:reference.mimeType||artifact.contentType,byteSize:bytes.length,sourceLineage:artifact.derivedLineage||null,provider,model,purpose};if(artifact.providerValue!=null)return {providerValue:artifact.providerValue,evidence};if(bytes.length<=this.smallDataUriLimit)return {providerValue:`data:${evidence.mimeType||'application/octet-stream'};base64,${bytes.toString('base64')}`,evidence};if(typeof this.materialize!=='function')throw new ProviderMediaResolutionError('REFERENCE_PROVIDER_RESOLUTION_FAILED','Large immutable media requires a configured provider-compatible local file/Buffer materializer',evidence);const materialized=await this.materialize({bytes,...evidence});if(!materialized?.providerValue)throw new ProviderMediaResolutionError('REFERENCE_PROVIDER_RESOLUTION_FAILED','Provider media materializer returned no provider-compatible value',evidence);return {providerValue:materialized.providerValue,evidence:{...evidence,resolution:materialized.evidence||null}};}
+}
+function replicateFileMaterializer(input={}){
+  if(input.provider!=='replicate')throw new ProviderMediaResolutionError('REFERENCE_PROVIDER_RESOLUTION_FAILED','Replicate file materialization cannot serve another provider',input);
+  return {providerValue:Object.freeze({__factoryProviderFile:true,bytes:input.bytes,mimeType:input.mimeType||'application/octet-stream',sha256:input.sha256,artifactId:input.artifactId,artifactVersion:input.artifactVersion,purpose:input.purpose}),evidence:{method:'REPLICATE_FILES_API',materializationContractVersion:'replicate-files-api@1'}};
+}
+module.exports={ProviderMediaResolutionError,ProviderCompatibleMediaResolver,replicateFileMaterializer};
