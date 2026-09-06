@@ -27,11 +27,11 @@ function approval(value) {
 }
 
 class AvatarStudioService {
-  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null, motionPilotService = null, performanceRuntime = null,
+  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null, motionPilotService = null, performanceRuntime = null, providerReadinessService = null,
     actor = 'local-operator', env = process.env } = {}) {
     if (!repository) throw new Error('AvatarStudioService requires repository');
     this.repository = repository; this.assetIntakeService = assetIntakeService; this.providerCatalog = providerCatalog;
-    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.motionPilotService = motionPilotService; this.performanceRuntime = performanceRuntime; this.actor = actor; this.env = env;
+    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.motionPilotService = motionPilotService; this.performanceRuntime = performanceRuntime; this.providerReadinessService = providerReadinessService; this.actor = actor; this.env = env;
   }
 
   async verticals() { return this.repository.verticals(); }
@@ -134,6 +134,20 @@ class AvatarStudioService {
   async certifyAvatarPerformance(input = {}) { return this.requirePerformanceRuntime().certify(input); }
   async benchmarkAvatarProviders(input = {}) {
     const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); return this.requirePerformanceRuntime().benchmark({...input,workspaceId:avatar.workspaceId,identityVersionId:avatar.identityVersionId});
+  }
+  async avatarProviderReadiness(input = {}) {
+    if (!this.providerReadinessService) throw new AvatarStudioError(503,'AVATAR_PROVIDER_READINESS_UNAVAILABLE','Avatar Provider Readiness is not configured');
+    const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId});
+    return this.providerReadinessService.benchmark({...input,avatar,bindings:avatar.providerBindings||[],prices:input.prices||{}});
+  }
+  async recordAvatarProviderPricingEvidence(input = {}) {
+    const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); const provider=String(input.provider||'').toUpperCase();
+    const status=String(input.status||'').toUpperCase();
+    if(!['HEYGEN','TAVUS','DID'].includes(provider)||!['KNOWN_CURRENT_PRICE','UNKNOWN_CURRENT_PRICE','ENTITLEMENT_REQUIRED','SUBSCRIPTION_REQUIRED','CONTACT_SALES'].includes(status)) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_INVALID','Provider and pricing status are required');
+    if(!String(input.evidenceSource||'').trim()||!input.verifiedAt) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_EVIDENCE_REQUIRED','A source and verification time are required');
+    const canonical={workspaceId:avatar.workspaceId,avatarId:avatar.id,provider,providerEngine:input.providerEngine||null,status,amountUsd:input.amountUsd==null?null:Number(input.amountUsd),currency:'USD',evidenceSource:String(input.evidenceSource).trim(),evidenceUrl:input.evidenceUrl||null,verifiedAt:input.verifiedAt,validUntil:input.validUntil||null};
+    if(canonical.amountUsd!=null&&(!Number.isFinite(canonical.amountUsd)||canonical.amountUsd<0)) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_INVALID','Price must be a non-negative USD amount');
+    return this.repository.recordAvatarProviderPricingEvidence({evidence:{...canonical,fingerprint:fingerprint(canonical)},actor:this.actor});
   }
 
   async intakeIdentityBatch({ avatarId, brandId, photos = [] } = {}) {

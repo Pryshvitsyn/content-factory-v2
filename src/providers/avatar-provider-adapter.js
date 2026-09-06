@@ -25,6 +25,12 @@ class AvatarProviderAdapter {
     const error = new ProviderError(`${this.provider} credentials are not configured`, { provider: this.provider });
     error.code = 'PROVIDER_CREDENTIAL_REQUIRED'; error.status = 409; throw error;
   }
+  configured() { return Boolean(this.apiKey); }
+  // A concrete adapter may opt in to a documented, no-cost endpoint by supplying
+  // `connectionCheck`.  This base class deliberately never probes a provider.
+  async checkConnection() {
+    return Object.freeze({ status: this.configured() ? 'ENTITLEMENT_UNKNOWN' : 'NOT_CONFIGURED', performed: false, provider: this.provider });
+  }
   async materialize(result) {
     if (Buffer.isBuffer(result.output)) return result;
     if (!result.mediaUrl || !this.mediaResolver?.download) return result;

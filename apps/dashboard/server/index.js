@@ -30,6 +30,8 @@ const { PassportExecutionService } = require('../../../src/avatar-studio/passpor
 const { AvatarL2Service } = require('../../../src/avatar-studio/l2-service');
 const { AvatarMotionPilotService } = require('../../../src/avatar-studio/motion-pilot-service');
 const { AvatarPerformanceRuntimeService } = require('../../../src/avatar-studio/avatar-performance-runtime');
+const { AvatarProviderReadinessService } = require('../../../src/avatar-studio/avatar-provider-readiness-service');
+const { ProviderMediaMaterializer } = require('../../../src/providers/provider-media-materializer');
 const { createDefaultProviderGateway } = require('../../../src/providers/default-provider-gateway');
 const { HeyGenAvatarAdapter } = require('../../../src/providers/heygen-avatar-adapter');
 const { TavusAvatarAdapter } = require('../../../src/providers/tavus-avatar-adapter');
@@ -134,8 +136,11 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
       TAVUS: new TavusAvatarAdapter({ apiKey: env.TAVUS_API_KEY || null }),
       DID: new DidAvatarAdapter({ apiKey: env.DID_API_KEY || null }),
     } });
+  // Deliberately no publisher is wired by default: readiness must fail closed until
+  // an operator configures a bounded public-media transport.
+  const providerReadinessService = new AvatarProviderReadinessService({ adapters: avatarPerformanceRuntime.adapters, mediaMaterializer: new ProviderMediaMaterializer() });
   const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
-    providerCatalog, passportExecutionService, l2Service, motionPilotService, performanceRuntime: avatarPerformanceRuntime, actor, env });
+    providerCatalog, passportExecutionService, l2Service, motionPilotService, performanceRuntime: avatarPerformanceRuntime, providerReadinessService, actor, env });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,
     lockedKeyframeService, avatarService, avatarRepository, avatarAssetIntakeService, v210Repository,
     creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,

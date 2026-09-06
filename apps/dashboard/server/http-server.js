@@ -150,6 +150,8 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (segments[4] === 'avatar-performance-preflight') return json(response,201,await avatarService.preflightAvatarPerformance(args));
         if (segments[4] === 'avatar-performance-executions') return json(response,201,await avatarService.createAvatarPerformanceExecution(args));
         if (segments[4] === 'avatar-provider-benchmark') return json(response,201,await avatarService.benchmarkAvatarProviders(args));
+        if (segments[4] === 'avatar-provider-readiness') return json(response,200,await avatarService.avatarProviderReadiness(args));
+        if (segments[4] === 'provider-pricing-evidence') return json(response,201,await avatarService.recordAvatarProviderPricingEvidence(args));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'avatar-performance-executions' && segments.length === 7) {

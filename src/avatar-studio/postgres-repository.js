@@ -111,6 +111,7 @@ class AvatarStudioPostgresRepository {
       ['l2PackCertificationEvents', 'SELECT * FROM avatar_studio.l2_pack_certification_events WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
       ['performanceCaptures', 'SELECT * FROM avatar_studio.performance_captures WHERE character_id=$1 ORDER BY approved_at DESC,id DESC'],
       ['providerBindings', 'SELECT b.*,coalesce((SELECT e.action FROM avatar_studio.avatar_provider_binding_lifecycle_events e WHERE e.binding_id=b.id ORDER BY e.recorded_at DESC,e.id DESC LIMIT 1),b.status) AS effective_status FROM avatar_studio.avatar_provider_bindings b WHERE b.character_id=$1 ORDER BY b.provider,b.binding_revision DESC'],
+      ['providerPricingEvidence', 'SELECT * FROM avatar_studio.avatar_provider_pricing_evidence WHERE character_id=$1 ORDER BY verified_at DESC,id DESC'],
     ];
     const results = await Promise.all(tableQueries.map(([, sql]) => this.db.query(sql, [id])));
     const avatar = camel(base);
@@ -817,6 +818,14 @@ class AvatarStudioPostgresRepository {
     [binding.workspaceId,binding.avatarId,binding.identityVersionId,binding.passportCertificationId,binding.provider,binding.providerBindingType,binding.providerExternalId,
       json(binding.providerEngineCapabilities),binding.performanceCaptureId,binding.providerConsentEvidence,binding.bindingRevision,binding.status,binding.provisioningEvidence,binding.providerRequestId,binding.fingerprint,actor])).rows[0];
     return camel(row);
+  }
+
+  async recordAvatarProviderPricingEvidence({ evidence, actor }) {
+    const row=(await this.db.query(`INSERT INTO avatar_studio.avatar_provider_pricing_evidence
+      (workspace_id,character_id,provider,provider_engine,status,amount_usd,currency,evidence_source,evidence_url,verified_at,valid_until,evidence_fingerprint,recorded_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(workspace_id,evidence_fingerprint) DO NOTHING RETURNING *`,
+    [evidence.workspaceId,evidence.avatarId,evidence.provider,evidence.providerEngine,evidence.status,evidence.amountUsd,evidence.currency,evidence.evidenceSource,evidence.evidenceUrl,evidence.verifiedAt,evidence.validUntil,evidence.fingerprint,actor])).rows[0];
+    if(row)return camel(row); return camel((await this.db.query('SELECT * FROM avatar_studio.avatar_provider_pricing_evidence WHERE workspace_id=$1 AND evidence_fingerprint=$2',[evidence.workspaceId,evidence.fingerprint])).rows[0]);
   }
 
   async avatarProviderBinding({ id, workspaceId = null, avatarId = null }) {
