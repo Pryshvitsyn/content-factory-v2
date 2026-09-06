@@ -48,6 +48,8 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
     await db.query(await fs.readFile(path.resolve('migrations/20260914_avatar_provider_runtime.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260915_avatar_provider_pricing_evidence.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260915_avatar_provider_pricing_evidence.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260916_avatar_provider_pricing_route_scope.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260916_avatar_provider_pricing_route_scope.sql'),'utf8'));
     const after=Number((await db.query('SELECT count(*) AS count FROM avatar_studio.characters WHERE id=$1',[CHARACTER])).rows[0].count);
     assert.equal(before,1);assert.equal(after,1,'populated V1.1 avatar must survive upgrade and reapplication');
     for(const table of ['identity_lock_versions','passport_generation_specs','passport_candidates','passport_qa_snapshots',

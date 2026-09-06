@@ -822,9 +822,9 @@ class AvatarStudioPostgresRepository {
 
   async recordAvatarProviderPricingEvidence({ evidence, actor }) {
     const row=(await this.db.query(`INSERT INTO avatar_studio.avatar_provider_pricing_evidence
-      (workspace_id,character_id,provider,provider_engine,status,amount_usd,currency,evidence_source,evidence_url,verified_at,valid_until,evidence_fingerprint,recorded_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(workspace_id,evidence_fingerprint) DO NOTHING RETURNING *`,
-    [evidence.workspaceId,evidence.avatarId,evidence.provider,evidence.providerEngine,evidence.status,evidence.amountUsd,evidence.currency,evidence.evidenceSource,evidence.evidenceUrl,evidence.verifiedAt,evidence.validUntil,evidence.fingerprint,actor])).rows[0];
+      (workspace_id,character_id,provider,provider_engine,operation,billing_unit,credit_to_operation_rule,status,amount_usd,currency,evidence_source,evidence_url,verified_at,valid_until,evidence_fingerprint,recorded_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(workspace_id,evidence_fingerprint) DO NOTHING RETURNING *`,
+    [evidence.workspaceId,evidence.avatarId,evidence.provider,evidence.providerEngine,evidence.operation,evidence.billingUnit,evidence.creditToOperationRule,evidence.status,evidence.amountUsd,evidence.currency,evidence.evidenceSource,evidence.evidenceUrl,evidence.verifiedAt,evidence.validUntil,evidence.fingerprint,actor])).rows[0];
     if(row)return camel(row); return camel((await this.db.query('SELECT * FROM avatar_studio.avatar_provider_pricing_evidence WHERE workspace_id=$1 AND evidence_fingerprint=$2',[evidence.workspaceId,evidence.fingerprint])).rows[0]);
   }
 

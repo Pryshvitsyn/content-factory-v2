@@ -143,10 +143,11 @@ class AvatarStudioService {
   async recordAvatarProviderPricingEvidence(input = {}) {
     const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); const provider=String(input.provider||'').toUpperCase();
     const status=String(input.status||'').toUpperCase();
-    if(!['HEYGEN','TAVUS','DID'].includes(provider)||!['KNOWN_CURRENT_PRICE','UNKNOWN_CURRENT_PRICE','ENTITLEMENT_REQUIRED','SUBSCRIPTION_REQUIRED','CONTACT_SALES'].includes(status)) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_INVALID','Provider and pricing status are required');
-    if(!String(input.evidenceSource||'').trim()||!input.verifiedAt) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_EVIDENCE_REQUIRED','A source and verification time are required');
-    const canonical={workspaceId:avatar.workspaceId,avatarId:avatar.id,provider,providerEngine:input.providerEngine||null,status,amountUsd:input.amountUsd==null?null:Number(input.amountUsd),currency:'USD',evidenceSource:String(input.evidenceSource).trim(),evidenceUrl:input.evidenceUrl||null,verifiedAt:input.verifiedAt,validUntil:input.validUntil||null};
-    if(canonical.amountUsd!=null&&(!Number.isFinite(canonical.amountUsd)||canonical.amountUsd<0)) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_INVALID','Price must be a non-negative USD amount');
+    const operation=String(input.operation||'').toUpperCase(),billingUnit=String(input.billingUnit||'').toUpperCase();
+    if(!['HEYGEN','TAVUS','DID'].includes(provider)||!['KNOWN_CURRENT_PRICE','UNKNOWN_CURRENT_PRICE','ENTITLEMENT_REQUIRED','SUBSCRIPTION_REQUIRED','CONTACT_SALES'].includes(status)||!['AVATAR_RENDER','AVATAR_PROVISION'].includes(operation)||!['PER_EXECUTION','PER_SECOND','PER_MINUTE','PER_CREDIT','FIXED_OPERATION','SUBSCRIPTION_DEPENDENT','UNKNOWN'].includes(billingUnit)) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_INVALID','Exact provider, engine, operation, billing unit and status are required');
+    if(!String(input.providerEngine||'').trim()||!String(input.evidenceSource||'').trim()||!input.verifiedAt||input.amountUsd==null) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_EVIDENCE_REQUIRED','An exact route, amount, source and verification time are required');
+    const canonical={workspaceId:avatar.workspaceId,avatarId:avatar.id,provider,providerEngine:String(input.providerEngine).trim(),operation,billingUnit,creditToOperationRule:input.creditToOperationRule||null,status,amountUsd:Number(input.amountUsd),currency:'USD',evidenceSource:String(input.evidenceSource).trim(),evidenceUrl:input.evidenceUrl||null,verifiedAt:input.verifiedAt,validUntil:input.validUntil||null};
+    if(!Number.isFinite(canonical.amountUsd)||canonical.amountUsd<0) throw new AvatarStudioError(400,'AVATAR_PROVIDER_PRICE_INVALID','Price must be a non-negative USD amount');
     return this.repository.recordAvatarProviderPricingEvidence({evidence:{...canonical,fingerprint:fingerprint(canonical)},actor:this.actor});
   }
 
