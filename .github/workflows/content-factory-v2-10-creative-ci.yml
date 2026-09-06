@@ -2,7 +2,7 @@ name: Content Factory V2.10 Creative Production CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/avatar-studio-v1-canonical-build]
   push:
     branches: [main]
 

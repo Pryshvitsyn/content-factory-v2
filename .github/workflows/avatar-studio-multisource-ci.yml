@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - avatar-studio-current
+      - feat/avatar-studio-v1-canonical-build
       - main
     paths:
       - "src/avatar-studio/**"
