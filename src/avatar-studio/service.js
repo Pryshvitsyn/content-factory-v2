@@ -27,11 +27,11 @@ function approval(value) {
 }
 
 class AvatarStudioService {
-  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null, motionPilotService = null,
+  constructor({ repository, assetIntakeService = null, providerCatalog = null, passportExecutionService = null, l2Service = null, motionPilotService = null, performanceRuntime = null,
     actor = 'local-operator', env = process.env } = {}) {
     if (!repository) throw new Error('AvatarStudioService requires repository');
     this.repository = repository; this.assetIntakeService = assetIntakeService; this.providerCatalog = providerCatalog;
-    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.motionPilotService = motionPilotService; this.actor = actor; this.env = env;
+    this.passportExecutionService = passportExecutionService; this.l2Service = l2Service; this.motionPilotService = motionPilotService; this.performanceRuntime = performanceRuntime; this.actor = actor; this.env = env;
   }
 
   async verticals() { return this.repository.verticals(); }
@@ -112,6 +112,28 @@ class AvatarStudioService {
   async intakeContent(input = {}) {
     const avatar = await this.avatar({ id: input.avatarId, brandId: input.brandId });
     return this.requireIntake().content({ avatar, ...input });
+  }
+
+  requirePerformanceRuntime() { if (!this.performanceRuntime) throw new AvatarStudioError(503,'AVATAR_PERFORMANCE_RUNTIME_UNAVAILABLE','Avatar Performance Runtime is not configured'); return this.performanceRuntime; }
+  async createPerformanceCapture(input = {}) {
+    const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); return this.requirePerformanceRuntime().createPerformanceCapture({...input,workspaceId:avatar.workspaceId,identityVersionId:avatar.identityVersionId});
+  }
+  async createAvatarProviderBinding(input = {}) {
+    const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); return this.requirePerformanceRuntime().createProviderBinding({...input,workspaceId:avatar.workspaceId,identityVersionId:avatar.identityVersionId});
+  }
+  async supersedeAvatarProviderBinding(input = {}) {
+    const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); return this.requirePerformanceRuntime().supersedeProviderBinding({...input,workspaceId:avatar.workspaceId,identityVersionId:avatar.identityVersionId});
+  }
+  async preflightAvatarPerformance(input = {}) {
+    const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); return this.requirePerformanceRuntime().preflight({...input,workspaceId:avatar.workspaceId,identityVersionId:avatar.identityVersionId});
+  }
+  async createAvatarPerformanceExecution(input = {}) { return this.requirePerformanceRuntime().createExecution({preflight:input.preflight}); }
+  async approveAvatarPerformanceExecution(input = {}) { return this.requirePerformanceRuntime().approve(input); }
+  async generateAvatarPerformance(input = {}) { const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); return this.requirePerformanceRuntime().generate({...input,avatar}); }
+  async recoverAvatarPerformance(input = {}) { return this.requirePerformanceRuntime().recover(input); }
+  async certifyAvatarPerformance(input = {}) { return this.requirePerformanceRuntime().certify(input); }
+  async benchmarkAvatarProviders(input = {}) {
+    const avatar=await this.avatar({id:input.avatarId,brandId:input.brandId}); return this.requirePerformanceRuntime().benchmark({...input,workspaceId:avatar.workspaceId,identityVersionId:avatar.identityVersionId});
   }
 
   async intakeIdentityBatch({ avatarId, brandId, photos = [] } = {}) {

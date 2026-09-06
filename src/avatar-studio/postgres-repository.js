@@ -109,11 +109,14 @@ class AvatarStudioPostgresRepository {
       ['mouthCalibrationSpecs', 'SELECT * FROM avatar_studio.mouth_calibration_specs WHERE character_id=$1 ORDER BY created_at DESC,id DESC'],
       ['mouthCalibrationCertifications', 'SELECT * FROM avatar_studio.mouth_calibration_certifications WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
       ['l2PackCertificationEvents', 'SELECT * FROM avatar_studio.l2_pack_certification_events WHERE character_id=$1 ORDER BY certified_at DESC,id DESC'],
+      ['performanceCaptures', 'SELECT * FROM avatar_studio.performance_captures WHERE character_id=$1 ORDER BY approved_at DESC,id DESC'],
+      ['providerBindings', 'SELECT b.*,coalesce((SELECT e.action FROM avatar_studio.avatar_provider_binding_lifecycle_events e WHERE e.binding_id=b.id ORDER BY e.recorded_at DESC,e.id DESC LIMIT 1),b.status) AS effective_status FROM avatar_studio.avatar_provider_bindings b WHERE b.character_id=$1 ORDER BY b.provider,b.binding_revision DESC'],
     ];
     const results = await Promise.all(tableQueries.map(([, sql]) => this.db.query(sql, [id])));
     const avatar = camel(base);
     avatar.activeBrandId = brandId || null;
     tableQueries.forEach(([key], index) => { avatar[key] = results[index].rows.map(camel); });
+    for (const binding of avatar.providerBindings || []) binding.status = binding.effectiveStatus || binding.status;
     for (const source of avatar.sources) await this.hydrateSource(source);
     avatar.vertical = avatar.verticalCode; avatar.subjectType = avatar.subjectType; avatar.identity = avatar.identitySpec;
     avatar.brandIds = avatar.brandPermissions.filter((item) => item.allowed).map((item) => item.brandId);
@@ -794,6 +797,104 @@ class AvatarStudioPostgresRepository {
     if (result.rows[0]) return camel(result.rows[0]);
     return camel((await this.db.query('SELECT * FROM avatar_studio.test_content_plans WHERE workspace_id=$1 AND plan_fingerprint=$2',
       [avatar.workspaceId, plan.planFingerprint])).rows[0]);
+  }
+
+  // Avatar Performance Runtime persistence. These are append-only records: provider
+  // state may be observed again, but is never rewritten or used as identity authority.
+  async createPerformanceCapture({ capture, actor }) {
+    const row = (await this.db.query(`INSERT INTO avatar_studio.performance_captures
+      (workspace_id,character_id,identity_version_id,artifact_id,artifact_version,content_hash,technical_evidence,provenance,approval_evidence,capture_fingerprint,approved_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(workspace_id,capture_fingerprint) DO NOTHING RETURNING *`,
+    [capture.workspaceId,capture.avatarId,capture.identityVersionId,capture.artifactId,capture.artifactVersion,capture.contentHash,capture.technicalEvidence,capture.provenance,capture.approvalEvidence,capture.fingerprint,actor])).rows[0];
+    if (row) return camel(row);
+    return camel((await this.db.query('SELECT * FROM avatar_studio.performance_captures WHERE workspace_id=$1 AND capture_fingerprint=$2',[capture.workspaceId,capture.fingerprint])).rows[0]);
+  }
+
+  async createAvatarProviderBinding({ binding, actor }) {
+    const row = (await this.db.query(`INSERT INTO avatar_studio.avatar_provider_bindings
+      (workspace_id,character_id,identity_version_id,passport_certification_id,provider,provider_binding_type,provider_external_id,provider_engine_capabilities,performance_capture_id,provider_consent_evidence,binding_revision,status,provisioning_evidence,provider_request_id,binding_fingerprint,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+    [binding.workspaceId,binding.avatarId,binding.identityVersionId,binding.passportCertificationId,binding.provider,binding.providerBindingType,binding.providerExternalId,
+      json(binding.providerEngineCapabilities),binding.performanceCaptureId,binding.providerConsentEvidence,binding.bindingRevision,binding.status,binding.provisioningEvidence,binding.providerRequestId,binding.fingerprint,actor])).rows[0];
+    return camel(row);
+  }
+
+  async avatarProviderBinding({ id, workspaceId = null, avatarId = null }) {
+    const row=(await this.db.query(`SELECT b.*,coalesce((SELECT e.action FROM avatar_studio.avatar_provider_binding_lifecycle_events e
+      WHERE e.binding_id=b.id ORDER BY e.recorded_at DESC,e.id DESC LIMIT 1),b.status) AS effective_status FROM avatar_studio.avatar_provider_bindings b WHERE b.id=$1
+      AND ($2::uuid IS NULL OR workspace_id=$2) AND ($3::uuid IS NULL OR character_id=$3)`,[id,workspaceId,avatarId])).rows[0];
+    if(!row)return null; const binding=camel(row); binding.status=binding.effectiveStatus; return binding;
+  }
+
+  async supersedeAvatarProviderBinding({ previousBindingId, replacement, actor }) {
+    const client=await this.db.connect(); try { await client.query('BEGIN');
+      const old=(await client.query(`SELECT b.*,coalesce((SELECT e.action FROM avatar_studio.avatar_provider_binding_lifecycle_events e WHERE e.binding_id=b.id ORDER BY e.recorded_at DESC,e.id DESC LIMIT 1),b.status) AS effective_status FROM avatar_studio.avatar_provider_bindings b WHERE b.id=$1 FOR UPDATE`,[previousBindingId])).rows[0];
+      if(!old || old.effective_status!=='ACTIVE') throw new AvatarStudioError(409,'AVATAR_PROVIDER_BINDING_SUPERSESSION_INVALID','Only an active binding can be superseded');
+      if(old.provider!==replacement.provider || old.character_id!==replacement.avatarId || Number(replacement.bindingRevision)!==Number(old.binding_revision)+1) throw new AvatarStudioError(409,'AVATAR_PROVIDER_BINDING_REVISION_INVALID','Replacement must be the next revision for the same Avatar/provider');
+      const inserted=(await client.query(`INSERT INTO avatar_studio.avatar_provider_bindings
+        (workspace_id,character_id,identity_version_id,passport_certification_id,provider,provider_binding_type,provider_external_id,provider_engine_capabilities,performance_capture_id,provider_consent_evidence,binding_revision,status,provisioning_evidence,provider_request_id,binding_fingerprint,supersedes_binding_id,created_by)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,[replacement.workspaceId,replacement.avatarId,replacement.identityVersionId,replacement.passportCertificationId,replacement.provider,replacement.providerBindingType,replacement.providerExternalId,json(replacement.providerEngineCapabilities),replacement.performanceCaptureId,replacement.providerConsentEvidence,replacement.bindingRevision,replacement.status,replacement.provisioningEvidence,replacement.providerRequestId,replacement.fingerprint,old.id,actor])).rows[0];
+      await client.query(`INSERT INTO avatar_studio.avatar_provider_binding_lifecycle_events(binding_id,action,successor_binding_id,recorded_by)
+        VALUES($1,'SUPERSEDED',$2,$3)`,[old.id,inserted.id,actor]);
+      // The binding itself remains immutable. Supersession is an append-only event.
+      await client.query('COMMIT'); return camel(inserted);
+    } catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;} finally {client.release();}
+  }
+
+  async createAvatarPerformanceExecution({ preflight, actor }) {
+    const c=preflight.contract; const row=(await this.db.query(`INSERT INTO avatar_studio.avatar_performance_executions
+      (workspace_id,brand_id,character_id,identity_version_id,provider_binding_id,provider,provider_engine,request_fingerprint,preflight_snapshot,preflight_fingerprint,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(workspace_id,request_fingerprint,provider_binding_id) DO NOTHING RETURNING *`,
+    [c.workspaceId,c.brandId,c.avatarId,c.identityVersionId,c.providerBindingId,c.provider,c.providerEngine,c.requestFingerprint,preflight,preflight.preflightFingerprint,actor])).rows[0];
+    if(row)return camel(row); return camel((await this.db.query(`SELECT * FROM avatar_studio.avatar_performance_executions WHERE workspace_id=$1 AND request_fingerprint=$2 AND provider_binding_id=$3`,[c.workspaceId,c.requestFingerprint,c.providerBindingId])).rows[0]);
+  }
+
+  async avatarPerformanceExecution({ id }) {
+    const row=(await this.db.query('SELECT * FROM avatar_studio.avatar_performance_executions WHERE id=$1',[id])).rows[0]; if(!row)return null;
+    const execution=camel(row); const [binding,approval,attempts,result]=await Promise.all([
+      this.avatarProviderBinding({id:execution.providerBindingId}), this.db.query('SELECT * FROM avatar_studio.avatar_performance_execution_approvals WHERE execution_id=$1',[id]),
+      this.db.query(`SELECT a.*,event.status,event.provider_request_id,event.may_have_started,event.raw_artifact_id,event.raw_artifact_version,event.error
+        FROM avatar_studio.avatar_performance_attempts a LEFT JOIN LATERAL (SELECT * FROM avatar_studio.avatar_performance_attempt_events e WHERE e.attempt_id=a.id ORDER BY recorded_at DESC,id DESC LIMIT 1) event ON true WHERE a.execution_id=$1 ORDER BY a.created_at,a.id`,[id]),
+      this.db.query('SELECT * FROM avatar_studio.avatar_performance_results WHERE execution_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[id]),
+    ]); execution.binding=binding; execution.approval=approval.rows[0]?camel(approval.rows[0]):null; execution.attempts=attempts.rows.map(camel); execution.result=result.rows[0]?camel(result.rows[0]):null; return execution;
+  }
+
+  async approveAvatarPerformanceExecution({ execution, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.avatar_performance_execution_approvals(execution_id,preflight_fingerprint,approved_by)
+      VALUES($1,$2,$3) ON CONFLICT(execution_id) DO NOTHING RETURNING *`,[execution.id,execution.preflightFingerprint,actor])).rows[0]
+      || (await this.db.query('SELECT * FROM avatar_studio.avatar_performance_execution_approvals WHERE execution_id=$1',[execution.id])).rows[0]);
+  }
+
+  async createAvatarPerformanceAttempt({ execution, actor }) {
+    const idempotencyKey=`avatar-performance:${execution.id}`; return camel((await this.db.query(`INSERT INTO avatar_studio.avatar_performance_attempts
+      (execution_id,idempotency_key,request_fingerprint) VALUES($1,$2,$3) RETURNING *`,[execution.id,idempotencyKey,execution.requestFingerprint])).rows[0]);
+  }
+
+  async recordAvatarPerformanceAttemptEvent({ attempt, status, providerRequestId = null, mayHaveStarted = false, rawArtifact = null, error = null, actor }) {
+    return camel((await this.db.query(`INSERT INTO avatar_studio.avatar_performance_attempt_events
+      (attempt_id,status,provider_request_id,may_have_started,raw_artifact_id,raw_artifact_version,error,recorded_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,[attempt.id,status,providerRequestId,mayHaveStarted,rawArtifact?.artifactId||null,rawArtifact?.version||null,error,actor])).rows[0]);
+  }
+
+  async completeAvatarPerformanceAttempt({ attempt, result, raw, ingested, qa, actor }) {
+    const execution=await this.avatarPerformanceExecution({id:attempt.executionId});
+    const row=(await this.db.query(`INSERT INTO avatar_studio.avatar_performance_results
+      (execution_id,attempt_id,intake_asset_id,artifact_id,artifact_version,provider_request_id,automatic_qa,provenance,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[execution.id,attempt.id,ingested.asset.id,ingested.artifact.artifactId,ingested.artifact.version,result.requestId||null,qa,
+      {source:'AVATAR_PERFORMANCE_RUNTIME',rawArtifactId:raw?.artifactId||null,rawArtifactVersion:raw?.version||null,provider:execution.provider,providerEngine:execution.providerEngine},actor])).rows[0]; return camel(row);
+  }
+
+  async certifyAvatarPerformanceResult({ result, decision, humanNote = null, actor }) {
+    if(!['PASS','FAIL'].includes(String(decision).toUpperCase()))throw new AvatarStudioError(400,'AVATAR_PERFORMANCE_CERTIFICATION_INVALID','Certification decision must be PASS or FAIL');
+    return camel((await this.db.query(`INSERT INTO avatar_studio.avatar_performance_human_certifications
+      (result_id,candidate_artifact_id,candidate_artifact_version,decision,human_note,certified_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[result.id,result.artifactId,result.artifactVersion,String(decision).toUpperCase(),humanNote,actor])).rows[0]);
+  }
+
+  async createAvatarProviderBenchmark({ benchmark, actor }) {
+    const row=(await this.db.query(`INSERT INTO avatar_studio.avatar_provider_benchmarks
+      (workspace_id,brand_id,character_id,identity_version_id,common_intent_fingerprint,specification,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT(workspace_id,common_intent_fingerprint) DO NOTHING RETURNING *`,[benchmark.workspaceId,benchmark.brandId,benchmark.avatarId,benchmark.identityVersionId,benchmark.commonIntentFingerprint,benchmark,actor])).rows[0];
+    if(row)return camel(row);return camel((await this.db.query('SELECT * FROM avatar_studio.avatar_provider_benchmarks WHERE workspace_id=$1 AND common_intent_fingerprint=$2',[benchmark.workspaceId,benchmark.commonIntentFingerprint])).rows[0]);
   }
 }
 

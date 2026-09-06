@@ -44,6 +44,8 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260903_avatar_studio_source_viewpoint_classification.sql'),'utf8'));
     await db.query(await fs.readFile(path.resolve('migrations/20260901_avatar_studio_v1_3_2_provenance_safety.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260914_avatar_provider_runtime.sql'),'utf8'));
+    await db.query(await fs.readFile(path.resolve('migrations/20260914_avatar_provider_runtime.sql'),'utf8'));
     const after=Number((await db.query('SELECT count(*) AS count FROM avatar_studio.characters WHERE id=$1',[CHARACTER])).rows[0].count);
     assert.equal(before,1);assert.equal(after,1,'populated V1.1 avatar must survive upgrade and reapplication');
     for(const table of ['identity_lock_versions','passport_generation_specs','passport_candidates','passport_qa_snapshots',
@@ -54,6 +56,10 @@ async function main(){assertDisposable();const db=new Pool(process.env.DATABASE_
       'expression_review_events','expression_certifications','mouth_calibration_specs','mouth_calibration_candidates',
       'mouth_calibration_qa','mouth_calibration_certifications','l2_pack_certification_events','l2_generation_executions',
       'l2_generation_execution_approvals','l2_generation_attempts','l2_generation_attempt_events','l2_generation_results'])
+      assert.equal((await db.query('SELECT to_regclass($1) AS name',[`avatar_studio.${table}`])).rows[0].name,`avatar_studio.${table}`);
+    for(const table of ['performance_captures','avatar_provider_bindings','avatar_provider_binding_lifecycle_events',
+      'avatar_performance_executions','avatar_performance_execution_approvals','avatar_performance_attempts',
+      'avatar_performance_attempt_events','avatar_performance_results','avatar_performance_human_certifications','avatar_provider_benchmarks'])
       assert.equal((await db.query('SELECT to_regclass($1) AS name',[`avatar_studio.${table}`])).rows[0].name,`avatar_studio.${table}`);
     assert.equal((await db.query("SELECT to_regclass('avatar_studio.character_provenance_events') AS name")).rows[0].name,
       'avatar_studio.character_provenance_events');

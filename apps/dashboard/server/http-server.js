@@ -144,6 +144,20 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (segments[4] === 'motion-pilot-plans') return json(response,201,await avatarService.planMotionPilot(args));
         if (segments[4] === 'motion-quality-batches') return json(response,201,await avatarService.planMotionQualityBatch(args));
         if (segments[4] === 'level-assets') return json(response, 201, await avatarService.addLevelAsset(args));
+        if (segments[4] === 'performance-captures') return json(response,201,await avatarService.createPerformanceCapture(args));
+        if (segments[4] === 'provider-bindings') return json(response,201,await avatarService.createAvatarProviderBinding(args));
+        if (segments[4] === 'provider-binding-revisions') return json(response,201,await avatarService.supersedeAvatarProviderBinding(args));
+        if (segments[4] === 'avatar-performance-preflight') return json(response,201,await avatarService.preflightAvatarPerformance(args));
+        if (segments[4] === 'avatar-performance-executions') return json(response,201,await avatarService.createAvatarPerformanceExecution(args));
+        if (segments[4] === 'avatar-provider-benchmark') return json(response,201,await avatarService.benchmarkAvatarProviders(args));
+      }
+      if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
+        && segments[2] === 'avatars' && segments[4] === 'avatar-performance-executions' && segments.length === 7) {
+        const args={avatarId:segments[3],executionId:segments[5],...await readJson(request)};
+        if(segments[6]==='approve') return json(response,201,await avatarService.approveAvatarPerformanceExecution(args));
+        if(segments[6]==='generate') return json(response,202,await avatarService.generateAvatarPerformance(args));
+        if(segments[6]==='recover') return json(response,202,await avatarService.recoverAvatarPerformance(args));
+        if(segments[6]==='certify') return json(response,201,await avatarService.certifyAvatarPerformance(args));
       }
       if (avatarService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar-studio'
         && segments[2] === 'avatars' && segments[4] === 'motion-pilot-plans' && segments[6] === 'preflight' && segments.length === 7) {

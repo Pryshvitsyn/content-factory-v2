@@ -29,7 +29,11 @@ const { SafeUrlImporter } = require('../../../src/avatar-studio/safe-url-import'
 const { PassportExecutionService } = require('../../../src/avatar-studio/passport-execution-service');
 const { AvatarL2Service } = require('../../../src/avatar-studio/l2-service');
 const { AvatarMotionPilotService } = require('../../../src/avatar-studio/motion-pilot-service');
+const { AvatarPerformanceRuntimeService } = require('../../../src/avatar-studio/avatar-performance-runtime');
 const { createDefaultProviderGateway } = require('../../../src/providers/default-provider-gateway');
+const { HeyGenAvatarAdapter } = require('../../../src/providers/heygen-avatar-adapter');
+const { TavusAvatarAdapter } = require('../../../src/providers/tavus-avatar-adapter');
+const { DidAvatarAdapter } = require('../../../src/providers/did-avatar-adapter');
 const { AvatarStudioContinuityAuthorityResolver, ContinuityAuthorityRepository } = require('../../../src/workflow/continuity-authority-repository');
 
 function wireQualityRecoveryShotRegeneration(commandService, qualityRecoveryService) {
@@ -124,8 +128,14 @@ function createDashboardRuntime(env = process.env, { previewProvider, creativeSt
   const l2Service = new AvatarL2Service({ repository:avatarRepository,providerCatalog,providerGateway:avatarProviderGateway,
     assetIntakeService:avatarAssetIntakeService,storage,env,actor });
   const motionPilotService = new AvatarMotionPilotService({ repository: avatarRepository, providerCatalog, providerGateway: avatarProviderGateway, assetIntakeService: avatarAssetIntakeService, storage, mediaInspector: audioInspector, env, actor });
+  const avatarPerformanceRuntime = new AvatarPerformanceRuntimeService({ repository: avatarRepository, artifactService: new ArtifactService({ storage }),
+    assetIntakeService: avatarAssetIntakeService, env, actor, adapters: {
+      HEYGEN: new HeyGenAvatarAdapter({ apiKey: env.HEYGEN_API_KEY || null }),
+      TAVUS: new TavusAvatarAdapter({ apiKey: env.TAVUS_API_KEY || null }),
+      DID: new DidAvatarAdapter({ apiKey: env.DID_API_KEY || null }),
+    } });
   const avatarService = new AvatarStudioService({ repository: avatarRepository, assetIntakeService: avatarAssetIntakeService,
-    providerCatalog, passportExecutionService, l2Service, motionPilotService, actor, env });
+    providerCatalog, passportExecutionService, l2Service, motionPilotService, performanceRuntime: avatarPerformanceRuntime, actor, env });
   return { db, storage, providerCatalog, service, qualityRecoveryService, creativeService, qualityDirectorService,
     lockedKeyframeService, avatarService, avatarRepository, avatarAssetIntakeService, v210Repository,
     creativeStarter: resolvedStarter, previewProvider: resolvedPreviewProvider,
