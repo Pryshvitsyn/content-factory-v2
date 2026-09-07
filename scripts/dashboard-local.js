@@ -63,7 +63,15 @@ async function validateDashboardDatabase(db) {
       to_regclass('avatar_studio.motion_pilot_quality_batch_children') IS NOT NULL AS motion_pilot_quality_batch_children,
       to_regclass('avatar_studio.motion_pilot_quality_batch_preflights') IS NOT NULL AS motion_pilot_quality_batch_preflights,
       to_regclass('avatar_studio.motion_pilot_quality_batch_approvals') IS NOT NULL AS motion_pilot_quality_batch_approvals,
-      to_regclass('avatar_studio.provider_reference_canonicals') IS NOT NULL AS provider_reference_canonicals`);
+      to_regclass('avatar_studio.provider_reference_canonicals') IS NOT NULL AS provider_reference_canonicals,
+      to_regclass('avatar_studio.performance_captures') IS NOT NULL AS avatar_performance_captures,
+      to_regclass('avatar_studio.avatar_provider_bindings') IS NOT NULL AS avatar_provider_bindings,
+      to_regclass('avatar_studio.avatar_performance_executions') IS NOT NULL AS avatar_performance_executions,
+      to_regclass('avatar_studio.avatar_provider_pricing_evidence') IS NOT NULL AS avatar_provider_pricing_evidence,
+      EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='avatar_studio' AND table_name='avatar_provider_pricing_evidence' AND column_name='provider_engine') AS avatar_pricing_provider_engine,
+      EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='avatar_studio' AND table_name='avatar_provider_pricing_evidence' AND column_name='operation') AS avatar_pricing_operation,
+      EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='avatar_studio' AND table_name='avatar_provider_pricing_evidence' AND column_name='billing_unit') AS avatar_pricing_billing_unit,
+      EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='avatar_studio' AND table_name='avatar_provider_pricing_evidence' AND column_name='credit_to_operation_rule') AS avatar_pricing_credit_to_operation_rule`);
   const state = result.rows[0];
   const required = [
     ['productions', 'v2_1.productions'],
@@ -84,6 +92,14 @@ async function validateDashboardDatabase(db) {
     ['motion_pilot_quality_batch_preflights', 'avatar_studio.motion_pilot_quality_batch_preflights'],
     ['motion_pilot_quality_batch_approvals', 'avatar_studio.motion_pilot_quality_batch_approvals'],
     ['provider_reference_canonicals', 'avatar_studio.provider_reference_canonicals'],
+    ['avatar_performance_captures', 'avatar_studio.performance_captures'],
+    ['avatar_provider_bindings', 'avatar_studio.avatar_provider_bindings'],
+    ['avatar_performance_executions', 'avatar_studio.avatar_performance_executions'],
+    ['avatar_provider_pricing_evidence', 'avatar_studio.avatar_provider_pricing_evidence'],
+    ['avatar_pricing_provider_engine', 'avatar_studio.avatar_provider_pricing_evidence.provider_engine'],
+    ['avatar_pricing_operation', 'avatar_studio.avatar_provider_pricing_evidence.operation'],
+    ['avatar_pricing_billing_unit', 'avatar_studio.avatar_provider_pricing_evidence.billing_unit'],
+    ['avatar_pricing_credit_to_operation_rule', 'avatar_studio.avatar_provider_pricing_evidence.credit_to_operation_rule'],
   ];
   const missing = required.filter(([key]) => !state?.[key]).map(([, table]) => table);
   if (!state || missing.length) {

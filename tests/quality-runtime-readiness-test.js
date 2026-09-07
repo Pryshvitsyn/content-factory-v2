@@ -14,12 +14,18 @@ async function main() {
   const automaticQaMigration = V210_MIGRATIONS.indexOf('migrations/20260911_avatar_motion_pilot_automatic_qa.sql');
   const batchPreflightMigration = V210_MIGRATIONS.indexOf('migrations/20260912_avatar_motion_quality_batch_preflight.sql');
   const providerReferenceMigration = V210_MIGRATIONS.indexOf('migrations/20260913_avatar_provider_reference_canonical.sql');
+  const providerRuntimeMigration = V210_MIGRATIONS.indexOf('migrations/20260914_avatar_provider_runtime.sql');
+  const pricingEvidenceMigration = V210_MIGRATIONS.indexOf('migrations/20260915_avatar_provider_pricing_evidence.sql');
+  const pricingRouteScopeMigration = V210_MIGRATIONS.indexOf('migrations/20260916_avatar_provider_pricing_route_scope.sql');
   assert(qualityMigration >= 0, 'dashboard/local preparation must auto-apply QUALITY script-first schema');
   assert(retryMigration > qualityMigration, 'append-only retry migration must run after QUALITY script-first schema');
   assert(motionPilotMigration > retryMigration, 'dashboard/local preparation must apply the Avatar Motion Pilot schema after prior additive migrations');
   assert(automaticQaMigration > motionPilotMigration, 'dashboard/local preparation must apply append-only automatic Motion QA schema');
   assert(batchPreflightMigration > automaticQaMigration, 'dashboard/local preparation must apply immutable Quality Batch preflight schema');
   assert(providerReferenceMigration > batchPreflightMigration, 'dashboard/local preparation must apply provider-reference canonical schema');
+  assert(providerRuntimeMigration > providerReferenceMigration, 'dashboard/local preparation must apply Avatar Provider Runtime schema');
+  assert(pricingEvidenceMigration === providerRuntimeMigration + 1, 'pricing evidence must follow Avatar Provider Runtime schema');
+  assert(pricingRouteScopeMigration === pricingEvidenceMigration + 1, 'pricing route scope must follow pricing evidence');
 
   const readyState = {
     database: 'test',
@@ -33,6 +39,9 @@ async function main() {
     quality_approvals: true,
     motion_pilot_plans: true, motion_pilot_executions: true, motion_pilot_approvals: true, motion_pilot_attempts: true,
     motion_pilot_auto_qa: true, motion_pilot_quality_batches: true, motion_pilot_quality_batch_children: true, motion_pilot_quality_batch_preflights: true, motion_pilot_quality_batch_approvals: true, provider_reference_canonicals: true,
+    avatar_performance_captures: true, avatar_provider_bindings: true, avatar_performance_executions: true,
+    avatar_provider_pricing_evidence: true, avatar_pricing_provider_engine: true, avatar_pricing_operation: true,
+    avatar_pricing_billing_unit: true, avatar_pricing_credit_to_operation_rule: true,
   };
   let readinessQuery = '';
   const readyDb = {

@@ -61,6 +61,9 @@ async function main() {
     quality_storyboards: true, quality_approvals: true, motion_pilot_plans: true,
     motion_pilot_executions: true, motion_pilot_approvals: true, motion_pilot_attempts: true,
     motion_pilot_auto_qa: true, motion_pilot_quality_batches: true, motion_pilot_quality_batch_children: true, motion_pilot_quality_batch_preflights: true, motion_pilot_quality_batch_approvals: true, provider_reference_canonicals: true,
+    avatar_performance_captures: true, avatar_provider_bindings: true, avatar_performance_executions: true,
+    avatar_provider_pricing_evidence: true, avatar_pricing_provider_engine: true, avatar_pricing_operation: true,
+    avatar_pricing_billing_unit: true, avatar_pricing_credit_to_operation_rule: true,
   }] }) });
   assert.equal(readiness.database, 'content_os');
   await assert.rejects(() => validateDashboardDatabase({ query: async () => ({ rows: [{
