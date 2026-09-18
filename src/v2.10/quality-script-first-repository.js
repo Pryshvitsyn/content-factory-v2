@@ -7,6 +7,12 @@ const SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES = Object.freeze([
   'KEYFRAME_TYPE_UNSUPPORTED',
   'KEYFRAME_SIZE_INVALID',
 ]);
+const SAFE_LOCAL_FIRST_VIDEO_RETRY_CODES = Object.freeze([
+  'V210_EXECUTION_DISABLED',
+  'LIVE_REPLICATE_TOKEN_REQUIRED',
+  'CREDENTIALS_MISSING',
+  'V210_CREDENTIALS_MISSING',
+]);
 const LEGACY_PRE_REQUEST_SEMANTIC_TIER_ERROR = 'Unsupported quality tier QUALITY';
 const LEGACY_PRE_REQUEST_FIRST_VIDEO_ERROR = Object.freeze({
   code: 'FIRST_VIDEO_STAGE_FAILED',
@@ -41,10 +47,10 @@ function isKnownPreRequestValidationFailure(attempt, stage) {
 }
 
 function isSafeLocalLockedStageRetry(attempt, stage) {
-  const deterministicLocalFailure = stage === 'KEYFRAME'
-    && attempt?.status === 'FAILED'
+  const deterministicLocalFailure = attempt?.status === 'FAILED'
     && attempt?.boundary_state === 'NOT_CROSSED'
-    && SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES.includes(attempt?.error?.code);
+    && ((stage === 'KEYFRAME' && SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES.includes(attempt?.error?.code))
+      || (stage === 'FIRST_VIDEO' && SAFE_LOCAL_FIRST_VIDEO_RETRY_CODES.includes(attempt?.error?.code)));
   return deterministicLocalFailure || isKnownPreRequestValidationFailure(attempt, stage);
 }
 
@@ -212,6 +218,7 @@ module.exports = {
   LEGACY_PRE_REQUEST_SEMANTIC_TIER_ERROR,
   LEGACY_PRE_REQUEST_FIRST_VIDEO_ERROR,
   SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES,
+  SAFE_LOCAL_FIRST_VIDEO_RETRY_CODES,
   isKnownPreRequestSemanticTierFailure,
   isKnownPreRequestFirstVideoFailure,
   isKnownPreRequestValidationFailure,
