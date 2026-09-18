@@ -105,7 +105,8 @@ async function main() {
       resolvedSettings: { resolution: '720p', duration: 2.3, providerDurationSeconds: 2.3 },
     }),
     beforeProviderBoundary: async () => { invalidBoundaryCalls += 1; },
-  }), /Seedance 2\.5 duration must be 1-30 seconds/);
+  }), (error) => error.code === 'UNSUPPORTED_DURATION'
+    && /Seedance 2\.5 generation duration must be an integer from 1-30 seconds/.test(error.message));
   assert.equal(invalidBoundaryCalls, 0, 'deterministic provider-input validation must happen before boundary marking');
   assert.equal(invalidPostCalls, 0, 'deterministic provider-input validation must happen before Replicate POST');
 
