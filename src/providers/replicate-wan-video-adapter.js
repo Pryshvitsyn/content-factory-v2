@@ -250,7 +250,7 @@ class ReplicateWanVideoAdapter {
     });
   }
 
-  async runPrediction({ input, idempotencyKey, onProviderRequest = null }) {
+  async runPrediction({ input, idempotencyKey, beforeProviderBoundary = null, onProviderRequest = null }) {
     if (!this.apiToken) throw providerError('REPLICATE_API_TOKEN is required for video generation', 'REPLICATE_TOKEN_REQUIRED', { model: this.model });
     const [owner, name] = this.model.split('/');
     if (!owner || !name) throw providerError('Replicate model must use owner/name format', 'REPLICATE_MODEL_INVALID', { model: this.model });
@@ -261,6 +261,9 @@ class ReplicateWanVideoAdapter {
       'Cancel-After': `${Math.max(5, Math.ceil(this.timeoutMs / 1000))}s`,
     };
     const predictionUrl = `${this.baseURL}/models/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/predictions`;
+    if (beforeProviderBoundary) await beforeProviderBoundary({
+      provider: 'replicate', model: this.model, method: 'POST', url: predictionUrl,
+    });
     let prediction = await this.requestJson(predictionUrl, {
       method: 'POST',
       headers,
@@ -309,7 +312,8 @@ class ReplicateWanVideoAdapter {
       interpolateOutput: canonicalRequest?.resolvedSettings?.interpolateOutput ?? options.interpolateOutput ?? requirements.interpolate_output,
     });
 
-    if (!idempotencyKey) return this.runPrediction({ input, idempotencyKey: null, onProviderRequest: options.onProviderRequest });
+    if (!idempotencyKey) return this.runPrediction({ input, idempotencyKey: null,
+      beforeProviderBoundary: options.beforeProviderBoundary, onProviderRequest: options.onProviderRequest });
     const operationIdentity = JSON.stringify(input);
     if (this.inflight.has(idempotencyKey)) {
       const existing = this.inflight.get(idempotencyKey);
@@ -318,7 +322,8 @@ class ReplicateWanVideoAdapter {
       }
       return existing.promise;
     }
-    const operation = this.runPrediction({ input, idempotencyKey, onProviderRequest: options.onProviderRequest });
+    const operation = this.runPrediction({ input, idempotencyKey,
+      beforeProviderBoundary: options.beforeProviderBoundary, onProviderRequest: options.onProviderRequest });
     this.inflight.set(idempotencyKey, { operationIdentity, promise: operation });
     try {
       return await operation;
