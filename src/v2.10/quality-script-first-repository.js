@@ -18,6 +18,10 @@ const LEGACY_PRE_REQUEST_FIRST_VIDEO_ERROR = Object.freeze({
   code: 'FIRST_VIDEO_STAGE_FAILED',
   message: 'Seedance 2.5 duration must be 1-30 seconds',
 });
+const TERMINAL_FIRST_VIDEO_PROVIDER_FAILURE_CODES = Object.freeze([
+  'REPLICATE_PREDICTION_FAILED',
+  'REPLICATE_PREDICTION_CANCELED',
+]);
 
 function lockedStageConflict(message = 'This immutable stage preflight already has an active, failed, or ambiguous attempt') {
   return Object.assign(new Error(message), { code: 'LOCKED_STAGE_ALREADY_ATTEMPTED', status: 409 });
@@ -46,12 +50,25 @@ function isKnownPreRequestValidationFailure(attempt, stage) {
     || isKnownPreRequestFirstVideoFailure(attempt, stage);
 }
 
+function isKnownTerminalFirstVideoProviderFailure(attempt, stage) {
+  return stage === 'FIRST_VIDEO'
+    && attempt?.status === 'NEEDS_RECONCILIATION'
+    && attempt?.boundary_state === 'MAY_HAVE_STARTED'
+    && Boolean(attempt?.provider_request_id)
+    && TERMINAL_FIRST_VIDEO_PROVIDER_FAILURE_CODES.includes(attempt?.error?.code);
+}
+
+function isKnownRecoverableLockedStageAttempt(attempt, stage) {
+  return isKnownPreRequestValidationFailure(attempt, stage)
+    || isKnownTerminalFirstVideoProviderFailure(attempt, stage);
+}
+
 function isSafeLocalLockedStageRetry(attempt, stage) {
   const deterministicLocalFailure = attempt?.status === 'FAILED'
     && attempt?.boundary_state === 'NOT_CROSSED'
     && ((stage === 'KEYFRAME' && SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES.includes(attempt?.error?.code))
       || (stage === 'FIRST_VIDEO' && SAFE_LOCAL_FIRST_VIDEO_RETRY_CODES.includes(attempt?.error?.code)));
-  return deterministicLocalFailure || isKnownPreRequestValidationFailure(attempt, stage);
+  return deterministicLocalFailure || isKnownRecoverableLockedStageAttempt(attempt, stage);
 }
 
 function jsonHasValues(value) {
@@ -123,6 +140,76 @@ async function resetKnownPreProviderFirstVideoExecution(client, {
   });
 }
 
+
+async function archiveAndResetTerminalFirstVideoExecution(client, {
+  workflowId, workspaceId, brandId, attempt,
+}) {
+  if (!isKnownTerminalFirstVideoProviderFailure(attempt, 'FIRST_VIDEO')) return null;
+  const workflowResult = await client.query(`SELECT production_id,opening_asset_id
+    FROM v2_10.locked_keyframe_workflows
+    WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 FOR UPDATE`,
+  [workflowId, workspaceId, brandId]);
+  const workflow = workflowResult.rows[0];
+  if (!workflow) throw lockedStageConflict('Locked FIRST_VIDEO terminal recovery cannot resolve the exact workflow');
+
+  const mediaRows = (await client.query(`SELECT * FROM v2_5.media_executions
+    WHERE production_id=$1 ORDER BY created_at,id`, [workflow.production_id])).rows;
+  if (mediaRows.length !== 1) throw lockedStageConflict(
+    'Terminal FIRST_VIDEO recovery requires exactly one durable media execution');
+
+  const media = mediaRows[0];
+  const exactTerminalFailure = media.asset_id === workflow.opening_asset_id
+    && media.status === 'FAILED'
+    && media.provider_request_id === attempt.provider_request_id
+    && TERMINAL_FIRST_VIDEO_PROVIDER_FAILURE_CODES.includes(media.error?.code)
+    && media.error?.code === attempt.error?.code
+    && !media.artifact_id
+    && !media.artifact_version
+    && !media.artifact_storage_key
+    && !media.artifact_content_hash;
+  if (!exactTerminalFailure) throw lockedStageConflict(
+    'Provider execution is not a proven terminal failure without an artifact; automatic retry remains blocked');
+
+  const productionResult = await client.query(`SELECT id,status FROM v2_1.productions
+    WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 FOR UPDATE`,
+  [workflow.production_id, workspaceId, brandId]);
+  const production = productionResult.rows[0] || null;
+  if (!production || production.status !== 'DRAFT') throw lockedStageConflict(
+    'Terminal FIRST_VIDEO production advanced beyond DRAFT; automatic retry remains blocked');
+
+  const jobs = (await client.query(`SELECT id,status,payload,result FROM v2_1.jobs
+    WHERE production_id=$1 ORDER BY created_at,id`, [workflow.production_id])).rows;
+  const unsafeJob = jobs.find((job) => job.status !== 'QUEUED'
+    || jsonHasValues(job.result)
+    || job.payload?.providerRequestId
+    || job.payload?.provider_request_id
+    || ['MAY_HAVE_STARTED','COMPLETED'].includes(job.payload?.providerRequestState));
+  if (unsafeJob) throw lockedStageConflict(
+    'Terminal FIRST_VIDEO job has incompatible execution state; automatic retry remains blocked');
+
+  await client.query(`INSERT INTO v2_10.locked_stage_provider_execution_evidence
+    (attempt_id,workflow_id,workspace_id,brand_id,stage,provider_request_id,media_execution_id,snapshot)
+    VALUES($1,$2,$3,$4,'FIRST_VIDEO',$5,$6,$7::jsonb)
+    ON CONFLICT(attempt_id,media_execution_id) DO NOTHING`,
+  [attempt.id, workflowId, workspaceId, brandId, attempt.provider_request_id, media.id, JSON.stringify(media)]);
+
+  await client.query(`DELETE FROM v2_1.productions
+    WHERE id=$1 AND workspace_id=$2 AND brand_id=$3`,
+  [workflow.production_id, workspaceId, brandId]);
+
+  return Object.freeze({
+    recoveredAttemptId: attempt.id,
+    productionId: workflow.production_id,
+    openingAssetId: workflow.opening_asset_id,
+    terminalProviderFailure: true,
+    providerRequestId: attempt.provider_request_id,
+    archivedMediaExecutionId: media.id,
+    transientProductionReset: true,
+    transientMediaRowsReset: 1,
+    transientJobsReset: jobs.length,
+  });
+}
+
 class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPostgresRepository {
   async recordQualityApproval(args) {
     if (args.decision === 'APPROVED') {
@@ -150,8 +237,9 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
           AND status IN ('RUNNING','NEEDS_RECONCILIATION')
         ORDER BY started_at DESC,id DESC`,
       [workflowId, workspaceId, brandId, stage]);
-      const blockingActive = active.rows.find((row) => !isKnownPreRequestValidationFailure(row, stage));
+      const blockingActive = active.rows.find((row) => !isKnownRecoverableLockedStageAttempt(row, stage));
       if (blockingActive) throw lockedStageConflict();
+      const recoverableTerminalFirstVideo = active.rows.find((row) => isKnownTerminalFirstVideoProviderFailure(row, stage)) || null;
       const recoverableFirstVideo = active.rows.find((row) => isKnownPreRequestFirstVideoFailure(row, stage)) || null;
 
       const latest = await client.query(`SELECT * FROM v2_10.locked_stage_attempts
@@ -168,11 +256,15 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
       const safeLocalRetry = isSafeLocalLockedStageRetry(prior, stage);
       if (prior && !safeLocalRetry) throw lockedStageConflict();
 
-      const recoveryCleanup = recoverableFirstVideo
-        ? await resetKnownPreProviderFirstVideoExecution(client, {
-          workflowId, workspaceId, brandId, attempt: recoverableFirstVideo,
+      const recoveryCleanup = recoverableTerminalFirstVideo
+        ? await archiveAndResetTerminalFirstVideoExecution(client, {
+          workflowId, workspaceId, brandId, attempt: recoverableTerminalFirstVideo,
         })
-        : null;
+        : recoverableFirstVideo
+          ? await resetKnownPreProviderFirstVideoExecution(client, {
+            workflowId, workspaceId, brandId, attempt: recoverableFirstVideo,
+          })
+          : null;
 
       const inserted = await client.query(`INSERT INTO v2_10.locked_stage_attempts
         (workflow_id,workspace_id,brand_id,stage,preflight_id,status,boundary_state)
@@ -187,6 +279,7 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
         safeLocalRetry,
         retryOfAttemptId: safeLocalRetry ? prior.id : null,
         recoveredPreProviderAttemptId: recoverableFirstVideo?.id || null,
+        recoveredTerminalProviderAttemptId: recoverableTerminalFirstVideo?.id || null,
         recoveryCleanup,
       });
     } catch (error) {
@@ -219,9 +312,13 @@ module.exports = {
   LEGACY_PRE_REQUEST_FIRST_VIDEO_ERROR,
   SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES,
   SAFE_LOCAL_FIRST_VIDEO_RETRY_CODES,
+  TERMINAL_FIRST_VIDEO_PROVIDER_FAILURE_CODES,
   isKnownPreRequestSemanticTierFailure,
   isKnownPreRequestFirstVideoFailure,
   isKnownPreRequestValidationFailure,
+  isKnownTerminalFirstVideoProviderFailure,
+  isKnownRecoverableLockedStageAttempt,
   isSafeLocalLockedStageRetry,
   resetKnownPreProviderFirstVideoExecution,
+  archiveAndResetTerminalFirstVideoExecution,
 };
