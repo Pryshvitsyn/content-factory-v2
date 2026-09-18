@@ -90,7 +90,8 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       capability: request?.capability || supportRequest.capability, requestedAspectRatio: common.aspectRatio,
       framingInheritedFrom: refs.firstFrame ? 'VERIFIED_FIRST_FRAME' : 'ASPECT_RATIO_PARAMETER',
       referenceGeometry: request?.referenceGeometry || null, resolvedSettings: resolved }) });
-    if (!options.idempotencyKey) return enrich(await this.runPrediction({ input, idempotencyKey: null, onProviderRequest: options.onProviderRequest }));
+    if (!options.idempotencyKey) return enrich(await this.runPrediction({ input, idempotencyKey: null,
+      beforeProviderBoundary: options.beforeProviderBoundary, onProviderRequest: options.onProviderRequest }));
     const identity = JSON.stringify(input);
     if (this.inflight.has(options.idempotencyKey)) {
       const existing = this.inflight.get(options.idempotencyKey);
@@ -98,7 +99,7 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       return existing.promise;
     }
     const operation = this.runPrediction({ input, idempotencyKey: options.idempotencyKey,
-      onProviderRequest: options.onProviderRequest }).then(enrich);
+      beforeProviderBoundary: options.beforeProviderBoundary, onProviderRequest: options.onProviderRequest }).then(enrich);
     this.inflight.set(options.idempotencyKey, { operationIdentity: identity, promise: operation });
     try { return await operation; } finally { this.inflight.delete(options.idempotencyKey); }
   }
