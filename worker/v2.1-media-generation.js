@@ -74,7 +74,8 @@ function capabilityForAssetKind(kind) {
   return capability;
 }
 
-async function generateMediaAsset({ providerGateway, asset, productionId, brandId = null, workerId, onProviderRequest = null } = {}) {
+async function generateMediaAsset({ providerGateway, asset, productionId, brandId = null, workerId,
+  beforeProviderBoundary = null, onProviderRequest = null } = {}) {
   requireValue('providerGateway', providerGateway);
   requireValue('asset', asset);
   requireValue('productionId', productionId);
@@ -92,6 +93,7 @@ async function generateMediaAsset({ providerGateway, asset, productionId, brandI
     provider: requirements.provider,
     model: requirements.model,
     idempotencyKey: `${brandId ? `${brandId}:` : ''}${productionId}:media:${asset.asset_id}`,
+    ...(beforeProviderBoundary ? { beforeProviderBoundary } : {}),
     ...(onProviderRequest ? { onProviderRequest } : {}),
     ...(canonicalRequest ? { canonicalRequest } : {}),
     prompt: JSON.stringify({
