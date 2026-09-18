@@ -210,7 +210,7 @@ class DurableMediaExecutor {
     };
   }
 
-  async execute({ workspaceId, productionId, brandId, workerId, asset }) {
+  async execute({ workspaceId, productionId, brandId, workerId, asset, beforeProviderBoundary = null }) {
     const selection = this.selection(asset);
     const identities = this.identities({ brandId, productionId, asset });
     let row = await this.repository.ensure({ workspaceId, brandId, productionId, asset,
@@ -251,18 +251,34 @@ class DurableMediaExecutor {
       } else {
         row = await this.repository.claim({ id: row.id, workerId });
         if (!row) throw new DurableMediaError('MEDIA_EXECUTION_NOT_CLAIMED', `Asset ${asset.asset_id} is already claimed or terminal`);
-        row = await this.repository.markBoundary({ id: row.id, workerId, requestEvidence: {
+        const requestEvidence = {
           capability: asset.generation_requirements?.capability || capabilityForAssetKind(asset.kind),
           canonicalAspectRatio: asset.generation_requirements?.aspect_ratio || null,
           referencePolicy: asset.generation_requirements?.v210_reference?.policy || 'NONE',
           referenceGeometry: asset.generation_requirements?.v210_reference_evidence || null,
           resolvedSettings: asset.generation_requirements?.resolved_settings || {},
           seed: asset.generation_requirements?.seed ?? null,
-        } });
-        boundaryCrossed = true;
+        };
+        let boundaryMarkInFlight = null;
+        const markActualProviderBoundary = async () => {
+          if (boundaryCrossed) return row;
+          if (boundaryMarkInFlight) return boundaryMarkInFlight;
+          boundaryMarkInFlight = (async () => {
+            if (beforeProviderBoundary) await beforeProviderBoundary();
+            row = await this.repository.markBoundary({ id: row.id, workerId, requestEvidence });
+            boundaryCrossed = true;
+            return row;
+          })();
+          try { return await boundaryMarkInFlight; }
+          finally { boundaryMarkInFlight = null; }
+        };
+        const deferBoundaryToAdapter = row.provider === 'replicate';
+        if (!deferBoundaryToAdapter) await markActualProviderBoundary();
         media = await generateMediaAsset({
           providerGateway: this.providerGateway, asset, productionId, brandId, workerId,
+          ...(deferBoundaryToAdapter ? { beforeProviderBoundary: markActualProviderBoundary } : {}),
           onProviderRequest: async ({ requestId, status }) => {
+            if (!boundaryCrossed) await markActualProviderBoundary();
             row = await this.repository.recordProviderRequest({ id: row.id, workerId, requestId, providerStatus: status });
           },
         });
