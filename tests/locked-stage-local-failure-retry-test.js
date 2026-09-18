@@ -23,6 +23,7 @@ function dbFor({ latest = null, active = null, insertedId = 'attempt-new',
       if (text.includes('FROM v2_5.media_executions WHERE production_id=$1')) return { rows: mediaRows };
       if (text.includes('SELECT id,status FROM v2_1.productions')) return { rows: production ? [production] : [] };
       if (text.includes('SELECT id,status,payload,result FROM v2_1.jobs')) return { rows: jobs };
+      if (text.includes('INSERT INTO v2_10.locked_stage_provider_execution_evidence')) return { rows: [], rowCount: 1 };
       if (text.includes('DELETE FROM v2_1.productions')) return { rows: [], rowCount: production ? 1 : 0 };
       if (text.includes('INSERT INTO v2_10.locked_stage_attempts')) return { rows: [{
         id: insertedId, workflow_id: params[0], workspace_id: params[1], brand_id: params[2],
@@ -191,6 +192,40 @@ async function main() {
   }
 
   {
+    const terminal = {
+      id: 'attempt-first-video-terminal', status: 'NEEDS_RECONCILIATION', boundary_state: 'MAY_HAVE_STARTED',
+      provider_request_id: 'replicate-terminal-1',
+      error: { code: 'REPLICATE_PREDICTION_FAILED',
+        message: 'Replicate prediction failed: Duration must be between 4 and 30 seconds' },
+    };
+    const db = dbFor({
+      active: terminal,
+      mediaRows: [{
+        id: 'media-terminal-1', asset_id: 'video-1', status: 'FAILED',
+        provider_request_id: 'replicate-terminal-1', provider_status: 'starting',
+        artifact_id: null, artifact_version: null, artifact_storage_key: null, artifact_content_hash: null,
+        error: { code: 'REPLICATE_PREDICTION_FAILED',
+          message: 'Replicate prediction failed: Duration must be between 4 and 30 seconds' },
+      }],
+      production: { id: 'production-1', status: 'DRAFT' },
+      jobs: [{ id: 'job-1', status: 'QUEUED', payload: { providerRequestState: 'NOT_STARTED' }, result: {} }],
+    });
+    const repository = new HardenedQualityScriptFirstPostgresRepository({ db });
+    const result = await repository.claimLockedStage({
+      ...args, stage: 'FIRST_VIDEO', preflightId: 'corrected-four-second-preflight',
+    });
+    assert.equal(result.id, 'attempt-new');
+    assert.equal(result.recoveredTerminalProviderAttemptId, terminal.id);
+    assert.equal(result.recoveryCleanup.terminalProviderFailure, true);
+    assert.equal(result.recoveryCleanup.providerRequestId, terminal.provider_request_id);
+    assert.equal(db.calls.filter((call) => call.sql.includes('INSERT INTO v2_10.locked_stage_provider_execution_evidence')).length, 1,
+      'terminal provider failure must be archived before transient execution rows are reset');
+    assert.equal(db.calls.filter((call) => call.sql.includes('DELETE FROM v2_1.productions')).length, 1);
+    assert.equal(db.calls.some((call) => call.sql.includes('UPDATE v2_10.locked_stage_attempts')), false,
+      'terminal locked-stage evidence remains immutable');
+  }
+
+  {
     const db = dbFor({ latest: {
       id: 'attempt-first-video-disabled', status: 'FAILED', boundary_state: 'NOT_CROSSED',
       provider_request_id: null,
@@ -218,7 +253,7 @@ async function main() {
     assert.equal(db.calls.some((call) => call.sql.includes('INSERT INTO v2_10.locked_stage_attempts')), false);
   }
 
-  console.log('Locked-stage append-only safe local retry, exact FIRST_VIDEO pre-provider recovery, and ambiguous fencing passed.');
+  console.log('Locked-stage append-only retry, pre-provider recovery, terminal provider evidence archival, and ambiguous fencing passed.');
 }
 
 main().catch((error) => {
