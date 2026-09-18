@@ -192,6 +192,23 @@ async function main() {
 
   {
     const db = dbFor({ latest: {
+      id: 'attempt-first-video-disabled', status: 'FAILED', boundary_state: 'NOT_CROSSED',
+      provider_request_id: null,
+      error: { code: 'V210_EXECUTION_DISABLED',
+        message: 'LIVE_PAID_GENERATION=true is required after reviewing the first-video preflight' },
+    } });
+    const repository = new HardenedQualityScriptFirstPostgresRepository({ db });
+    const result = await repository.claimLockedStage({
+      ...args, stage: 'FIRST_VIDEO', preflightId: 'preflight-1',
+    });
+    assert.equal(result.id, 'attempt-new');
+    assert.equal(result.safeLocalRetry, true);
+    assert.equal(result.retryOfAttemptId, 'attempt-first-video-disabled');
+    assert.equal(db.calls.some((call) => call.sql.includes('UPDATE v2_10.locked_stage_attempts')), false);
+  }
+
+  {
+    const db = dbFor({ latest: {
       id: 'attempt-success', status: 'SUCCEEDED', boundary_state: 'COMPLETED', result: { ok: true },
     } });
     const repository = new HardenedQualityScriptFirstPostgresRepository({ db });
