@@ -20,7 +20,7 @@ function dbFor({ latest = null, active = null, insertedId = 'attempt-new',
       if (text.includes('SELECT production_id,opening_asset_id') && text.includes('locked_keyframe_workflows')) {
         return { rows: workflow ? [workflow] : [] };
       }
-      if (text.includes('FROM v2_5.media_executions WHERE production_id=$1')) return { rows: mediaRows };
+      if (text.includes('FROM v2_5.media_executions') && text.includes('WHERE production_id=$1')) return { rows: mediaRows };
       if (text.includes('SELECT id,status FROM v2_1.productions')) return { rows: production ? [production] : [] };
       if (text.includes('SELECT id,status,payload,result FROM v2_1.jobs')) return { rows: jobs };
       if (text.includes('INSERT INTO v2_10.locked_stage_provider_execution_evidence')) return { rows: [], rowCount: 1 };
