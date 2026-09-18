@@ -49,7 +49,7 @@ function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16
   image = null, lastFrameImage = null, referenceImages = [], referenceVideos = [], referenceAudios = [],
   generateAudio = false, watermark = false, seed } = {}) {
   if (!String(prompt || '').trim()) throw new ProviderError('Seedance 2.5 requires a prompt', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  if (!Number.isInteger(duration) || duration < 1 || duration > 30) throw durationError('Seedance 2.5 generation duration must be an integer from 1-30 seconds; run a fresh final preflight', 'bytedance/seedance-2.5');
+  if (!Number.isInteger(duration) || duration < 4 || duration > 30) throw durationError('Seedance 2.5 generation duration must be an integer from 4-30 seconds; run a fresh final preflight', 'bytedance/seedance-2.5');
   if ((image || lastFrameImage) && (referenceImages.length || referenceVideos.length || referenceAudios.length)) {
     throw new ProviderError('Seedance first/last frames cannot be combined with reference media', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
   }
