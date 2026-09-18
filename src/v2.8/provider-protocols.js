@@ -5,6 +5,7 @@ const { CAPABILITIES: C } = require('./capabilities');
 const ratioPixels = (ratio) => ratio === '9:16' ? '720:1280' : '1280:720';
 const commonHeaders = (authorization) => ({ Authorization: authorization, 'Content-Type': 'application/json', Accept: 'application/json' });
 const state = (value, states) => states[String(value || '').toLowerCase()] || 'PENDING';
+const generationDuration = (request, fallback) => request.resolvedSettings.providerDurationSeconds ?? request.durationSeconds ?? fallback;
 
 const ALIBABA_REGIONS = Object.freeze({ singapore: 'ap-southeast-1', 'ap-southeast-1': 'ap-southeast-1',
   beijing: 'cn-beijing', 'cn-beijing': 'cn-beijing' });
@@ -41,7 +42,7 @@ function createAlibabaProtocol({ region, workspaceId } = {}) {
       for (const url of request.references.referenceAudios || []) media.push({ type: 'reference_audio', url });
       return { model: request.providerSelection.model, input: { prompt: request.providerPrompt, ...(media.length ? { media } : {}) },
         parameters: { resolution: String(request.resolution || request.resolvedSettings.resolution || '720p').toUpperCase(),
-          ratio: request.aspectRatio, duration: request.durationSeconds || Number(request.resolvedSettings.duration || 5),
+          ratio: request.aspectRatio, duration: generationDuration(request, Number(request.resolvedSettings.duration || 5)),
           audio: request.audio.requested, watermark: Boolean(request.resolvedSettings.watermark),
           prompt_extend: request.resolvedSettings.enablePromptExpansion !== false,
           ...(request.seed == null ? {} : { seed: request.seed }) } };
@@ -58,7 +59,7 @@ const PROTOCOLS = Object.freeze({
     result: (id, model, body) => body?.video ? { body } : ({ url: `https://queue.fal.run/${model}/requests/${encodeURIComponent(id)}` }),
     requestId: (body) => body.request_id, state: (body) => state(body.status, { in_queue: 'PENDING', in_progress: 'RUNNING', completed: body.error ? 'FAILED' : 'SUCCEEDED' }),
     mapRequest: (request) => ({ prompt: request.providerPrompt, resolution: request.resolution,
-      duration: String(request.durationSeconds || request.resolvedSettings.duration || '5'), aspect_ratio: request.aspectRatio,
+      duration: String(generationDuration(request, request.resolvedSettings.duration || '5')), aspect_ratio: request.aspectRatio,
       generate_audio: request.audio.requested, ...(request.seed == null ? {} : { seed: request.seed }),
       ...(request.resolvedSettings.bitrateMode ? { bitrate_mode: request.resolvedSettings.bitrateMode } : {}),
       ...(request.references.characterImages.length || request.references.styleImages.length || request.references.referenceVideos.length
@@ -73,7 +74,7 @@ const PROTOCOLS = Object.freeze({
     result: (_id, _model, body) => ({ body }), requestId: (body) => body.id,
     state: (body) => state(body.status, { pending: 'PENDING', throttled: 'PENDING', running: 'RUNNING', succeeded: 'SUCCEEDED', failed: 'FAILED', canceled: 'CANCELED' }),
     mapRequest: (request) => ({ model: request.providerSelection.model, promptText: request.providerPrompt,
-      ratio: ratioPixels(request.aspectRatio), duration: request.durationSeconds || 5,
+      ratio: ratioPixels(request.aspectRatio), duration: generationDuration(request, 5),
       ...(request.capability === C.IMAGE_TO_VIDEO ? { promptImage: request.references.firstFrame } : {}) }),
     outputUrl: (body) => Array.isArray(body.output) ? body.output[0] : null,
   },
@@ -88,7 +89,7 @@ const PROTOCOLS = Object.freeze({
     state: (body) => body.error ? 'FAILED' : body.done === true ? 'SUCCEEDED' : 'PENDING',
     mapRequest: (request) => ({ instances: [{ prompt: request.providerPrompt }], parameters: {
       aspectRatio: request.aspectRatio, resolution: request.resolution,
-      durationSeconds: request.durationSeconds || 8, ...(request.negativePrompt ? { negativePrompt: request.negativePrompt } : {}) } }),
+      durationSeconds: generationDuration(request, 8), ...(request.negativePrompt ? { negativePrompt: request.negativePrompt } : {}) } }),
     outputUrl: (body) => body.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
   },
   luma: {
@@ -100,7 +101,7 @@ const PROTOCOLS = Object.freeze({
     state: (body) => state(body.state, { queued: 'PENDING', dreaming: 'RUNNING', completed: 'SUCCEEDED', failed: 'FAILED' }),
     mapRequest: (request) => ({ generation_type: 'video', model: request.providerSelection.model, prompt: request.providerPrompt,
       aspect_ratio: request.aspectRatio, resolution: request.resolution,
-      duration: request.resolvedSettings.duration || `${request.durationSeconds || 5}s`, loop: false,
+      duration: request.resolvedSettings.providerDurationSeconds != null ? `${request.resolvedSettings.providerDurationSeconds}s` : request.resolvedSettings.duration || `${request.durationSeconds || 5}s`, loop: false,
       ...(request.references.firstFrame || request.references.lastFrame ? { keyframes: {
         ...(request.references.firstFrame ? { frame0: { type: 'image', url: request.references.firstFrame } } : {}),
         ...(request.references.lastFrame ? { frame1: { type: 'image', url: request.references.lastFrame } } : {}) } } : {}) }),

@@ -12,11 +12,15 @@ function requestOf(options) {
   return { parsed, request: options.canonicalRequest || null, requirements: parsed.requirements || {} };
 }
 
+function durationError(message, model) {
+  return Object.assign(new ProviderError(message, { provider: 'replicate', model }), { code: 'UNSUPPORTED_DURATION', status: 409 });
+}
+
 function buildWan3Input({ prompt, resolution = '720p', aspectRatio = '9:16', duration = 5,
   image = null, negativePrompt = '', enablePromptExpansion = true, seed } = {}) {
   if (!String(prompt || '').trim()) throw new ProviderError('Wan 3 requires a prompt', { provider: 'replicate', model: 'alibaba/wan-3' });
   if (!['480p','720p','1080p'].includes(resolution)) throw new ProviderError('Wan 3 resolution is unsupported', { provider: 'replicate', model: 'alibaba/wan-3' });
-  if (!Number.isInteger(duration) || duration < 2 || duration > 30) throw new ProviderError('Wan 3 duration must be 2-30 seconds', { provider: 'replicate', model: 'alibaba/wan-3' });
+  if (!Number.isInteger(duration) || duration < 2 || duration > 30) throw durationError('Wan 3 generation duration must be an integer from 2-30 seconds; run a fresh final preflight', 'alibaba/wan-3');
   return { prompt: prompt.trim(), resolution, duration, ...(image ? { image } : { aspect_ratio: aspectRatio }),
     ...(negativePrompt ? { negative_prompt: negativePrompt } : {}), enable_prompt_expansion: Boolean(enablePromptExpansion),
     ...(seed == null ? {} : { seed }) };
@@ -45,7 +49,7 @@ function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16
   image = null, lastFrameImage = null, referenceImages = [], referenceVideos = [], referenceAudios = [],
   generateAudio = false, watermark = false, seed } = {}) {
   if (!String(prompt || '').trim()) throw new ProviderError('Seedance 2.5 requires a prompt', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  if (!Number.isInteger(duration) || duration < 1 || duration > 30) throw new ProviderError('Seedance 2.5 duration must be 1-30 seconds', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
+  if (!Number.isInteger(duration) || duration < 1 || duration > 30) throw durationError('Seedance 2.5 generation duration must be an integer from 1-30 seconds; run a fresh final preflight', 'bytedance/seedance-2.5');
   if ((image || lastFrameImage) && (referenceImages.length || referenceVideos.length || referenceAudios.length)) {
     throw new ProviderError('Seedance first/last frames cannot be combined with reference media', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
   }
@@ -72,7 +76,7 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
     const { parsed, request, requirements } = requestOf(options);
     const resolved = request?.resolvedSettings || requirements.resolved_settings || {};
     const common = { prompt: request?.providerPrompt || parsed.prompt, resolution: request?.resolution || resolved.resolution || requirements.resolution || '720p',
-      aspectRatio: request?.aspectRatio || requirements.aspect_ratio || '9:16', duration: request?.durationSeconds || Number(resolved.duration || requirements.duration || 5), seed: request?.seed ?? requirements.seed };
+      aspectRatio: request?.aspectRatio || requirements.aspect_ratio || '9:16', duration: Number(resolved.providerDurationSeconds ?? resolved.duration ?? request?.durationSeconds ?? requirements.duration ?? 5), seed: request?.seed ?? requirements.seed };
     const refs = request?.references || {};
     if (this.family === 'WAN_3') assertWan3ReferenceGeometry(request, refs, common.aspectRatio);
     const input = this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,

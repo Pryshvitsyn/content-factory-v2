@@ -526,7 +526,7 @@ export function CreativeProduction() {
           <button type="button" className="secondary" disabled={!preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
           <button type="button" className="primary" disabled={!firstVideoPreflight || busy} onClick={startLockedVideo}>START FIRST VIDEO ONLY</button>
         </div>
-        {firstVideoPreflight ? <div className="plan-grid"><div className="key-value"><span>EXACT REFERENCE</span><p>{firstVideoPreflight.keyframe.artifactId} · v{firstVideoPreflight.keyframe.version} · {firstVideoPreflight.keyframe.contentHash}</p></div><div className="key-value"><span>BOUNDED EXECUTION</span><p>Video 1 · Semantic 1 · Voice 0 · Continuity 0 · Renderer 0 · Maximum 2</p></div></div> : null}
+        {firstVideoPreflight ? <div className="plan-grid"><div className="key-value"><span>EXACT REFERENCE</span><p>{firstVideoPreflight.keyframe.artifactId} · v{firstVideoPreflight.keyframe.version} · {firstVideoPreflight.keyframe.contentHash}</p><p>Editorial {firstVideoPreflight.editorialDurationSeconds}s · Provider generation {firstVideoPreflight.providerDurationSeconds}s</p></div><div className="key-value"><span>BOUNDED EXECUTION</span><p>Video 1 · Semantic 1 · Voice 0 · Continuity 0 · Renderer 0 · Maximum 2</p></div></div> : null}
       </section>
 
       <section className="panel"><h2 className="panel-title">CONTINUITY</h2><div className="form-grid">
@@ -621,7 +621,7 @@ export function CreativeProduction() {
         {preflight ? <>
           <div className="preflight-status"><span>STATUS</span><strong className={preflight.status === 'READY' ? 'pass' : 'fail'}>{preflight.status}</strong>{preflight.blockers?.length ? <code>{preflight.blockers.join(' · ')}</code> : null}</div>
           <div className="plan-grid">
-            <div className="key-value"><span>VIDEO</span><p>{preflight.video?.providerDisplayName || preflight.video?.provider} · {preflight.video?.model} · {preflight.video?.profile} · {preflight.video?.resolvedSettings?.resolution || 'provider default'}</p></div>
+            <div className="key-value"><span>VIDEO</span><p>{preflight.video?.providerDisplayName || preflight.video?.provider} · {preflight.video?.model} · {preflight.video?.profile} · {preflight.video?.resolvedSettings?.resolution || 'provider default'}</p>{preflight.video?.shotCapabilities?.map(shot => <p key={shot.shotId}>{shot.shotId}: editorial {shot.resolvedSettings?.editorialDurationSeconds}s · provider generation {shot.resolvedSettings?.providerDurationSeconds}s</p>)}</div>
             <div className="key-value"><span>CREATIVE</span><p>{preflight.creative.storyboardShots} shots · {preflight.creative.completeness} · continuity {preflight.creative.continuity}</p></div>
             <div className="key-value"><span>VOICE</span><p>{preflight.voice?.sourceType || 'NO VOICE'} · {preflight.voice?.previewApproved ? 'APPROVED' : 'NO APPROVAL REQUIRED / PENDING'}</p></div>
             <div className="key-value"><span>EXTERNAL CALLS</span><p>Video {preflight.externalCalls.video} · Speech {preflight.externalCalls.speech} · Semantic {preflight.externalCalls.semantic} · Maximum {preflight.externalCalls.maximum}</p></div>

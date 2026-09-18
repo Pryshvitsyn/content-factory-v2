@@ -25,6 +25,22 @@ function credentialConfigured(provider, env) {
   return credential && (provider.requiredEnv || []).every((name) => Boolean(env[name]));
 }
 
+function resolveVideoDuration(editorial, constraints = {}, name = 'Selected model') {
+  if (editorial == null) return null;
+  editorial = Number(editorial);
+  if (!Number.isFinite(editorial) || editorial <= 0) throw new ProviderCatalogError('UNSUPPORTED_DURATION', 'Editorial duration must be positive');
+  let duration = editorial;
+  if (constraints.durations) duration = [...constraints.durations].sort((a,b) => a-b).find(value => value >= editorial);
+  else if (constraints.durationRange) {
+    duration = Math.max(editorial, constraints.durationRange[0]);
+    if (constraints.durationStepSeconds) duration = Math.ceil(duration / constraints.durationStepSeconds) * constraints.durationStepSeconds;
+  }
+  if (!Number.isFinite(duration) || (constraints.durationRange && duration > constraints.durationRange[1])) {
+    throw new ProviderCatalogError('UNSUPPORTED_DURATION', `${name} cannot generate a valid source at least ${editorial}s long`);
+  }
+  return duration;
+}
+
 function availability(provider, env) {
   if (!credentialConfigured(provider, env)) return 'NOT_CONFIGURED';
   const override = String(env[`PROVIDER_${provider.id.toUpperCase()}_HEALTH`] || '').toUpperCase();
@@ -153,7 +169,9 @@ class ProviderCatalog {
     const settings = modelDefinition.profiles?.[profileName];
     if (!settings) throw new ProviderCatalogError('SELECTED_PROFILE_UNAVAILABLE', `Profile '${profile}' is unavailable for ${modelDefinition.displayName}`);
     const constraints = modelDefinition.constraints || {};
-    const effectiveDuration = durationSeconds ?? (Number(String(settings.duration || '').replace(/s$/, '')) || null);
+    const editorialDuration = durationSeconds ?? (Number(String(settings.duration || '').replace(/s$/, '')) || null);
+    const effectiveDuration = normalizedCapability.includes('VIDEO')
+      ? resolveVideoDuration(editorialDuration, constraints, modelDefinition.displayName) : editorialDuration;
     const effectiveResolution = resolution || settings.resolution || null;
     if (effectiveDuration != null && constraints.durationRange
       && (effectiveDuration < constraints.durationRange[0] || effectiveDuration > constraints.durationRange[1])) {
@@ -173,8 +191,13 @@ class ProviderCatalog {
       modelFamily: modelDefinition.modelFamily || null, providerModelId: modelDefinition.providerModelId || modelDefinition.modelId,
       modelVersion: modelDefinition.modelVersion || null, displayName: modelDefinition.displayName,
       adapterFamily: modelDefinition.adapterFamily, profile: profileName, capability: normalizedCapability,
+      durationConstraints: Object.freeze({ ...(constraints.durationRange ? { durationRange: [...constraints.durationRange] } : {}),
+        ...(constraints.durations ? { durations: [...constraints.durations] } : {}),
+        ...(constraints.durationStepSeconds ? { durationStepSeconds: constraints.durationStepSeconds } : {}) }),
       resolvedSettings: Object.freeze({ ...settings, ...(resolution ? { resolution } : {}),
-        ...(durationSeconds ? { durationSeconds } : {}), ...(aspectRatio ? { aspectRatio } : {}) }),
+        ...(effectiveDuration != null ? { duration: effectiveDuration, durationSeconds: effectiveDuration,
+          editorialDurationSeconds: Number(editorialDuration), providerDurationSeconds: effectiveDuration } : {}),
+        ...(aspectRatio ? { aspectRatio } : {}) }),
       costStatus: modelDefinition.costStatus || 'UNKNOWN', relativeTier: modelDefinition.relativeTier || profileName,
       supportStatus: modelDefinition.supportStatus || 'SUPPORTED', configurationStatus: 'CONFIGURED',
       capabilities: Object.freeze([...(modelDefinition.capabilities || [])]),
@@ -192,4 +215,4 @@ class ProviderCatalog {
   async snapshot() { await this.refresh(this.workspaceId); return this.listProviders(); }
 }
 
-module.exports = { AVAILABILITY, PRESETS, ProviderCatalog, ProviderCatalogError, PostgresProviderCatalogRepository };
+module.exports = { AVAILABILITY, PRESETS, ProviderCatalog, ProviderCatalogError, PostgresProviderCatalogRepository, resolveVideoDuration };

@@ -130,6 +130,8 @@ function buildFirstVideoStagePlan({ draft, canonical, keyframe, executionAsset, 
     profile: executionAsset.generation_requirements?.profile,
     capability: executionAsset.generation_requirements?.capability,
     resolvedSettings: executionAsset.generation_requirements?.resolved_settings || {},
+    editorialDurationSeconds: executionAsset.generation_requirements?.target_clip_duration_ms / 1000,
+    providerDurationSeconds: executionAsset.generation_requirements?.resolved_settings?.providerDurationSeconds,
     externalCalls: { imageGeneration: 0, video: 1, semanticVideoEvaluation: 1, semanticRetries: 0,
       voice: 0, continuity: 0, renderer: 0, maximum: 2, alreadyMade: 0 },
     cost: { knownUsd: null, status: 'UNKNOWN', unknownComponents: [

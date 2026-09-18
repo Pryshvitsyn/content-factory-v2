@@ -85,7 +85,8 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
       throw new V210RuntimeError('V210_PROVIDER_RESOLUTION_CONFLICT',
         'All storyboard shots must resolve to one authoritative provider/model/profile selection');
     }
-    shotCapabilities.push(Object.freeze({ shotId: shot.shotId, capability: resolved.capability }));
+    shotCapabilities.push(Object.freeze({ shotId: shot.shotId, capability: resolved.capability,
+      resolvedSettings: resolved.resolvedSettings }));
   }
   return Object.freeze({ ...base, shotCapabilities: Object.freeze(shotCapabilities), requested });
 }
@@ -168,6 +169,9 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
   }
   const qualityProfile = qualityProfileFromSelection(video);
   const capabilities = new Map((video.shotCapabilities || []).map((item) => [item.shotId, item.capability]));
+  const settingsByShot = new Map((video.shotCapabilities || []).map((item) => [item.shotId, item.resolvedSettings]));
+  const durationConstraints = video.durationConstraints || require('../v2.8/provider-definitions').MODELS
+    .find(item => item.provider === video.provider && item.modelId === video.model)?.constraints || {};
   const copy = sceneCopy(brief);
   const approvedSpokenCopy = copy.filter(Boolean).join(' ').trim();
   const voiceEnabled = Boolean(brief.voice.sourceType && approvedSpokenCopy);
@@ -178,8 +182,12 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
   const voiceId = uploaded ? 'uploaded-human' : brief.voice.voiceId;
   const scenes = brief.storyboard.map((shot, index) => {
     const fps = qualityProfile.framesPerSecond || 24;
-    const numFrames = Math.max(2, Math.round(shot.durationSeconds * fps) + 1);
     const capability = capabilities.get(shot.shotId) || CAPABILITIES.TEXT_TO_VIDEO;
+    const providerDuration = require('../v2.8/provider-catalog').resolveVideoDuration(shot.durationSeconds, durationConstraints, video.model);
+    const numFrames = Math.max(2, Math.round(providerDuration * fps) + 1);
+    const resolvedSettings = { ...(settingsByShot.get(shot.shotId) || video.resolvedSettings || {}),
+      editorialDurationSeconds: shot.durationSeconds, providerDurationSeconds: providerDuration,
+      durationSeconds: providerDuration, duration: providerDuration };
     return {
       scene_id: `v210-scene-${index + 1}`, duration_seconds: shot.durationSeconds,
       location: shot.environment, visual: `${shot.purpose}. ${shot.action}`, emotional_intent: shot.emotionalIntent,
@@ -189,7 +197,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
         video: { provider: video.provider, vendor: video.vendor || null, model: video.model,
           model_family: video.modelFamily || null, provider_model_id: video.providerModelId || video.model,
           model_version: video.modelVersion || null, profile: video.profile, capability,
-          resolved_settings: { ...(video.resolvedSettings || {}), duration: shot.durationSeconds },
+          resolved_settings: resolvedSettings,
           prompt: buildShotPrompt(brief, shot), resolution: video.resolvedSettings?.resolution || qualityProfile.resolution,
           aspect_ratio: '9:16', num_frames: numFrames, frames_per_second: fps,
           go_fast: qualityProfile.goFast === true, optimize_prompt: qualityProfile.optimizePrompt,

@@ -102,7 +102,7 @@ async function main() {
   });
   assert.equal(authoritativeVideo.provider, 'replicate');
   assert.equal(authoritativeVideo.model, 'alibaba/wan-3');
-  assert.deepEqual(authoritativeVideo.shotCapabilities, [
+  assert.deepEqual(authoritativeVideo.shotCapabilities.map(({shotId,capability}) => ({shotId,capability})), [
     { shotId: 's1', capability: CAPABILITIES.TEXT_TO_VIDEO },
     { shotId: 's2', capability: CAPABILITIES.IMAGE_TO_VIDEO },
   ]);
