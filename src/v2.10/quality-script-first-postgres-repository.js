@@ -184,7 +184,7 @@ class QualityScriptFirstPostgresRepository extends V210PostgresRepository {
     try {
       await client.query('BEGIN');
       const updated = await client.query(`UPDATE v2_10.locked_keyframe_workflows SET state=$4
-        WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND state IN ('KEYFRAME_APPROVED','FIRST_VIDEO_RUNNING') RETURNING *`,
+        WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND state='FIRST_VIDEO_RUNNING' RETURNING *`,
       [workflowId, workspaceId, brandId, state]);
       if (!updated.rows[0]) throw conflict('LOCKED_WORKFLOW_STATE_CONFLICT',
         'First-video result cannot be recorded in the current workflow state');
