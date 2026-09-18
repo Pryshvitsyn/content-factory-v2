@@ -194,7 +194,7 @@ async function main() {
   {
     const terminal = {
       id: 'attempt-first-video-terminal', status: 'NEEDS_RECONCILIATION', boundary_state: 'MAY_HAVE_STARTED',
-      provider_request_id: 'replicate-terminal-1',
+      provider_request_id: null,
       error: { code: 'REPLICATE_PREDICTION_FAILED',
         message: 'Replicate prediction failed: Duration must be between 4 and 30 seconds' },
     };
@@ -217,7 +217,7 @@ async function main() {
     assert.equal(result.id, 'attempt-new');
     assert.equal(result.recoveredTerminalProviderAttemptId, terminal.id);
     assert.equal(result.recoveryCleanup.terminalProviderFailure, true);
-    assert.equal(result.recoveryCleanup.providerRequestId, terminal.provider_request_id);
+    assert.equal(result.recoveryCleanup.providerRequestId, 'replicate-terminal-1');
     assert.equal(db.calls.filter((call) => call.sql.includes('INSERT INTO v2_10.locked_stage_provider_execution_evidence')).length, 1,
       'terminal provider failure must be archived before transient execution rows are reset');
     assert.equal(db.calls.filter((call) => call.sql.includes('DELETE FROM v2_1.productions')).length, 1);
