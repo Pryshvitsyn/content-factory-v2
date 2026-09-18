@@ -52,7 +52,6 @@ CREATE UNIQUE INDEX locked_stage_one_active_attempt
          (
            stage = 'FIRST_VIDEO'
            AND boundary_state = 'MAY_HAVE_STARTED'
-           AND provider_request_id IS NOT NULL
            AND error->>'code' IN ('REPLICATE_PREDICTION_FAILED','REPLICATE_PREDICTION_CANCELED')
          )
        )
