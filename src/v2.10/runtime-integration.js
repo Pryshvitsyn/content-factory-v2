@@ -59,6 +59,12 @@ function requiredCapability(shot, capabilities = []) {
   return CAPABILITIES.IMAGE_TO_VIDEO;
 }
 
+function providerDurationRequest({ provider, model, editorialDurationSeconds }) {
+  const editorial = Number(editorialDurationSeconds);
+  if (provider === 'replicate' && model === 'bytedance/seedance-2.5') return Math.max(4, editorial);
+  return editorial;
+}
+
 async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief: input } = {}) {
   if (!catalog) throw new V210RuntimeError('V210_PROVIDER_CATALOG_REQUIRED', 'Authoritative Provider Catalog is required');
   const brief = canonicalCreativeBrief(input);
@@ -77,9 +83,20 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
     }
     const advertised = scoped.listModels(requested.provider).find((item) => item.modelId === requested.model)?.capabilities || [];
     const capability = requiredCapability(shot, advertised);
-    const resolved = scoped.resolveSelection({ provider: requested.provider, model: requested.model,
-      profile: requested.profile, capability, durationSeconds: shot.durationSeconds,
+    const requestedDurationSeconds = providerDurationRequest({ provider: requested.provider, model: requested.model,
+      editorialDurationSeconds: shot.durationSeconds });
+    const catalogResolved = scoped.resolveSelection({ provider: requested.provider, model: requested.model,
+      profile: requested.profile, capability, durationSeconds: requestedDurationSeconds,
       resolution: requested.resolution, aspectRatio: '9:16', allowExperimental: requested.allowExperimental });
+    const providerDurationSeconds = Number(catalogResolved.resolvedSettings?.providerDurationSeconds
+      ?? catalogResolved.resolvedSettings?.durationSeconds ?? requestedDurationSeconds);
+    const resolved = Object.freeze({ ...catalogResolved, resolvedSettings: Object.freeze({
+      ...(catalogResolved.resolvedSettings || {}),
+      editorialDurationSeconds: Number(shot.durationSeconds),
+      providerDurationSeconds,
+      durationSeconds: providerDurationSeconds,
+      duration: providerDurationSeconds,
+    }) });
     if (!base) base = resolved;
     if (base.provider !== resolved.provider || base.model !== resolved.model || base.profile !== resolved.profile) {
       throw new V210RuntimeError('V210_PROVIDER_RESOLUTION_CONFLICT',
@@ -183,9 +200,11 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
   const scenes = brief.storyboard.map((shot, index) => {
     const fps = qualityProfile.framesPerSecond || 24;
     const capability = capabilities.get(shot.shotId) || CAPABILITIES.TEXT_TO_VIDEO;
-    const providerDuration = require('../v2.8/provider-catalog').resolveVideoDuration(shot.durationSeconds, durationConstraints, video.model);
+    const authoritativeShotSettings = settingsByShot.get(shot.shotId) || video.resolvedSettings || {};
+    const providerDuration = Number(authoritativeShotSettings.providerDurationSeconds
+      ?? require('../v2.8/provider-catalog').resolveVideoDuration(shot.durationSeconds, durationConstraints, video.model));
     const numFrames = Math.max(2, Math.round(providerDuration * fps) + 1);
-    const resolvedSettings = { ...(settingsByShot.get(shot.shotId) || video.resolvedSettings || {}),
+    const resolvedSettings = { ...authoritativeShotSettings,
       editorialDurationSeconds: shot.durationSeconds, providerDurationSeconds: providerDuration,
       durationSeconds: providerDuration, duration: providerDuration };
     return {
@@ -362,5 +381,5 @@ class V210CanonicalProductionStarter {
 }
 
 module.exports = { CANONICAL_OBJECTIVES, V210CanonicalProductionStarter, V210RuntimeError, buildCanonicalV210Input,
-  canonicalObjective, createVoicePreviewGateway, normalizeVoiceProvider, requestedVideoSelection, resolveAuthoritativeVideo,
-  resolveAuthoritativeVoice };
+  canonicalObjective, createVoicePreviewGateway, normalizeVoiceProvider, providerDurationRequest, requestedVideoSelection,
+  resolveAuthoritativeVideo, resolveAuthoritativeVoice };
