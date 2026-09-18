@@ -3,7 +3,9 @@
   "version": "2.0.0",
   "description": "Content Factory V2 production architecture for controlled AI content generation.",
   "main": "index.js",
-  "directories": { "test": "tests" },
+  "directories": {
+    "test": "tests"
+  },
   "scripts": {
     "test:video-duration": "node tests/video-duration-resolution-test.js",
     "test:v2.10.3": "node tests/v2.10.3-cross-shot-continuity-test.js && node tests/v2.10.3-dashboard-continuity-ui-test.js && node tests/v2.10.3-dashboard-quality-recovery-wiring-test.js",
@@ -15,7 +17,7 @@
     "test:v2.10.1": "node tests/v2.10.1-quality-evidence-reconciliation-test.js && node tests/v2.10.1-quality-recovery-test.js && node tests/v2.10.1-external-call-accounting-test.js",
     "test:locked-keyframe": "node tests/locked-keyframe-production-test.js",
     "test:locked-keyframe:postgres": "node tests/locked-keyframe-postgres-test.js",
-    "test:v2.10": "node tests/v2.10-creative-production-test.js && node tests/v2.10-runtime-integration-test.js && node tests/v2.10-operator-draft-browser-test.js && node tests/locked-keyframe-production-test.js && vitest run --config apps/dashboard/client/vite.config.js",
+    "test:v2.10": "node tests/v2.10-creative-production-test.js && node tests/v2.10-runtime-integration-test.js && node tests/v2.10-operator-draft-browser-test.js && node tests/v2.10-first-video-ui-state-test.js && node tests/locked-keyframe-production-test.js && vitest run --config apps/dashboard/client/vite.config.js",
     "test:v2.10:postgres": "node tests/v2.10-postgres-integration-test.js",
     "test:v2.9.2": "node tests/v2.9.2-universal-media-stack-test.js && node tests/v2.9.2.2-capability-recovery-test.js && node tests/v2.9.2.4-recovery-evidence-test.js && node tests/v2.9.2.6-recovery-history-test.js && node tests/v2.9.2-semantic-retry-test.js && npm run test:v2.9.1",
     "test:v2.9.1": "node tests/v2.9.1-real-semantic-visual-evaluator-test.js && npm run test:v2.9",
@@ -85,7 +87,12 @@
     "test:v2.1:replicate-master": "node tests/v2.1-replicate-master-integration-test.js",
     "test:v2.2:growth-foundation": "node tests/v2.2-growth-foundation-test.js && node tests/v2.2-brand-brain-opportunity-test.js"
   },
-  "keywords": ["content-factory", "ai", "pipeline", "production"],
+  "keywords": [
+    "content-factory",
+    "ai",
+    "pipeline",
+    "production"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
