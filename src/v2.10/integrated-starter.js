@@ -138,10 +138,9 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
       throw new LockedKeyframeError('STALE_LOCKED_STAGE_PREFLIGHT', 'First-video input changed after authoritative preflight');
     }
     const prepared = await this.ensureLockedProduction({ draft, preflight, actor, productionId });
-    if (beforeProviderBoundary) await beforeProviderBoundary();
     const media = await prepared.runtime.mediaExecutor.execute({ workspaceId: projection.canonical.input.workspaceId,
       productionId, brandId: projection.canonical.input.brandId,
-      workerId: prepared.runtime.config.workerId, asset: projection.asset });
+      workerId: prepared.runtime.config.workerId, asset: projection.asset, beforeProviderBoundary });
     const quality = await prepared.runtime.visualQualityEvaluator.evaluate({ media,
       creativePlan: projection.canonical.input.creativePlan,
       expectedAspectRatio: projection.canonical.input.aspectRatio || '9:16', intendedContentType: 'cinematic',
