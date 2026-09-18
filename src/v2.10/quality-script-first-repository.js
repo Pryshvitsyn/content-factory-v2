@@ -272,6 +272,15 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
       [workflowId, workspaceId, brandId, stage, preflightId]);
       if (!inserted.rows[0]) throw lockedStageConflict('Locked-stage attempt could not be claimed');
 
+      if (stage === 'FIRST_VIDEO') {
+        const advanced = await client.query(`UPDATE v2_10.locked_keyframe_workflows
+          SET state='FIRST_VIDEO_RUNNING'
+          WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND state='KEYFRAME_APPROVED'
+          RETURNING id,state`, [workflowId, workspaceId, brandId]);
+        if (!advanced.rows[0]) throw lockedStageConflict(
+          'FIRST_VIDEO claim requires workflow state KEYFRAME_APPROVED before provider execution');
+      }
+
       if (ownsTransaction) await client.query('COMMIT');
       return Object.freeze({
         ...inserted.rows[0],
