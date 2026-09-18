@@ -266,6 +266,9 @@ class LockedKeyframeService {
     const current = await this.starter.preflightLockedFirstVideo({ draft, preflight: draft.final_preflight, keyframe });
     if (current.plan.fingerprint !== stored.fingerprint) throw new LockedKeyframeError('STALE_LOCKED_STAGE_PREFLIGHT',
       'Prepared first-video execution changed after preflight');
+    if (typeof this.starter.assertLockedFirstVideoExecutionReady === 'function') {
+      this.starter.assertLockedFirstVideoExecutionReady({ draft, preflight: draft.final_preflight, keyframe });
+    }
     const attempt = await this.repository.claimLockedStage({ workflowId: workflow.id, ...scope,
       stage: STAGES.FIRST_VIDEO, preflightId });
     if (attempt.reused) return attempt.result;
