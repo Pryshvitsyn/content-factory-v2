@@ -106,7 +106,7 @@ async function main() {
     }),
     beforeProviderBoundary: async () => { invalidBoundaryCalls += 1; },
   }), (error) => error.code === 'UNSUPPORTED_DURATION'
-    && /Seedance 2\.5 generation duration must be an integer from 1-30 seconds/.test(error.message));
+    && /Seedance 2\.5 generation duration must be an integer from 4-30 seconds/.test(error.message));
   assert.equal(invalidBoundaryCalls, 0, 'deterministic provider-input validation must happen before boundary marking');
   assert.equal(invalidPostCalls, 0, 'deterministic provider-input validation must happen before Replicate POST');
 
@@ -127,7 +127,7 @@ async function main() {
       resolution: '720p', aspectRatio: '9:16',
       providerSelection: { provider: 'replicate', modelFamily: 'SEEDANCE_2_5',
         model: 'bytedance/seedance-2.5', profile: 'STANDARD' },
-      resolvedSettings: { resolution: '720p', duration: 3, providerDurationSeconds: 3,
+      resolvedSettings: { resolution: '720p', duration: 4, providerDurationSeconds: 4,
         editorialDurationSeconds: 2.3 },
     }),
     beforeProviderBoundary: async () => { seedanceOrder.push('BOUNDARY'); },
