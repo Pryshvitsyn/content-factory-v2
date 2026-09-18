@@ -48,6 +48,7 @@ async function main() {
     await apply('migrations/20260901_locked_keyframe_production.sql');
     await apply('migrations/20260903_quality_script_first.sql');
     await apply('migrations/20260903_locked_stage_retry_history.sql');
+    await apply('migrations/20260918_first_video_pre_request_recovery.sql');
 
     const obsoleteUnique = await db.query(`SELECT conname FROM pg_constraint
       WHERE conrelid='v2_10.locked_stage_attempts'::regclass AND contype='u'
