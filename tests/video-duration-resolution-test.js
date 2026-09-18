@@ -12,7 +12,7 @@ const { validateMediaProbe } = require('../src/v2.5/media-validator');
 async function main() {
   const catalog = new ProviderCatalog({env:{REPLICATE_API_TOKEN:'synthetic',LUMA_API_KEY:'synthetic'}});
   const selection = durationSeconds => catalog.resolveSelection({provider:'replicate',model:'bytedance/seedance-2.5',profile:'STANDARD',durationSeconds});
-  for (const [editorial,provider] of [[3.75,4],[4,4],[4.2,5],[29.9,30]]) {
+  for (const [editorial,provider] of [[2.3,4],[3.75,4],[4,4],[4.2,5],[29.9,30]]) {
     const settings=selection(editorial).resolvedSettings;
     assert.equal(settings.editorialDurationSeconds,editorial);assert.equal(settings.providerDurationSeconds,provider);
   }
