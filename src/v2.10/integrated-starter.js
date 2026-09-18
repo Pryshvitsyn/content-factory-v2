@@ -117,6 +117,19 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
     return Object.freeze({ ...projection, providerExecutions: 0 });
   }
 
+  assertLockedFirstVideoExecutionReady({ draft, preflight, keyframe }) {
+    if (this.env.LIVE_PAID_GENERATION !== 'true') throw new LockedKeyframeError('V210_EXECUTION_DISABLED',
+      'LIVE_PAID_GENERATION=true is required after reviewing the first-video preflight');
+    const projection = this.lockedFirstVideoProjection({ draft, preflight, keyframe });
+    const runtime = this.runtime(projection.canonical.input, true);
+    try {
+      this.credentialCheck({ config: runtime.config, input: projection.canonical.input, env: runtime.env });
+    } catch (error) {
+      throw new LockedKeyframeError(error.code || 'V210_CREDENTIALS_MISSING', error.message);
+    }
+    return Object.freeze({ projection, runtime });
+  }
+
   async ensureLockedProduction({ draft, preflight, actor, productionId }) {
     const canonical = revisionSafeCanonical({ draft, preflight });
     const runtime = this.runtime(canonical.input, true);
@@ -131,9 +144,7 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
 
   async startLockedFirstVideo({ draft, preflight, keyframe, actor, productionId, expectedFingerprint,
     beforeProviderBoundary = null }) {
-    if (this.env.LIVE_PAID_GENERATION !== 'true') throw new LockedKeyframeError('V210_EXECUTION_DISABLED',
-      'LIVE_PAID_GENERATION=true is required after reviewing the first-video preflight');
-    const projection = this.lockedFirstVideoProjection({ draft, preflight, keyframe });
+    const { projection } = this.assertLockedFirstVideoExecutionReady({ draft, preflight, keyframe });
     if (!expectedFingerprint || projection.plan.fingerprint !== expectedFingerprint) {
       throw new LockedKeyframeError('STALE_LOCKED_STAGE_PREFLIGHT', 'First-video input changed after authoritative preflight');
     }
