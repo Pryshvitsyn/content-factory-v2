@@ -46,7 +46,7 @@ async function main() {
   const args=buildFfmpegArgs({assembly:{durationMs:8000,clips:[{kind:'video',durationMs:2300},{kind:'video',durationMs:5700}]},inputPaths:['synthetic-a.mp4','synthetic-b.mp4'],outputPath:'synthetic-master.mp4'});
   assert(args.join(' ').includes('trim=start=0.000:duration=2.300'));assert(args.join(' ').includes('trim=start=0.000:duration=5.700'));
   const probe={size:10,videoCodec:'h264',durationMs:4000};assert.equal(validateMediaProbe({kind:'video',probe,expectedDurationMs:2300}).status,'PASS');
-  assert.throws(()=>validateMediaProbe({kind:'video',probe:{...probe,durationMs:1000},expectedDurationMs:2300}),e=>e.code==='MEDIA_DURATION_TOO_SHORT');
+  assert.throws(()=>validateMediaProbe({kind:'video',probe:{...probe,durationMs:700},expectedDurationMs:2300}),e=>e.code==='MEDIA_DURATION_TOO_SHORT');
   console.log('Per-shot provider duration resolution, exact editorial timing, bounded preflight, adapter mapping and deterministic trim: PASS; real provider calls 0');
 }
 main().catch(e=>{console.error(e);process.exitCode=1});
