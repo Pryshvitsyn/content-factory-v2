@@ -88,6 +88,53 @@ async function main() {
   assert.equal(seedanceInput.generate_audio, true);
   assert.equal(seedanceInput.reference_audios.length, 1);
   assert.throws(() => buildSeedance25Input({ prompt: 'invalid refs', image: 'a', referenceVideos: ['b'] }), /cannot be combined/);
+
+  const seedanceSelection = catalog.resolveSelection({ provider: 'replicate', model: 'bytedance/seedance-2.5',
+    profile: 'STANDARD', capability: 'TEXT_TO_VIDEO' });
+  let invalidBoundaryCalls = 0;
+  let invalidPostCalls = 0;
+  const invalidSeedanceAdapter = createVideoAdapter(seedanceSelection, {
+    env, fetchImpl: async () => { invalidPostCalls += 1; return response({ json: { id: 'must-not-exist', status: 'failed' } }); },
+  });
+  await assert.rejects(() => invalidSeedanceAdapter.generate({
+    canonicalRequest: createCanonicalMediaRequest({
+      capability: 'TEXT_TO_VIDEO', prompt: 'Local validation must fail first', durationSeconds: 2.3,
+      resolution: '720p', aspectRatio: '9:16',
+      providerSelection: { provider: 'replicate', modelFamily: 'SEEDANCE_2_5',
+        model: 'bytedance/seedance-2.5', profile: 'STANDARD' },
+      resolvedSettings: { resolution: '720p', duration: 2.3, providerDurationSeconds: 2.3 },
+    }),
+    beforeProviderBoundary: async () => { invalidBoundaryCalls += 1; },
+  }), /Seedance 2\.5 duration must be 1-30 seconds/);
+  assert.equal(invalidBoundaryCalls, 0, 'deterministic provider-input validation must happen before boundary marking');
+  assert.equal(invalidPostCalls, 0, 'deterministic provider-input validation must happen before Replicate POST');
+
+  const seedanceOrder = [];
+  const seedanceResponses = [
+    response({ json: { id: 'seedance-prediction', status: 'succeeded', output: 'https://media.invalid/seedance.mp4' } }),
+    response({ bytes: Buffer.from('seedance-video') }),
+  ];
+  const validSeedanceAdapter = createVideoAdapter(seedanceSelection, {
+    env, fetchImpl: async (_url, options) => {
+      if (options.method === 'POST') seedanceOrder.push('POST');
+      return seedanceResponses.shift();
+    }, sleep: async () => {},
+  });
+  const validSeedanceResult = await validSeedanceAdapter.generate({
+    canonicalRequest: createCanonicalMediaRequest({
+      capability: 'TEXT_TO_VIDEO', prompt: 'Validated provider input', durationSeconds: 2.3,
+      resolution: '720p', aspectRatio: '9:16',
+      providerSelection: { provider: 'replicate', modelFamily: 'SEEDANCE_2_5',
+        model: 'bytedance/seedance-2.5', profile: 'STANDARD' },
+      resolvedSettings: { resolution: '720p', duration: 3, providerDurationSeconds: 3,
+        editorialDurationSeconds: 2.3 },
+    }),
+    beforeProviderBoundary: async () => { seedanceOrder.push('BOUNDARY'); },
+  });
+  assert.equal(validSeedanceResult.requestId, 'seedance-prediction');
+  assert.deepEqual(seedanceOrder.slice(0, 2), ['BOUNDARY','POST'],
+    'Replicate boundary must be persisted immediately before the actual POST');
+
   const wan3Adapter = createVideoAdapter(catalog.resolveSelection({ provider: 'replicate', model: 'alibaba/wan-3', profile: 'STANDARD' }), {
     env, fetchImpl: async () => response({ json: { id: 'never-called', status: 'failed' } }) });
   assert.equal(wan3Adapter.supports({ capability: 'TEXT_TO_VIDEO', model: 'alibaba/wan-3' }), true);
