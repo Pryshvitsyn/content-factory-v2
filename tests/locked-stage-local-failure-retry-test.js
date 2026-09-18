@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const { HardenedQualityScriptFirstPostgresRepository } = require('../src/v2.10/quality-script-first-repository');
 
 function dbFor({ latest = null, active = null, insertedId = 'attempt-new',
@@ -48,6 +49,13 @@ const args = {
 };
 
 async function main() {
+  const historicalMigration = fs.readFileSync('migrations/20260903_locked_stage_retry_history.sql', 'utf8');
+  const authoritativeRecoveryMigration = fs.readFileSync('migrations/20260918_first_video_pre_request_recovery.sql', 'utf8');
+  assert.equal(/CREATE UNIQUE INDEX locked_stage_one_active_attempt/.test(historicalMigration), false,
+    'replayed historical migration must not recreate an obsolete active-attempt predicate');
+  assert.equal(/CREATE UNIQUE INDEX locked_stage_one_active_attempt/.test(authoritativeRecoveryMigration), true,
+    'latest recovery migration must own the authoritative active-attempt predicate');
+
   {
     const db = dbFor({ latest: {
       id: 'attempt-old', status: 'FAILED', boundary_state: 'NOT_CROSSED',
