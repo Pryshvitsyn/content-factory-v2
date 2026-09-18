@@ -76,6 +76,20 @@ function revisionSafeCanonical({ draft, preflight }) {
   return Object.freeze({ ...canonical, raw, input, scope, ...identity });
 }
 
+function singleAssetCreativePlan(creativePlan, assetId) {
+  const shots = Array.isArray(creativePlan?.shots)
+    ? creativePlan.shots.filter((shot) => shot.assetId === assetId)
+    : [];
+  if (shots.length !== 1) {
+    throw new LockedKeyframeError('FIRST_VIDEO_CREATIVE_SCOPE_MISMATCH',
+      `Expected exactly one creative-plan shot for first-video asset '${assetId}', found ${shots.length}`);
+  }
+  return Object.freeze({
+    ...creativePlan,
+    shots: Object.freeze(shots.map((shot) => Object.freeze({ ...shot }))),
+  });
+}
+
 class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
   runtime(input, live) {
     const env = integratedEnvironment(this.env, input, live);
@@ -153,7 +167,7 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
       productionId, brandId: projection.canonical.input.brandId,
       workerId: prepared.runtime.config.workerId, asset: projection.asset, beforeProviderBoundary });
     const quality = await prepared.runtime.visualQualityEvaluator.evaluate({ media,
-      creativePlan: projection.canonical.input.creativePlan,
+      creativePlan: singleAssetCreativePlan(projection.canonical.input.creativePlan, projection.asset.asset_id),
       expectedAspectRatio: projection.canonical.input.aspectRatio || '9:16', intendedContentType: 'cinematic',
       qualityTier: projection.canonical.input.qualityVideoProfile?.name || 'STANDARD',
       provider: media.provider, model: media.model,
@@ -200,4 +214,4 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
 }
 
 module.exports = { V210_EXECUTION_IDENTITY_VERSION, V210IntegratedProductionStarter, executionIdentitySource,
-  integratedEnvironment, persistedDraftScope, revisionSafeCanonical, revisionSafeProductionKey };
+  integratedEnvironment, persistedDraftScope, revisionSafeCanonical, revisionSafeProductionKey, singleAssetCreativePlan };
