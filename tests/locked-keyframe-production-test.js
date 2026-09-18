@@ -5,6 +5,7 @@ const { ProviderCatalog } = require('../src/v2.8/provider-catalog');
 const { canonicalCreativeBrief, buildShotPrompt } = require('../src/v2.10/creative-contract');
 const { approvedKeyframeIdentity, bindApprovedKeyframe, buildFirstVideoStagePlan,
   buildKeyframeStagePlan, LockedKeyframeError, sanitizeEvaluatorResult } = require('../src/v2.10/locked-keyframe-contract');
+const { singleAssetCreativePlan } = require('../src/v2.10/integrated-starter');
 
 function brief() {
   return canonicalCreativeBrief({
@@ -79,6 +80,21 @@ async function main() {
   assert.deepEqual(videoPlan.externalCalls, { imageGeneration: 0, video: 1, semanticVideoEvaluation: 1,
     semanticRetries: 0, voice: 0, continuity: 0, renderer: 0, maximum: 2, alreadyMade: 0 });
   assert.equal(videoPlan.remainingProductionScheduled, false); assert.equal(videoPlan.autoPublish, false);
+
+  const scopedCreativePlan = singleAssetCreativePlan({
+    schemaVersion: 2,
+    shots: [
+      { shotId: 'shot-1', assetId: 'video-1', purpose: 'Opening worn bathroom' },
+      { shotId: 'shot-2', assetId: 'video-2', purpose: 'Renovation preparation' },
+      { shotId: 'shot-3', assetId: 'video-3', purpose: 'Waterproofing craft' },
+      { shotId: 'shot-4', assetId: 'video-4', purpose: 'Finished bathroom hero' },
+    ],
+    continuity: { environment: 'same bathroom shell' },
+  }, 'video-1');
+  assert.deepEqual(scopedCreativePlan.shots.map((shot) => shot.assetId), ['video-1'],
+    'FIRST_VIDEO semantic QA must evaluate only the opening shot, never the complete multi-shot ad');
+  assert.equal(scopedCreativePlan.continuity.environment, 'same bathroom shell');
+
   assert.throws(() => buildFirstVideoStagePlan({ draft, canonical, keyframe: keyframe({ version: 3 }),
     executionAsset: asset }), (error) => error.code === 'KEYFRAME_REFERENCE_MISMATCH');
 
