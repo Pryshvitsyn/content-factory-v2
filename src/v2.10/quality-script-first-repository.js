@@ -54,7 +54,6 @@ function isKnownTerminalFirstVideoProviderFailure(attempt, stage) {
   return stage === 'FIRST_VIDEO'
     && attempt?.status === 'NEEDS_RECONCILIATION'
     && attempt?.boundary_state === 'MAY_HAVE_STARTED'
-    && Boolean(attempt?.provider_request_id)
     && TERMINAL_FIRST_VIDEO_PROVIDER_FAILURE_CODES.includes(attempt?.error?.code);
 }
 
@@ -160,7 +159,8 @@ async function archiveAndResetTerminalFirstVideoExecution(client, {
   const media = mediaRows[0];
   const exactTerminalFailure = media.asset_id === workflow.opening_asset_id
     && media.status === 'FAILED'
-    && media.provider_request_id === attempt.provider_request_id
+    && Boolean(media.provider_request_id)
+    && (!attempt.provider_request_id || media.provider_request_id === attempt.provider_request_id)
     && TERMINAL_FIRST_VIDEO_PROVIDER_FAILURE_CODES.includes(media.error?.code)
     && media.error?.code === attempt.error?.code
     && !media.artifact_id
@@ -191,7 +191,7 @@ async function archiveAndResetTerminalFirstVideoExecution(client, {
     (attempt_id,workflow_id,workspace_id,brand_id,stage,provider_request_id,media_execution_id,snapshot)
     VALUES($1,$2,$3,$4,'FIRST_VIDEO',$5,$6,$7::jsonb)
     ON CONFLICT(attempt_id,media_execution_id) DO NOTHING`,
-  [attempt.id, workflowId, workspaceId, brandId, attempt.provider_request_id, media.id, JSON.stringify(media)]);
+  [attempt.id, workflowId, workspaceId, brandId, media.provider_request_id, media.id, JSON.stringify(media)]);
 
   await client.query(`DELETE FROM v2_1.productions
     WHERE id=$1 AND workspace_id=$2 AND brand_id=$3`,
@@ -202,7 +202,7 @@ async function archiveAndResetTerminalFirstVideoExecution(client, {
     productionId: workflow.production_id,
     openingAssetId: workflow.opening_asset_id,
     terminalProviderFailure: true,
-    providerRequestId: attempt.provider_request_id,
+    providerRequestId: media.provider_request_id,
     archivedMediaExecutionId: media.id,
     transientProductionReset: true,
     transientMediaRowsReset: 1,
