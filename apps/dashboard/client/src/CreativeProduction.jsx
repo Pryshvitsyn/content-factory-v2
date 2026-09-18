@@ -122,7 +122,10 @@ export function CreativeProduction() {
   const voiceReady = !voiceNeedsApproval || brief.voice.approved === true;
   const imageProviders = providers.filter((provider) => provider.models?.some((model) => model.capabilities?.includes('TEXT_TO_IMAGE')));
 
-  const invalidate = () => setPreflight(null);
+  const invalidate = () => {
+    setPreflight(null);
+    setFirstVideoPreflight(null);
+  };
   const edit = (fn, voiceChange = false) => {
     setBrief((current) => {
       const next = fn(current);
@@ -153,6 +156,7 @@ export function CreativeProduction() {
     setVideo({ provider: persisted.provider, model: persisted.model, modelFamily: model?.modelFamily || persisted.modelFamily || '',
       profile, resolution: resolvedResolution(model, profile) || persisted.resolution || null });
     setPreflight(row.final_preflight || row.finalPreflight || null);
+    setFirstVideoPreflight(null);
     setPreview(loaded.voice?.previewArtifact || null);
     setUploadedFile(null); setAttested(false);
     setMessage(`Resumed ${statusText(row)} draft · revision ${row.revision || 1}. External calls: 0.`);
@@ -173,7 +177,7 @@ export function CreativeProduction() {
   }
 
   async function chooseBrand(nextBrandId) {
-    setBrandId(nextBrandId); setDraft(null); setPreflight(null); setPreview(null);
+    setBrandId(nextBrandId); setDraft(null); setPreflight(null); setFirstVideoPreflight(null); setPreview(null);
     if (!nextBrandId) { setDrafts([]); setBrief(initialBrief()); setVideo(emptyVideo()); return; }
     try {
       let catalog = providers;
@@ -284,7 +288,7 @@ export function CreativeProduction() {
     if (completeness.status !== 'PASS') { setMessage('Creative Validation must be PASS before final preflight.'); return; }
     if (!routeReady) { setMessage('Choose a configured video provider, model and profile.'); return; }
     if (!continuitySupported) { setMessage('Selected model does not support the reference policy used by the storyboard.'); return; }
-    setBusy('preflight'); setPreflight(null);
+    setBusy('preflight'); setPreflight(null); setFirstVideoPreflight(null);
     try {
       const saved = await persistDraft({ announce: false });
       const value = await api(`/api/v2.10/creative-drafts/${saved.id}/preflight`, { method: 'POST',
@@ -314,7 +318,7 @@ export function CreativeProduction() {
     try {
       const value = await api(`/api/v2.10/creative-drafts/${draft.id}/voice-approve`, { method: 'POST',
         body: JSON.stringify({ brandId, voice: brief.voice, previewArtifact: preview }) });
-      setDraft(value); setBrief(rowBrief(value)); setMessage('Exact voice configuration approved.'); setPreflight(null);
+      setDraft(value); setBrief(rowBrief(value)); setMessage('Exact voice configuration approved.'); invalidate();
     } catch (error) { setMessage(error.message); }
     finally { setBusy(null); }
   }
@@ -407,6 +411,7 @@ export function CreativeProduction() {
 
   async function preflightLockedVideo() {
     setBusy('locked-video-preflight');
+    setFirstVideoPreflight(null);
     try {
       const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/video-preflight`, { method: 'POST',
         body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id }) });
