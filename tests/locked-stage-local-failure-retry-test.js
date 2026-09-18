@@ -30,6 +30,9 @@ function dbFor({ latest = null, active = null, insertedId = 'attempt-new',
         id: insertedId, workflow_id: params[0], workspace_id: params[1], brand_id: params[2],
         stage: params[3], preflight_id: params[4], status: 'RUNNING', boundary_state: 'NOT_CROSSED',
       }] };
+      if (text.includes("SET state='FIRST_VIDEO_RUNNING'")) {
+        return { rows: [{ id: params[0], state: 'FIRST_VIDEO_RUNNING' }] };
+      }
       throw new Error(`Unexpected query: ${text}`);
     },
     release() { calls.push({ sql: 'RELEASE' }); },
@@ -231,6 +234,18 @@ async function main() {
     assert.equal(db.calls.filter((call) => call.sql.includes('DELETE FROM v2_1.productions')).length, 1);
     assert.equal(db.calls.some((call) => call.sql.includes('UPDATE v2_10.locked_stage_attempts')), false,
       'terminal locked-stage evidence remains immutable');
+  }
+
+  {
+    const db = dbFor();
+    const repository = new HardenedQualityScriptFirstPostgresRepository({ db });
+    const result = await repository.claimLockedStage({
+      ...args, stage: 'FIRST_VIDEO', preflightId: 'fresh-four-second-preflight',
+    });
+    assert.equal(result.id, 'attempt-new');
+    const runningTransition = db.calls.find((call) => call.sql.includes("SET state='FIRST_VIDEO_RUNNING'"));
+    assert.ok(runningTransition, 'FIRST_VIDEO claim must enter FIRST_VIDEO_RUNNING before provider execution');
+    assert.deepEqual(runningTransition.params, ['workflow-1','workspace-1','brand-1']);
   }
 
   {
