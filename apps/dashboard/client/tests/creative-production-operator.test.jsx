@@ -56,7 +56,7 @@ describe('V2.10 operator-first Creative Production UX', () => {
     const providers = [{
       id: 'replicate', displayName: 'Replicate', configured: true, models: [{
         modelId: 'alibaba/wan-3', displayName: 'Wan 3', modelFamily: 'WAN_3', selectable: true,
-        capabilities: ['TEXT_TO_VIDEO','IMAGE_TO_VIDEO','AUDIO_DISABLE_SUPPORTED'],
+        capabilities: ['TEXT_TO_VIDEO','IMAGE_TO_VIDEO','AUDIO_DISABLE_SUPPORTED'], constraints: { aspectRatios: ['9:16','16:9'] },
         profiles: { ECONOMY: { resolution: '480p' }, STANDARD: { resolution: '720p' }, PREMIUM: { resolution: '1080p' } },
       }],
     }];
@@ -79,6 +79,9 @@ describe('V2.10 operator-first Creative Production UX', () => {
     expect(screen.getByLabelText('VIDEO MODEL').value).toBe('alibaba/wan-3');
     expect(screen.getByLabelText('VIDEO PROFILE').value).toBe('STANDARD');
     expect(screen.getByLabelText('RESOLVED OUTPUT').value).toContain('720p source');
+    expect(screen.getByLabelText('OUTPUT FORMAT').value).toBe('9:16');
+    fireEvent.change(screen.getByLabelText('OUTPUT FORMAT'), { target: { value: '16:9' } });
+    expect(screen.getByLabelText('RESOLVED OUTPUT').value).toContain('16:9 · final master 1920×1080');
     expect(screen.getByText('WAN_3')).toBeTruthy();
     expect(screen.getByText(/TEXT_TO_VIDEO · IMAGE_TO_VIDEO/)).toBeTruthy();
     expect(screen.getByLabelText('DRAFT').value).toBe(draftId);

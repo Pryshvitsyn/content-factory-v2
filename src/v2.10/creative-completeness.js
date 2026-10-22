@@ -36,6 +36,7 @@ function validateCreativeCompleteness(input) {
   const topOk = requiredTop.every((field) => isSpecific(brief[field], field === 'title' || field === 'targetPlatform' ? 1 : 2));
   const duration = shots.reduce((sum, shot) => sum + (Number.isFinite(shot.durationSeconds) ? shot.durationSeconds : 0), 0);
   const checks = [
+    item('OUTPUT_FORMAT', ['9:16', '16:9'].includes(brief.aspectRatio) ? 'PASS' : 'FAIL', 'Output format must be 9:16 vertical or 16:9 landscape.'),
     item('CREATIVE_BRIEF', topOk && countOk ? 'PASS' : 'FAIL', countOk ? 'Required brief fields must be concrete.' : 'Storyboard requires 2–5 shots.'),
     item('SUBJECT_SPECIFICITY', every(shots, 'subject') ? 'PASS' : 'FAIL', 'Every shot needs a concrete subject.'),
     item('ACTION_SPECIFICITY', every(shots, 'action') ? 'PASS' : 'FAIL', 'Every shot needs a concrete visible action.'),

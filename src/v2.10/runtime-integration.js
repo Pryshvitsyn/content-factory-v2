@@ -48,6 +48,7 @@ function requestedVideoSelection(input = {}) {
     model: String(input.model || ''),
     profile: String(input.profile || '').toUpperCase(),
     resolution: input.resolution || null,
+    aspectRatio: input.aspectRatio === '16:9' ? '16:9' : '9:16',
     allowExperimental: input.allowExperimental === true,
   });
 }
@@ -62,7 +63,7 @@ function requiredCapability(shot, capabilities = []) {
 async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief: input } = {}) {
   if (!catalog) throw new V210RuntimeError('V210_PROVIDER_CATALOG_REQUIRED', 'Authoritative Provider Catalog is required');
   const brief = canonicalCreativeBrief(input);
-  const requested = requestedVideoSelection(request);
+  const requested = requestedVideoSelection({ ...request, aspectRatio: brief.aspectRatio });
   if (!requested.provider || !requested.model || !requested.profile) {
     throw new V210RuntimeError('VIDEO_SELECTION_INCOMPLETE', 'Explicit provider, model, and profile are required');
   }
@@ -79,7 +80,7 @@ async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief:
     const capability = requiredCapability(shot, advertised);
     const resolved = scoped.resolveSelection({ provider: requested.provider, model: requested.model,
       profile: requested.profile, capability, durationSeconds: shot.durationSeconds,
-      resolution: requested.resolution, aspectRatio: '9:16', allowExperimental: requested.allowExperimental });
+      resolution: requested.resolution, aspectRatio: requested.aspectRatio, allowExperimental: requested.allowExperimental });
     if (!base) base = resolved;
     if (base.provider !== resolved.provider || base.model !== resolved.model || base.profile !== resolved.profile) {
       throw new V210RuntimeError('V210_PROVIDER_RESOLUTION_CONFLICT',
@@ -153,7 +154,7 @@ function canonicalRequestForDraft(draft, brief, video) {
   return Object.freeze({ requestId: draft.id, brandId: draft.brand_id || draft.brandId, title: brief.title,
     objective: canonicalObjective(brief.objective), creativeObjective: brief.objective,
     platform: brief.targetPlatform, targetDurationSeconds: brief.targetDurationSeconds,
-    aspectRatio: '9:16', renderMode: 'QUALITY', provider: video.provider, model: video.model,
+    aspectRatio: brief.aspectRatio, renderMode: 'QUALITY', provider: video.provider, model: video.model,
     modelFamily: video.modelFamily || null, profile: video.profile, hook: brief.hook,
     coreMessage: brief.coreMessage, creativeBrief: brief.creativeConcept, cta: brief.cta,
     voiceover: sceneCopy(brief).filter(Boolean).join(' '), visualDirection: brief.visualStyle,
@@ -162,6 +163,13 @@ function canonicalRequestForDraft(draft, brief, video) {
 
 function buildCanonicalV210Input({ draft, preflight } = {}) {
   const brief = canonicalCreativeBrief(draft.creative_brief || draft.creativeBrief);
+  if (!['9:16', '16:9'].includes(brief.aspectRatio)) {
+    throw new V210RuntimeError('V210_ASPECT_RATIO_INVALID', 'Output aspect ratio must be 9:16 or 16:9');
+  }
+  const landscape = brief.aspectRatio === '16:9';
+  const masterProfile = landscape
+    ? { profile: 'SOCIAL_LANDSCAPE', container: 'mp4', codec: 'h264', width: 1920, height: 1080, framesPerSecond: 30, aspectRatio: '16:9', audioCodec: 'aac' }
+    : { profile: 'SOCIAL_VERTICAL', container: 'mp4', codec: 'h264', width: 1080, height: 1920, framesPerSecond: 30, aspectRatio: '9:16', audioCodec: 'aac' };
   const video = preflight.authoritativeVideo;
   if (!video?.provider || !video.model || !video.profile) {
     throw new V210RuntimeError('V210_AUTHORITATIVE_PREFLIGHT_REQUIRED', 'Authoritative V2.10 provider resolution is required');
@@ -191,7 +199,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
           model_version: video.modelVersion || null, profile: video.profile, capability,
           resolved_settings: { ...(video.resolvedSettings || {}), duration: shot.durationSeconds },
           prompt: buildShotPrompt(brief, shot), resolution: video.resolvedSettings?.resolution || qualityProfile.resolution,
-          aspect_ratio: '9:16', num_frames: numFrames, frames_per_second: fps,
+          aspect_ratio: brief.aspectRatio, num_frames: numFrames, frames_per_second: fps,
           go_fast: qualityProfile.goFast === true, optimize_prompt: qualityProfile.optimizePrompt,
           interpolate_output: qualityProfile.interpolateOutput, sample_shift: qualityProfile.sampleShift },
       }],
@@ -212,11 +220,10 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
       preventDuplicateNarration: true, voice: voiceEnabled ? { provider: voiceCatalogProvider,
         model: voiceModel, voiceId, language: brief.voice.language || 'en' } : null },
     semanticCritic: preflight.quality?.semanticCriticResolved || null,
-    master: { profile: 'SOCIAL_VERTICAL', container: 'mp4', codec: 'h264', width: 1080, height: 1920,
-      framesPerSecond: 30, aspectRatio: '9:16', audioCodec: 'aac' } };
+    master: masterProfile };
   const raw = { schema_version: '2.6', render_mode: 'QUALITY', brand_id: draft.brand_id || draft.brandId,
     production_key: `v210-${draft.id}`, title: brief.title, objective: canonicalObjective(brief.objective),
-    target_platform: brief.targetPlatform, target_duration_seconds: brief.targetDurationSeconds, aspect_ratio: '9:16',
+    target_platform: brief.targetPlatform, target_duration_seconds: brief.targetDurationSeconds, aspect_ratio: brief.aspectRatio,
     hook: brief.hook, core_message: brief.coreMessage,
     approved_spoken_copy: approvedSpokenCopy || [brief.hook, brief.coreMessage, brief.cta].filter(Boolean).join(' '),
     spoken_copy_policy: { contract_version: 'v2.8.1', source: 'v2.10-approved-storyboard', strict_approved_copy: true },

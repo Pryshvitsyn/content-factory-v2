@@ -185,20 +185,28 @@ The asset orchestrator is capability-aware for text, image, video, voice, and au
 
 The architecture does **not** claim that every media provider is already connected. The orchestrator provides the production boundary so concrete image/video/voice/audio adapters can be added independently.
 
-## What Is Not Complete Yet
+## Production Readiness and Remaining Work
 
-The system is not yet the finished end-to-end media factory. The remaining production layers are deliberately explicit:
+The repository contains a durable video-ad production path, configured provider adapters, explicit 9:16/16:9 QUALITY
+master profiles, FFmpeg rendering, technical and perceptual validation, immutable artifacts, and human review. This
+is a production workflow implementation; it is not proof that a particular local installation has working database
+connectivity, credentials, model access, storage capacity, or acceptable creative output. A live pilot must pass the
+operator preflight and the real media, audio, final-master, and human-review checks before it can be called ready.
 
-1. concrete image/video/voice/audio provider adapters;
-2. asset generation at real media scale;
-3. stronger continuity enforcement across generated assets;
-4. broader edit templates beyond the supported social-video delivery profiles;
-5. production-scale rendering/export operations;
-6. additional platform-specific adaptation profiles;
-7. richer perceptual QA and review tooling;
-8. production analytics and learning feedback.
+Current limits that remain visible to the operator:
 
-A capability is not considered complete merely because its schema or interface exists. It becomes part of the certified system only after implementation and automated verification.
+1. Provider support is capability- and credential-specific. Not every catalog entry is configured or verified with a live account, and the system does not silently switch providers.
+2. The V2.10 locked-opening-keyframe pilot is portrait 9:16 only; the standard QUALITY production supports 9:16 and 16:9.
+3. Audio quality still needs human listening for intelligibility, clipping, loudness, masking, and natural delivery; current automated gates do not claim all of these checks.
+4. TikTok/YouTube delivery is MP4 export for manual upload. Direct channel OAuth, upload, scheduling, and post-publication analytics are not implemented.
+5. Automatic publishing and automatic promotion/certification remain disabled by policy.
+6. Product-specific brand truth, rights to media/voices, factual claims, and final ad quality require review by the operator.
+
+Schemas, catalog entries, and passing mocked tests do not count as proof of a live provider run. Record the exact
+provider/model, cost boundary, output artifact, validation evidence, and human decision for each pilot.
+
+See [the open-source video ad factory comparison](docs/OPEN-SOURCE-VIDEO-AD-FACTORY-COMPARISON.md) for a code-backed
+feature map against relevant public projects and the acceptance evidence required for the first real ad.
 
 ## Provider Architecture
 

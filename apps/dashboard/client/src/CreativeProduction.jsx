@@ -20,6 +20,7 @@ const makeShot = (index) => ({
 
 const initialBrief = () => ({
   title: '', objective: '', targetPlatform: 'Instagram Reels', targetDurationSeconds: 10,
+  aspectRatio: '9:16',
   hook: '', coreMessage: '', cta: '', audienceIntent: '', creativeConcept: '', visualStyle: '',
   storyboard: [makeShot(0), makeShot(1)],
   continuity: { ...Object.fromEntries(CONTINUITY_FIELDS.map((field) => [field, ''])), referencePolicy: 'NONE' },
@@ -111,9 +112,12 @@ export function CreativeProduction() {
   const selectedModel = videoModels.find((model) => model.modelId === video.model) || null;
   const profiles = Object.keys(selectedModel?.profiles || {});
   const effectiveResolution = resolvedResolution(selectedModel, video.profile);
+  const supportedAspectRatios = selectedModel?.constraints?.aspectRatios || ['9:16', '16:9'];
+  const modelSupportsAspectRatio = !selectedModel || supportedAspectRatios.includes(brief.aspectRatio);
+  const lockedKeyframeSupported = brief.aspectRatio === '9:16';
   const continuityRequested = brief.storyboard.some((shot) => shot.referencePolicy !== 'NONE');
   const continuitySupported = !continuityRequested || Boolean(selectedModel?.capabilities?.some((capability) => ['IMAGE_TO_VIDEO','REFERENCE_TO_VIDEO'].includes(capability)));
-  const routeReady = Boolean(selectedProvider?.configured && selectedModel && video.profile && profiles.includes(video.profile));
+  const routeReady = Boolean(selectedProvider?.configured && selectedModel && video.profile && profiles.includes(video.profile) && modelSupportsAspectRatio);
   const voiceProviders = providers.filter((provider) => Array.isArray(provider.models)
     && provider.models.some((model) => model.capabilities?.includes(SPEECH_CAPABILITY)));
   const selectedVoiceProvider = voiceProviders.find((provider) => provider.id === brief.voice.provider) || null;
@@ -260,7 +264,7 @@ export function CreativeProduction() {
 
   function currentProviderSelection() {
     return routeReady ? { provider: video.provider, model: video.model, modelFamily: selectedModel?.modelFamily || null,
-      profile: video.profile, resolution: effectiveResolution || null } : {};
+      profile: video.profile, resolution: effectiveResolution || null, aspectRatio: brief.aspectRatio } : {};
   }
 
   async function persistDraft({ announce = true } = {}) {
@@ -452,6 +456,10 @@ export function CreativeProduction() {
       <section className="panel"><h2 className="panel-title">CREATIVE BRIEF</h2><div className="form-grid">
         <Field label="TITLE" value={brief.title} area={false} onChange={(value) => setTop('title', value)} />
         <Field label="TARGET PLATFORM" value={brief.targetPlatform} area={false} onChange={(value) => setTop('targetPlatform', value)} />
+        <SelectField label="OUTPUT FORMAT" value={brief.aspectRatio} onChange={(value) => edit((current) => ({ ...current, aspectRatio: value }))}>
+          <option value="9:16">Vertical · 9:16 · TikTok / Reels / Shorts</option>
+          <option value="16:9">Landscape · 16:9 · YouTube</option>
+        </SelectField>
         <Field label="TARGET DURATION SECONDS" value={brief.targetDurationSeconds} number area={false} onChange={(value) => setTop('targetDurationSeconds', value)} />
         <Field label="OBJECTIVE" value={brief.objective} onChange={(value) => setTop('objective', value)} />
         <Field label="HOOK" value={brief.hook} onChange={(value) => setTop('hook', value)} />
@@ -503,9 +511,9 @@ export function CreativeProduction() {
       })}</section>
 
       <section className="panel"><h2 className="panel-title">LOCKED OPENING KEYFRAME</h2>
-        <p className="boundary">This bounded workflow creates or stores only the opening still, validates it, and then waits for explicit approval. It cannot generate video, voice, continuity, a master, or publication implicitly.</p>
+        <p className="boundary">This bounded workflow creates or stores only a portrait 9:16 opening still, validates it, and then waits for explicit approval. It cannot generate video, voice, continuity, a master, or publication implicitly. Landscape productions skip this portrait-only workflow.</p>
         <div className="form-grid">
-          <SelectField label="KEYFRAME SOURCE" value={keyframeSource} onChange={(value) => { setKeyframeSource(value); setKeyframePreflight(null); }}>
+          <SelectField label="KEYFRAME SOURCE" value={keyframeSource} disabled={!lockedKeyframeSupported} onChange={(value) => { setKeyframeSource(value); setKeyframePreflight(null); }}>
             <option value="OPERATOR_UPLOAD">Operator upload · 0 image calls</option><option value="AI_GENERATED">AI generated · 1 image call</option>
           </SelectField>
           {keyframeSource === 'AI_GENERATED' ? <>
@@ -513,18 +521,18 @@ export function CreativeProduction() {
               <option value="">Choose configured provider</option>{imageProviders.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.configured}>{provider.displayName} · {humanProviderState(provider)}</option>)}
             </SelectField>
             <Field label="IMAGE MODEL" value={keyframeRoute.model} area={false} onChange={(model) => { setKeyframeRoute((current) => ({ ...current, model })); setKeyframePreflight(null); }} />
-          </> : <label>UPLOAD 9:16 KEYFRAME<input aria-label="Upload keyframe" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { setKeyframeFile(event.target.files?.[0] || null); setKeyframePreflight(null); }} /></label>}
+          </> : <label>UPLOAD 9:16 KEYFRAME<input aria-label="Upload keyframe" type="file" accept="image/png,image/jpeg,image/webp" disabled={!lockedKeyframeSupported} onChange={(event) => { setKeyframeFile(event.target.files?.[0] || null); setKeyframePreflight(null); }} /></label>}
         </div>
         <div className="actions">
-          <button type="button" className="secondary" disabled={!draft || busy || (keyframeSource === 'AI_GENERATED' && !keyframeRoute.model)} onClick={preflightKeyframeStage}>KEYFRAME PREFLIGHT · 0 CALLS</button>
-          <button type="button" className="primary" disabled={!keyframePreflight || busy || (keyframeSource === 'OPERATOR_UPLOAD' && !keyframeFile)} onClick={executeKeyframeStage}>EXECUTE KEYFRAME STAGE</button>
-          <button type="button" className="secondary" disabled={keyframeResult?.validation?.status !== 'PASS' || busy || keyframeResult?.keyframe?.approvalDecision === 'APPROVED'} onClick={approveLockedKeyframe}>APPROVE EXACT KEYFRAME</button>
+          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || !draft || busy || (keyframeSource === 'AI_GENERATED' && !keyframeRoute.model)} onClick={preflightKeyframeStage}>KEYFRAME PREFLIGHT · 0 CALLS</button>
+          <button type="button" className="primary" disabled={!lockedKeyframeSupported || !keyframePreflight || busy || (keyframeSource === 'OPERATOR_UPLOAD' && !keyframeFile)} onClick={executeKeyframeStage}>EXECUTE KEYFRAME STAGE</button>
+          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || keyframeResult?.validation?.status !== 'PASS' || busy || keyframeResult?.keyframe?.approvalDecision === 'APPROVED'} onClick={approveLockedKeyframe}>APPROVE EXACT KEYFRAME</button>
         </div>
         {keyframePreflight ? <div className="plan-grid"><div className="key-value"><span>KEYFRAME CALLS</span><p>Image {keyframePreflight.externalCalls.imageGeneration} · Semantic {keyframePreflight.externalCalls.semanticImageEvaluation} · Retries 0 · Maximum {keyframePreflight.externalCalls.maximum}</p></div><div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {keyframePreflight.cost.status}</p></div></div> : null}
         {keyframeResult ? <div className="voice-status-line"><span>KEYFRAME VALIDATION / APPROVAL</span><strong className={keyframeResult.validation.status === 'PASS' ? 'pass' : 'fail'}>{keyframeResult.validation.status} · {keyframeResult.keyframe.approvalDecision || 'APPROVAL REQUIRED'}</strong></div> : null}
         <div className="actions">
-          <button type="button" className="secondary" disabled={!preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
-          <button type="button" className="primary" disabled={!firstVideoPreflight || busy} onClick={startLockedVideo}>START FIRST VIDEO ONLY</button>
+          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || !preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
+          <button type="button" className="primary" disabled={!lockedKeyframeSupported || !firstVideoPreflight || busy} onClick={startLockedVideo}>START FIRST VIDEO ONLY</button>
         </div>
         {firstVideoPreflight ? <div className="plan-grid"><div className="key-value"><span>EXACT REFERENCE</span><p>{firstVideoPreflight.keyframe.artifactId} · v{firstVideoPreflight.keyframe.version} · {firstVideoPreflight.keyframe.contentHash}</p></div><div className="key-value"><span>BOUNDED EXECUTION</span><p>Video 1 · Semantic 1 · Voice 0 · Continuity 0 · Renderer 0 · Maximum 2</p></div></div> : null}
       </section>
@@ -549,7 +557,7 @@ export function CreativeProduction() {
           <SelectField label="VIDEO PROFILE" value={video.profile} disabled={!selectedModel} onChange={chooseProfile}>
             <option value="">Choose profile</option>{profiles.map((profile) => <option key={profile}>{profile}</option>)}
           </SelectField>
-          <label>RESOLVED OUTPUT<input aria-label="RESOLVED OUTPUT" readOnly value={effectiveResolution ? `${effectiveResolution} source · 9:16 · final master 1080×1920` : ''} /></label>
+          <label>RESOLVED OUTPUT<input aria-label="RESOLVED OUTPUT" readOnly value={effectiveResolution ? `${effectiveResolution} source · ${brief.aspectRatio} · final master ${brief.aspectRatio === '16:9' ? '1920×1080' : '1080×1920'}` : ''} /></label>
         </div>
         <div className="route-truth-grid">
           <div><span>MODEL FAMILY</span><strong>{selectedModel?.modelFamily || '—'}</strong></div>
