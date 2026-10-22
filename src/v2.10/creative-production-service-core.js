@@ -49,7 +49,9 @@ class CreativeProductionService {
         model: this.env.SEMANTIC_VISUAL_MODEL || null } });
   }
   authoritativeMaster(brief) {
-    return Object.freeze({ profile: 'SOCIAL_VERTICAL', resolution: '1080x1920', fps: 30,
+    const landscape = brief.aspectRatio === '16:9';
+    return Object.freeze({ profile: landscape ? 'SOCIAL_LANDSCAPE' : 'SOCIAL_VERTICAL',
+      resolution: landscape ? '1920x1080' : '1080x1920', aspectRatio: landscape ? '16:9' : '9:16', fps: 30,
       availableVoiceDurationSeconds: brief.targetDurationSeconds,
       audioStrategy: brief.voice.sourceType || 'NO_VOICE' });
   }
@@ -83,7 +85,7 @@ class CreativeProductionService {
     if (draft.status === 'STARTED' || ['RUNNING','NEEDS_RECONCILIATION'].includes(draft.start_state)) {
       throw new CreativeProductionError(409, 'PREFLIGHT_UNAVAILABLE', 'Started or unresolved creative drafts cannot be re-preflighted');
     }
-    const requested = requestedVideoSelection(video);
+    const requested = requestedVideoSelection({ ...video, aspectRatio: draft.creative_brief.aspectRatio || '9:16' });
     if (!same(draft.provider_selection, requested)) {
       const validation = validateCreativeCompleteness(draft.creative_brief);
       draft = await this.repository.updateDraft({ id, ...scope, brief: canonicalCreativeBrief(draft.creative_brief),

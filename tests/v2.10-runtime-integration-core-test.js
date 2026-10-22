@@ -107,6 +107,11 @@ async function main() {
     { shotId: 's2', capability: CAPABILITIES.IMAGE_TO_VIDEO },
   ]);
 
+  const landscapeBrief = { ...referencedBrief, aspectRatio: '16:9' };
+  const landscapeVideo = await resolveAuthoritativeVideo({ catalog, workspaceId: 'workspace-1', brief: landscapeBrief,
+    request: { provider: 'replicate', model: 'alibaba/wan-3', profile: 'STANDARD', resolution: '720p' } });
+  assert.equal(landscapeVideo.requested.aspectRatio, '16:9');
+
   assert.equal(canonicalObjective('ORGANIC REACH'), 'ORGANIC_REACH');
   assert.equal(canonicalObjective(referencedBrief.objective), 'EXPERIMENT');
   const preflight = {
@@ -123,6 +128,15 @@ async function main() {
   assert.deepEqual(secondAsset.generation_requirements.v210_reference, {
     policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: 'a1',
   });
+
+  const landscapePreflight = { ...preflight, authoritativeVideo: landscapeVideo };
+  const landscapeCanonical = buildCanonicalV210Input({ draft: { ...draft, creative_brief: landscapeBrief }, preflight: landscapePreflight });
+  assert.equal(landscapeCanonical.input.aspectRatio, '16:9');
+  assert.equal(landscapeCanonical.input.mediaStack.master.profile, 'SOCIAL_LANDSCAPE');
+  assert.equal(landscapeCanonical.input.mediaStack.master.width, 1920);
+  assert.equal(landscapeCanonical.input.mediaStack.master.height, 1080);
+  assert.equal(landscapeCanonical.input.assetPlan.assets.find((asset) => asset.kind === 'video').generation_requirements.aspect_ratio, '16:9');
+  assert.equal(landscapeCanonical.canonicalRequest.aspectRatio, '16:9');
 
   let preparedInput = null;
   const configResolver = (env, input) => ({

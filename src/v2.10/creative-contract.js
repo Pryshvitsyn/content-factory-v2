@@ -90,6 +90,7 @@ function canonicalCreativeBrief(raw = {}) {
   const value = {
     creativeSchemaVersion: SCHEMA_VERSION, title: text(raw.title), objective: text(raw.objective),
     targetPlatform: text(raw.targetPlatform), targetDurationSeconds: Number(raw.targetDurationSeconds),
+    aspectRatio: text(raw.aspectRatio) || '9:16',
     hook: text(raw.hook), coreMessage: text(raw.coreMessage), cta: text(raw.cta),
     audienceIntent: text(raw.audienceIntent), creativeConcept: text(raw.creativeConcept), visualStyle: text(raw.visualStyle),
     storyboard, continuity: canonicalContinuity(raw.continuity), voice: canonicalVoice(raw.voice),
@@ -171,6 +172,7 @@ function buildShotPrompt(briefInput, shotInput) {
   const mayChange = shot.mayChange.length ? shot.mayChange.join('; ') : 'only changes explicitly required by the action';
   return [
     `Advertising objective: ${brief.objective}. Creative concept: ${brief.creativeConcept}.`,
+    `Required full-frame output composition: ${brief.aspectRatio}; keep the subject and important action inside platform-safe framing.`,
     `Shot purpose: ${shot.purpose}. Subject: ${shot.subject}. Environment: ${shot.environment}.`,
     shot.startState ? `START STATE: ${shot.startState}.` : '',
     `ACTION: ${shot.action}.`,

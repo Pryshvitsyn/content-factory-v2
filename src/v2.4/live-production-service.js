@@ -229,7 +229,7 @@ class LiveProductionService {
       readiness: lanePlan.readiness === 'BLOCKED' ? 'BLOCKED'
         : preExecutionValidation?.status === 'PASS' ? 'READY' : 'NOT_READY',
       preExecutionValidation,
-      finalMasterDeliveryProfile: FINAL_MASTER_DELIVERY_PROFILE,
+      finalMasterDeliveryProfile: preparedMasterDeliveryProfile(input),
       dryRunProviderCalls: 0,
       schemaCompatibility: 'READY',
     });
@@ -562,6 +562,7 @@ class LiveProductionService {
           strictApprovedCopy: prepared.input.spokenCopyPolicy?.strictApprovedCopy !== false,
           requireVoiceTimingPlan: prepared.input.schemaVersion >= 2,
           requireProviderCompatibility: prepared.input.schemaVersion >= 2 && prepared.input.renderMode === 'QUALITY',
+          ...qualityDimensions(prepared.input),
           creativePlan: prepared.input.creativePlan || null,
           masterVisualTransforms: prepared.input.captions?.enabled === true },
       });
@@ -646,6 +647,19 @@ class LiveProductionService {
       WHERE id=$1 AND brand_id=$2 AND status='FAILED'`, [production.id, production.brandId]);
     return result;
   }
+}
+
+function preparedMasterDeliveryProfile(input = {}) {
+  const selected = input.mediaStack?.master;
+  return selected ? Object.freeze({ width: selected.width, height: selected.height,
+    fps: selected.framesPerSecond, aspectRatio: selected.aspectRatio, profile: selected.profile })
+    : FINAL_MASTER_DELIVERY_PROFILE;
+}
+
+function qualityDimensions(input = {}) {
+  const selected = input.mediaStack?.master;
+  return selected ? { width: selected.width, height: selected.height, fps: selected.framesPerSecond,
+    expectedAspectRatio: selected.aspectRatio } : { expectedAspectRatio: input.aspectRatio || '9:16' };
 }
 
 module.exports = {

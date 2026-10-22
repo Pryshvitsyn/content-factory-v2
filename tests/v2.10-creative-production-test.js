@@ -24,7 +24,7 @@ function shot(number, roles) {
 function brief(count = 2) {
   const roles = count === 2 ? [['HOOK', 'TENSION', 'INSIGHT'], ['ACTION', 'RESOLUTION', 'CTA']]
     : Array.from({ length: count }, (_, i) => i === 0 ? ['HOOK', 'TENSION'] : i === count - 1 ? ['RESOLUTION', 'CTA'] : ['INSIGHT', 'ACTION']);
-  return { title: 'Concrete Campaign', objective: 'Move attentive couples toward the approved product idea', targetPlatform: 'Instagram Reels',
+  return { title: 'Concrete Campaign', objective: 'Move attentive couples toward the approved product idea', targetPlatform: 'Instagram Reels', aspectRatio: '9:16',
     targetDurationSeconds: count * 5, hook: 'A specific moment of hesitation opens the story', coreMessage: 'Attention changes an ambiguous relationship moment',
     cta: 'Notice the moment today', audienceIntent: 'Help thoughtful couples pause before assuming', creativeConcept: 'A visible progression from tension through attentive action to relief',
     visualStyle: 'Warm restrained cinematic realism with natural micro-expressions', storyboard: roles.map((role, i) => shot(i + 1, role)),
@@ -43,6 +43,8 @@ async function main() {
   assert.equal(validateCreativeCompleteness(brief(5)).status, 'PASS', '5-shot storyboard PASS');
   assert.equal(validateCreativeCompleteness(brief(1)).status, 'FAIL', '1-shot storyboard FAIL');
   assert.equal(validateCreativeCompleteness(brief(6)).status, 'FAIL', '6-shot storyboard FAIL');
+  const invalidAspect = brief(); invalidAspect.aspectRatio = '4:3';
+  assert.equal(check(invalidAspect, 'OUTPUT_FORMAT').status, 'FAIL', 'unsupported output aspect ratios fail closed');
   for (const [field, checkName] of [['subject', 'SUBJECT_SPECIFICITY'], ['environment', 'ENVIRONMENT_SPECIFICITY']]) {
     const missing = brief(); missing.storyboard[0][field] = ''; assert.equal(check(missing, checkName).status, 'FAIL');
     const placeholder = brief(); placeholder.storyboard[0][field] = `${field} exactly as specified by the operator creative brief`; assert.equal(check(placeholder, checkName).status, 'FAIL');

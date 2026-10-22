@@ -42,6 +42,12 @@ async function main() {
     assert.ok(Math.abs(rendered.probe.fps - 24) < 0.1);
     assert.ok(Math.abs(rendered.probe.durationMs - 2000) < 150);
     assert.equal(rendered.probe.hasAudio, true);
+    const landscape = await new FfmpegMasterRenderer().render({ assembly,
+      profile: { width: 1920, height: 1080, fps: 30 } });
+    assert.equal(landscape.probe.width, 1920);
+    assert.equal(landscape.probe.height, 1080);
+    assert.ok(Math.abs(landscape.probe.fps - 30) < 0.1);
+    assert.equal(landscape.probe.hasAudio, true);
   } finally {
     await fs.rm(fixtureDirectory, { recursive: true, force: true });
   }

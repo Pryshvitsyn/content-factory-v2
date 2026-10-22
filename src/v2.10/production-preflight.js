@@ -48,6 +48,7 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
   };
   const masterResolved = { profile: master.profile || plan.masterAssemblyMode || 'SOCIAL_VERTICAL',
     resolution: master.resolution || '1080x1920', fps: Number(master.fps || 30), durationSeconds: brief.targetDurationSeconds,
+    aspectRatio: master.aspectRatio || brief.aspectRatio,
     audioStrategy: master.audioStrategy || brief.voice.sourceType || 'NO_VOICE' };
   const semanticResolved = quality.semanticCriticResolved || { provider: plan.semanticEvaluatorProvider || null,
     model: plan.semanticEvaluatorModel || null };

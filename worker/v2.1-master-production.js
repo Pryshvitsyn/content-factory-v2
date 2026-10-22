@@ -580,7 +580,7 @@ class MasterProductionOrchestrator {
         mediaProbe: rendered.probe, provider: 'ffmpeg', model: 'master' };
       try {
         finalEvaluation = await this.finalQualityEvaluator.evaluate({ media: masterMedia,
-          creativePlan: qualityPolicy.creativePlan || null, expectedAspectRatio: '9:16', intendedContentType: 'final-master',
+          creativePlan: qualityPolicy.creativePlan || null, expectedAspectRatio: qualityPolicy.expectedAspectRatio || '9:16', intendedContentType: 'final-master',
           qualityTier, provider: 'ffmpeg', model: 'master', generationSettings: rendered.provenance?.profile || {},
           motionExpected: true, evaluationClass: 'FINAL',
           semanticEvaluationRequired: finalSemanticEvaluationRequired });
