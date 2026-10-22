@@ -128,6 +128,25 @@ async function main() {
   assert.equal(plannedA.input.creativePlan.brandBrain.status, 'AVAILABLE');
   assert.equal(plannedA.input.creativePlan.operatorBriefAuthoritative, true);
   assert.equal(plannedA.input.creativePlan.shots.length, 2);
+  const landscapeStack = { ...require('../src/v2.9.2/media-stack').MEDIA_STACK_PRESETS.CUSTOM,
+    master: { profile: 'SOCIAL_LANDSCAPE', container: 'mp4', codec: 'h264', width: 1920, height: 1080,
+      framesPerSecond: 30, aspectRatio: '16:9', audioCodec: 'aac' } };
+  const landscapeBuilt = buildOperatorProductionInput(operatorRequest({ aspectRatio: '16:9', masterProfile: 'SOCIAL_LANDSCAPE' }),
+    brand, { qualityProfile: productionProfile, mediaStack: landscapeStack });
+  assert.equal(landscapeBuilt.input.aspectRatio, '16:9');
+  assert.equal(landscapeBuilt.input.mediaStack.master.width, 1920);
+  assert.equal(landscapeBuilt.input.mediaStack.master.height, 1080);
+  assert(landscapeBuilt.input.assetPlan.assets.filter((asset) => asset.kind === 'video')
+    .every((asset) => asset.generation_requirements.aspect_ratio === '16:9'));
+  const landscapeDefaulted = buildOperatorProductionInput(operatorRequest({ aspectRatio: '16:9' }), brand,
+    { qualityProfile: productionProfile });
+  assert.equal(landscapeDefaulted.input.mediaStack.master.profile, 'SOCIAL_LANDSCAPE',
+    'horizontal delivery dimensions are recorded even for legacy provider configuration');
+  assert.throws(() => buildOperatorProductionInput(operatorRequest({ aspectRatio: '16:9' }), brand,
+    { qualityProfile: productionProfile, mediaStack: { master: { profile: 'SOCIAL_VERTICAL', aspectRatio: '9:16' } } }),
+  /match the selected master profile/);
+  assert.throws(() => buildOperatorProductionInput(operatorRequest({ renderMode: 'FAST', aspectRatio: '16:9' }), brand),
+    /choose QUALITY for 16:9 masters/);
   assert.notEqual(plannedA.input.creativePlan.shots[0].purpose, plannedA.input.creativePlan.shots[1].purpose);
   assert.ok(plannedA.input.creativePlan.shots.every((shot) => shot.generationPrompt
     && shot.negativeGuidance.length && shot.continuityIdentity));

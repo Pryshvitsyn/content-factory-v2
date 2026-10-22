@@ -91,7 +91,7 @@ Provider-specific logic stays behind the gateway/adapter boundary. The registry 
 
 ### Master video production
 
-The repository now includes one executable vertical-short production path from approved structured plans to a real MP4 master:
+The repository includes an executable social-video production path from approved structured plans to a real MP4 master. QUALITY productions can export either vertical 9:16 (1080×1920) or horizontal 16:9 (1920×1080); FAST renderer support remains vertical 9:16 only:
 
 - provider-routed image, video and speech generation;
 - deterministic media timeline;
@@ -192,7 +192,7 @@ The system is not yet the finished end-to-end media factory. The remaining produ
 1. concrete image/video/voice/audio provider adapters;
 2. asset generation at real media scale;
 3. stronger continuity enforcement across generated assets;
-4. broader edit templates beyond the certified vertical-short path;
+4. broader edit templates beyond the supported social-video delivery profiles;
 5. production-scale rendering/export operations;
 6. additional platform-specific adaptation profiles;
 7. richer perceptual QA and review tooling;

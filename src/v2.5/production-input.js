@@ -157,7 +157,9 @@ function buildProductionInput(raw = {}) {
   const targetPlatform = text('target_platform', raw.target_platform);
   const targetDurationSeconds = positiveNumber('target_duration_seconds', raw.target_duration_seconds);
   const aspectRatio = text('aspect_ratio', raw.aspect_ratio);
-  if (aspectRatio !== '9:16') throw new ProductionInputError('V2.5 currently supports the 9:16 aspect ratio');
+  if (!['9:16', '16:9'].includes(aspectRatio) || (!isV26 && aspectRatio !== '9:16')) {
+    throw new ProductionInputError('Production input supports 9:16; V2.6 QUALITY also supports 16:9');
+  }
   const hook = text('hook', raw.hook);
   const coreMessage = text('core_message', raw.core_message);
   const creativeConcept = text('creative_concept', raw.creative_concept);
@@ -170,6 +172,9 @@ function buildProductionInput(raw = {}) {
   if (typeof captions.enabled !== 'boolean') throw new ProductionInputError('captions.enabled must be a boolean');
   const renderMode = isV26 ? text('render_mode', raw.render_mode || 'QUALITY').toUpperCase() : 'QUALITY';
   if (!RENDER_MODES.has(renderMode)) throw new ProductionInputError('render_mode must be FAST or QUALITY');
+  if (renderMode === 'FAST' && aspectRatio !== '9:16') {
+    throw new ProductionInputError('FAST rendering currently supports 9:16 only');
+  }
   const fastRender = renderMode === 'FAST' ? normalizeFastRender(raw.fast_render, captions) : null;
 
   if (!Array.isArray(raw.scenes) || raw.scenes.length === 0) throw new ProductionInputError('scenes must be a non-empty array');

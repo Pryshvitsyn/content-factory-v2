@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { MasterProductionOrchestrator, buildMasterTimeline, validateMasterQuality } = require('../worker/v2.1-master-production');
+const { MasterProductionOrchestrator, buildMasterTimeline, validateMasterQuality, validatePostRenderQuality } = require('../worker/v2.1-master-production');
 
 const script = {
   brand_id: 'brand-1',
@@ -39,6 +39,7 @@ async function main() {
   const generated = [];
   const artifactCalls = [];
   const reviewCalls = [];
+  const renderedProfiles = [];
   const orchestrator = new MasterProductionOrchestrator({
     providerGateway: {
       async generate(request) {
@@ -56,11 +57,11 @@ async function main() {
     renderer: {
       async render({ assembly, profile }) {
         assert.equal(assembly.durationMs, 5000);
-        assert.deepEqual(profile, { width: 1080, height: 1920, fps: 30 });
+        renderedProfiles.push(profile);
         return {
           output: Buffer.from('master-mp4'),
           contentType: 'video/mp4',
-          probe: { width: 1080, height: 1920, fps: 30, durationMs: 5000, videoCodec: 'h264', hasAudio: true },
+          probe: { width: profile.width, height: profile.height, fps: profile.fps, durationMs: 5000, videoCodec: 'h264', hasAudio: true },
           provenance: { renderer: 'ffmpeg', profile },
         };
       },
@@ -95,6 +96,16 @@ async function main() {
   assert.equal(reviewCalls.length, 1);
   assert.equal(reviewCalls[0].master.artifact.contentHash, 'certified-content-hash');
   assert.equal(reviewCalls[0].quality.publicationAllowed, false);
+
+  await orchestrator.build({ productionId: 'production-landscape', brandId: 'brand-1', workerId: 'worker-1', script, shotPlan, assetPlan,
+    qualityPolicy: { width: 1920, height: 1080, fps: 30, expectedAspectRatio: '16:9' } });
+  assert.deepEqual(renderedProfiles[0], { width: 1080, height: 1920, fps: 30 });
+  assert.deepEqual(renderedProfiles[1], { width: 1920, height: 1080, fps: 30 });
+
+  const landscapePostRender = validatePostRenderQuality({ timeline,
+    probe: { width: 1920, height: 1080, fps: 30, durationMs: timeline.durationMs, videoCodec: 'h264', hasAudio: true },
+    policy: { width: 1920, height: 1080, fps: 30 } });
+  assert.equal(landscapePostRender.status, 'PASS', 'landscape output dimensions are validated against the selected delivery profile');
 
   await assert.rejects(
     () => orchestrator.build({ productionId: 'production-1', brandId: 'brand-2', workerId: 'worker-1', script, shotPlan, assetPlan }),

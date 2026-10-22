@@ -685,6 +685,12 @@ class ProductionCommandService {
             strictApprovedCopy: prepared.input.spokenCopyPolicy?.strictApprovedCopy !== false,
             requireVoiceTimingPlan: prepared.input.schemaVersion >= 2,
             requireProviderCompatibility: prepared.input.schemaVersion >= 2,
+            ...(prepared.input.mediaStack?.master ? {
+              width: prepared.input.mediaStack.master.width,
+              height: prepared.input.mediaStack.master.height,
+              fps: prepared.input.mediaStack.master.framesPerSecond,
+              expectedAspectRatio: prepared.input.mediaStack.master.aspectRatio,
+            } : { expectedAspectRatio: prepared.input.aspectRatio || '9:16' }),
             creativePlan: prepared.input.creativePlan || null,
             masterVisualTransforms: prepared.input.captions?.enabled === true } });
         await this.repository.completeShotRegeneration(record.id, { replacementAssetId: revision?.replacementAssetId

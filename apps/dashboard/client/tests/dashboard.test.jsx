@@ -474,7 +474,10 @@ describe('V2.9.2 universal media stack controls', () => {
       ECONOMY: {}, STANDARD: { video: { provider: 'runway', modelFamily: 'RUNWAY_GEN_4_5', model: 'gen4.5', profile: 'STANDARD' },
         audioStrategy: 'EXTERNAL_VOICE', voice: { provider: 'openai', model: 'gpt-4o-mini-tts', voiceId: 'alloy' }, masterProfile: 'SOCIAL_VERTICAL' },
       PREMIUM: {}, CUSTOM: {},
-    }, audioStrategies: ['EXTERNAL_VOICE','NATIVE_VIDEO_AUDIO','HYBRID','NO_VOICE'], masterProfiles: { SOCIAL_VERTICAL: {} } };
+    }, audioStrategies: ['EXTERNAL_VOICE','NATIVE_VIDEO_AUDIO','HYBRID','NO_VOICE'], masterProfiles: {
+      SOCIAL_VERTICAL: { aspectRatio: '9:16', width: 1080, height: 1920 },
+      SOCIAL_LANDSCAPE: { aspectRatio: '16:9', width: 1920, height: 1080 },
+    } };
     fetch.mockImplementation((url) => response(url === '/api/brands' ? [{ id: brandId, name: 'Attune', status: 'ACTIVE' }]
       : url === '/api/providers' ? providers : mediaStack));
     render(<NewProduction />);
@@ -492,5 +495,9 @@ describe('V2.9.2 universal media stack controls', () => {
     expect(screen.queryByLabelText('Voice ID')).toBeNull();
     fireEvent.change(screen.getByLabelText('Audio strategy'), { target: { value: 'EXTERNAL_VOICE' } });
     expect(screen.getByLabelText('Voice ID').value).toBe('operator-voice');
+    fireEvent.change(screen.getByLabelText('Aspect ratio'), { target: { value: '16:9' } });
+    expect(screen.getByLabelText('Master profile').value).toBe('SOCIAL_LANDSCAPE');
+    fireEvent.change(screen.getByLabelText('Master profile'), { target: { value: 'SOCIAL_VERTICAL' } });
+    expect(screen.getByLabelText('Aspect ratio').value).toBe('9:16');
   });
 });

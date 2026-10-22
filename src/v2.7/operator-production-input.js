@@ -4,6 +4,7 @@ const { buildProductionInput, stableFingerprint } = require('../v2.5/production-
 const { planCreative } = require('./creative-director-planner');
 const { LEGACY_FAST_MODEL } = require('./quality-video-profile');
 const { createSpokenCopyPlan } = require('../v2.8.1/spoken-copy-contract');
+const { MASTER_PROFILES } = require('../v2.9.2/media-stack');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OBJECTIVES = new Set(['ORGANIC_REACH','ENGAGEMENT','TRAFFIC','LEAD_GENERATION','APP_INSTALL','PURCHASE','BOOKING','SEO_AUTHORITY','RETENTION','EXPERIMENT']);
@@ -65,7 +66,17 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
     throw new OperatorInputError('targetDurationSeconds must be between 3 and 60');
   }
   const aspectRatio = required('aspectRatio', request.aspectRatio || '9:16', 12);
-  if (aspectRatio !== '9:16') throw new OperatorInputError('The certified renderer currently supports 9:16 only');
+  if (!['9:16', '16:9'].includes(aspectRatio)) {
+    throw new OperatorInputError('aspectRatio must be 9:16 (vertical) or 16:9 (horizontal)');
+  }
+  if (mode === 'FAST' && aspectRatio !== '9:16') {
+    throw new OperatorInputError('FAST rendering currently supports 9:16 only; choose QUALITY for 16:9 masters');
+  }
+  if (mode === 'QUALITY' && mediaStack?.master?.aspectRatio && mediaStack.master.aspectRatio !== aspectRatio) {
+    throw new OperatorInputError('Output aspect ratio must match the selected master profile');
+  }
+  const selectedMasterName = aspectRatio === '16:9' ? 'SOCIAL_LANDSCAPE' : 'SOCIAL_VERTICAL';
+  const masterProfile = mediaStack?.master || { profile: selectedMasterName, ...MASTER_PROFILES[selectedMasterName] };
   const hook = required('hook', request.hook, 800);
   const coreMessage = required('coreMessage', request.coreMessage || request.creativeBrief, 4000);
   const creativeBrief = required('creativeBrief', request.creativeBrief || request.coreMessage, 4000);
@@ -142,7 +153,7 @@ function buildRawInput(request, brand, { productionKey = null, qualityProfile = 
     cta,
     creative_plan: creativePlan,
     quality_video_profile: mode === 'QUALITY' ? profile : null,
-    media_stack: mode === 'QUALITY' && mediaStack ? mediaStack : null,
+    media_stack: mode === 'QUALITY' ? { ...(mediaStack || {}), master: masterProfile } : null,
     provider_selection: mode === 'QUALITY' ? { provider: profile.provider, vendor: profile.vendor || null,
       model: profile.model, model_version: profile.modelVersion || null, profile: profile.name,
       capability: profile.capability || 'TEXT_TO_VIDEO', resolved_settings: profile.resolvedSettings || {} } : null,
