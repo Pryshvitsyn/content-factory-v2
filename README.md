@@ -39,7 +39,7 @@ V2.9.2 adds a universal media stack with explicit provider model families, provi
 - **Stable branch:** `main`
 - **Primary text provider:** NVIDIA-first
 - **Database:** PostgreSQL
-- **Runtime:** Node.js 22
+- **Runtime:** Node.js 22.23.4 (security baseline; see `.node-version`)
 
 V2 is built as a durable execution system rather than a single AI script. Production state, stage state, attempts, ownership, artifacts, validation, provider routing, storage, and publication state are explicit and persistent.
 
