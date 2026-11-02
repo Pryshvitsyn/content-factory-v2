@@ -11,7 +11,7 @@ Implemented context-bound LOOK approval on `fix/quality-look-lifecycle`, includi
 Local contract/service regressions, runtime/keyframe checks, 21 Dashboard tests and build pass. SQL migrations, LOOK reload, stale-context rejection and duplicate preservation pass under PGlite, including the updated full script-first integration fixture through a Pool adapter. Real external generation calls: 0. Validation uses Node 24; Node 22/native PostgreSQL CI remains separate.
 
 ## BROKEN / MISSING
-The fix is prepared but not yet installed on the Mac. No completed or reviewed current pilot MP4 is evidenced. Local changes beyond the recovered approval package are preserved by guarded text patches rather than whole-file replacement.
+The first Mac installer stopped before writes on preview/voice UI differences. Corrected package preserves image-load checks; full prior-package fixture passes installation/build and 27 UI tests. Mac installation is still pending. No completed or reviewed current pilot MP4 is evidenced. Local changes beyond the recovered approval package are preserved by guarded text patches rather than whole-file replacement.
 
 ## BLOCKERS
 Installation and live verification require the Mac operator. Guarded installer stops if expected local code differs.

@@ -20,3 +20,7 @@ The prior additive `20261101_quality_approval_lifecycle.sql` migration is includ
 - Dashboard tests include persisted APPROVED frame + stale LOOK; review is available, first-video/full Start remain blocked. Build and related runtime/keyframe regressions pass with zero real provider calls.
 
 Local validation used Node 24; CI targets Node 22. The user's Mac runtime has not been inspected directly or changed by these checks.
+
+## Mac package compatibility correction
+
+The first installer stopped before writing on the previously delivered preview/voice combination. Its UI anchors assumed the older approval guard without the mandatory image-load check. The revised installer matches stable subexpressions, preserves the image-load guard and voice/preview additions, and updates optional preview tests to exercise current LOOK semantics. Installation/build and all 27 UI tests passed on a fixture assembled from the exact earlier preview, voice and approval packages. This is package compatibility evidence, not direct verification of the Mac checkout.

@@ -107,6 +107,9 @@ describe('Current LOOK recovery', () => {
   render(<CreativeProduction/>);
   fireEvent.change(await screen.findByLabelText('BRAND'),{target:{value:brandId}});
   const review=await screen.findByRole('button',{name:'REVIEW & APPROVE CURRENT LOOK'});
+  await screen.findByText(/LOOK: REVIEW_REQUIRED/);
+  const image = screen.queryByRole('img');
+  if (image) fireEvent.load(image);
   await waitFor(()=>expect(review.disabled).toBe(false));
   expect(screen.getByRole('button',{name:'START PRODUCTION'}).disabled).toBe(true);
   expect(screen.getByRole('button',{name:'FIRST VIDEO PREFLIGHT · 0 CALLS'}).disabled).toBe(true);
