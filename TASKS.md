@@ -1,7 +1,7 @@
 # TASKS
 
 ## NOW
-- [ ] Install guarded provider recovery package on Mac with Dashboard stopped; restart and verify migration.
+- [ ] Install guarded provider recovery v2 on Mac with Dashboard stopped; verify startup after the 23505 migration failure.
 - [ ] Inspect fresh first-video preflight for the intended Tune Into Her draft, approved frame/LOOK, STANDARD/720p and valid duration.
 - [ ] Reconcile any other genuinely unknown provider attempts surfaced by preflight before retrying.
 
@@ -24,3 +24,5 @@
 - [x] Distinguish proven creation refusal from unknown outcomes in stage and media journals.
 - [x] Preserve immutable history and concurrency fences; use revision-safe canonical production identity for corrected input.
 - [x] Verify provider recovery, SQL migration, scope, durable media, runtime, FFmpeg and Dashboard behavior without real generation.
+
+- [x] Reproduce multi-attempt legacy upgrade; preserve history, enforce database insert fencing and stop replaying the superseded index.

@@ -123,3 +123,7 @@ jobs:
         run: |
           createdb --maintenance-db=postgres locked_stage_retry_history
           PGDATABASE=locked_stage_retry_history CONTENT_FACTORY_TEST_DATABASE=1 node tests/locked-stage-retry-history-postgres-test.js
+      - name: Provider recovery upgrade and concurrent insert fencing
+        run: |
+          createdb --maintenance-db=postgres provider_recovery_test
+          PGDATABASE=provider_recovery_test CONTENT_FACTORY_TEST_DATABASE=1 RECOVERY_TEST_NATIVE=1 node tests/provider-rejection-recovery-postgres-test.js

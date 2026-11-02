@@ -9,7 +9,9 @@ async function main() {
   assert.equal(BODY_LIMIT, 1024 * 1024, 'normal QUALITY JSON requests need a durable 1 MB limit');
 
   const qualityMigration = V210_MIGRATIONS.indexOf('migrations/20260903_quality_script_first.sql');
-  const retryMigration = V210_MIGRATIONS.indexOf('migrations/20260903_locked_stage_retry_history.sql');
+  const retryMigration = V210_MIGRATIONS.indexOf('migrations/20261102_provider_rejection_recovery.sql');
+  assert(!V210_MIGRATIONS.includes('migrations/20260903_locked_stage_retry_history.sql'),
+    'startup must not replay the superseded unique index over unresolved history');
   assert(qualityMigration >= 0, 'dashboard/local preparation must auto-apply QUALITY script-first schema');
   assert(retryMigration > qualityMigration, 'append-only retry migration must run after QUALITY script-first schema');
 

@@ -43,7 +43,6 @@ const V210_MIGRATIONS = [
   'migrations/20260831_v2_10_4_source_creative_recovery.sql',
   'migrations/20260901_locked_keyframe_production.sql',
   'migrations/20260903_quality_script_first.sql',
-  'migrations/20260903_locked_stage_retry_history.sql',
   'migrations/20261101_quality_approval_lifecycle.sql',
   'migrations/20261102_provider_rejection_recovery.sql',
 ];
