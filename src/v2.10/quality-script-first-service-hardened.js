@@ -15,7 +15,8 @@ class HardenedQualityScriptFirstService extends QualityScriptFirstService {
       ...state,
       workflow: workflow ? {
         id: workflow.id,
-        productionId: workflow.production_id,
+        productionId: pilotAttempt?.result?.productionId || workflow.production_id,
+        keyframeOriginProductionId: workflow.production_id,
         state: workflow.state,
         openingShotId: workflow.opening_shot_id,
         draftRevision: Number(workflow.draft_revision || 0),

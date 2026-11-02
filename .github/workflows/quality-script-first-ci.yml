@@ -45,6 +45,16 @@ jobs:
           node --check src/v2.10/locked-keyframe-state-service.js
           node --check apps/dashboard/server/http-server.js
           node --check apps/dashboard/server/index.js
+      - name: LOOK lifecycle and SQL migration regressions · zero real calls
+        run: |
+          npm install --no-save --package-lock=false @electric-sql/pglite@0.5.14
+          node tests/quality-approval-lifecycle-test.js
+          node tests/quality-approval-migration-test.js
+          node tests/quality-look-lifecycle-test.js
+          node tests/quality-look-postgres-test.js
+          node tests/seedance-resolution-contract-test.js
+          node tests/provider-rejection-recovery-test.js
+          node tests/provider-rejection-recovery-postgres-test.js
       - name: Script-first director contract
         run: node tests/quality-script-first-test.js
       - name: Safe local locked-stage retry contract
@@ -113,3 +123,7 @@ jobs:
         run: |
           createdb --maintenance-db=postgres locked_stage_retry_history
           PGDATABASE=locked_stage_retry_history CONTENT_FACTORY_TEST_DATABASE=1 node tests/locked-stage-retry-history-postgres-test.js
+      - name: Provider recovery upgrade and concurrent insert fencing
+        run: |
+          createdb --maintenance-db=postgres provider_recovery_test
+          PGDATABASE=provider_recovery_test CONTENT_FACTORY_TEST_DATABASE=1 RECOVERY_TEST_NATIVE=1 node tests/provider-rejection-recovery-postgres-test.js

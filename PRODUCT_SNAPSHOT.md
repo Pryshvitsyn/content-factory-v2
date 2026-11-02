@@ -2,27 +2,26 @@
 Updated: 2026-11-02
 
 ## CURRENT STATE
-Content Factory V2 is a Node.js/PostgreSQL, multi-brand advertising-video system with a React Dashboard, provider routing, FFmpeg rendering, immutable artifacts and human review. Inspected GitHub baseline: `470cdf46818d10ca281838b20f758c40492f3f38` on `main`. Source exists; current live runtime and pilot output were not accessed.
+Content Factory has a local Mac Dashboard, PostgreSQL and an immutable Script → Storyboard → LOOK → Pilot workflow. Mac screenshots show an approved opening frame, Seedance STANDARD/720p and pilot-only readiness. The first Tune Into Her video is not yet confirmed complete.
 
 ## LATEST DELTA
-Applied Originesis bootstrap to existing files on `docs/originesis-bootstrap-alignment`: shortened README, added progressive-context and completion rules to AGENTS, reconciled this snapshot and executable tasks. GOAL remains valid. Reused existing architecture and script-first workflow documentation; no duplicate architecture, decision log, agents or skills.
+Mac startup failed with 23505 rebuilding a unique index over old unresolved attempts. Revised recovery migration preserves multiple historical unresolved rows, keeps RUNNING uniqueness and adds an advisory-lock database insert fence that blocks new active attempts beside unresolved evidence. Startup no longer replays the superseded September index. Provider outcome classification, Seedance input bounds and revision-safe canonical production identity remain in place. The upgrade fixture now includes three old ambiguous attempts in one workflow; migration reruns and concurrent insert checks pass.
 
 ## WORKING
-On 2026-11-02: QUALITY script-first contract PASS; V2.10 runtime integration PASS (real external calls = 0); V2.1 stage sequence PASS; Dashboard production build PASS. Dependencies installed using package-lock. Checks ran on Node 24.22.1; documented target is Node 22. This is local verification, not live-production certification.
+Mocked provider/stage/media tests, PGlite migration/history/concurrency/scope checks, durable-media and runtime regressions, real FFmpeg master checks, Dashboard tests and build pass. Guarded installation succeeds on the prior preview/voice/LOOK fixture. No real provider generation was used in these checks.
 
 ## BROKEN / MISSING
-Current pilot has no verified playable, reviewed MP4 in this handoff. Earlier operator report says final preflight READY and production not started; it is not a fresh runtime check. Latest Mac fixes may be ahead of GitHub; installation/sync state is unknown.
+Recovery v2 still needs installation and verification on the Mac. Earlier unknown-duration/network attempts may still require reconciliation; they are not automatically released. No reviewed current pilot MP4 is evidenced.
 
 ## BLOCKERS
-Configured active runtime, current draft/approvals and local source revision are unavailable here for live verification. Paid generation still requires explicit start authorization.
+Direct access to the Mac runtime is unavailable. Unknown local code makes the installer stop before writes.
 
 ## NEXT BEST MOVE
-Reconcile the active Mac checkout with this baseline and latest local fixes, then inspect the exact approved script/storyboard, selected models, voice, costs and fresh canonical preflight before any production start.
+Install provider recovery with Dashboard stopped, restart through dashboard:local, inspect a fresh first-video preflight, then explicitly start one pilot if ready.
 
 ## PARALLEL
-Read-only inspection of catalog capability and regression coverage can proceed independently of live production.
+GitHub review and Node 22/native PostgreSQL CI. Cloud deployment remains deferred.
 
 ## REFERENCES
-Repo: https://github.com/Pryshvitsyn/content-factory-v2
-Core: README.md, AGENTS.md, GOAL.md, TASKS.md.
-Details: docs/QUALITY-SCRIPT-FIRST-WORKFLOW.md; docs/ARCHITECTURE.md.
+https://github.com/Pryshvitsyn/content-factory-v2/pull/122
+Details: docs/PROVIDER-REJECTION-RECOVERY.md; docs/QUALITY-LOOK-LIFECYCLE.md; TASKS.md.

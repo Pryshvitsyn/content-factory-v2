@@ -1,27 +1,28 @@
 # TASKS
 
 ## NOW
-- [ ] Reconcile active Mac checkout branch/commit and latest local fixes with inspected GitHub baseline `470cdf4`; preserve unrelated changes.
-- [ ] Read the current draft and verify approved script/storyboard fingerprints, brand scope, catalog models and voice approval in that runtime.
-- [ ] Run fresh zero-generation canonical preflight with exact cost/budget evidence; record the draft/revision and result.
+- [ ] Install guarded provider recovery v2 on Mac with Dashboard stopped; verify startup after the 23505 migration failure.
+- [ ] Inspect fresh first-video preflight for the intended Tune Into Her draft, approved frame/LOOK, STANDARD/720p and valid duration.
+- [ ] Reconcile any other genuinely unknown provider attempts surfaced by preflight before retrying.
 
 ## NEXT
-- [ ] After explicit production-start authorization, execute one controlled QUALITY pilot through applicable LOOK/PILOT approval gates.
-- [ ] Verify final MP4, audio, technical/visual QA, immutable artifact identity and operator review.
-- [ ] Fix reproduced failures within scope; run affected tests and update snapshot with actual evidence.
+- [ ] Explicitly start one pilot; inspect actual video and approve/reject motion.
+- [ ] Continue remaining shots only after pilot approval; verify final MP4/audio/QA and update snapshot.
 
 ## PARALLEL
-- [ ] Inspect script/storyboard service and PostgreSQL regression coverage for stale-approval invalidation; do not infer database behavior from contract tests alone.
-- [ ] Compare selected provider/model capabilities and known cost boundaries against the current catalog without generating media.
+- [ ] Review GitHub changes and run Node 22/native PostgreSQL CI.
 
 ## BLOCKED
-- [ ] Verify current live readiness and local-only fixes.
-  Blocked by: access to active runtime, draft identity and current local source revision.
-- [ ] Paid production execution.
-  Blocked by: verified current readiness and explicit production-start authorization.
+- [ ] Live pilot verification.
+  Blocked by: installation and operator actions on the Mac runtime.
 
 ## DONE
-- [x] Inspect existing core, source, package scripts and relevant architecture/workflow docs without creating duplicates.
-- [x] Preserve valid GOAL; shorten README and add progressive-context, task/snapshot maintenance and objective completion rules to AGENTS.
-- [x] Verify QUALITY script-first contract, V2.10 runtime integration and V2.1 sequence; all PASS, no real generation calls.
-- [x] Build Dashboard successfully; record verification environment and live-runtime limits in PRODUCT_SNAPSHOT.
+- [x] Reuse existing project core and preserve local-only fixes through guarded patches.
+- [x] Bind LOOK to exact frame and current creative approvals; reject stale/foreign requests.
+- [x] Preserve downstream state on duplicate approvals; distinguish pilot/full readiness.
+- [x] Enforce Seedance resolution/duration parity before HTTP.
+- [x] Distinguish proven creation refusal from unknown outcomes in stage and media journals.
+- [x] Preserve immutable history and concurrency fences; use revision-safe canonical production identity for corrected input.
+- [x] Verify provider recovery, SQL migration, scope, durable media, runtime, FFmpeg and Dashboard behavior without real generation.
+
+- [x] Reproduce multi-attempt legacy upgrade; preserve history, enforce database insert fencing and stop replaying the superseded index.

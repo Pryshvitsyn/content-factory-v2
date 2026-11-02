@@ -89,3 +89,31 @@ describe('V2.10 operator-first Creative Production UX', () => {
     expect(methods.every(([, method]) => method === 'GET')).toBe(true);
   });
 });
+
+describe('Current LOOK recovery', () => {
+ afterEach(() => vi.unstubAllGlobals());
+ it('restores an approved frame but requires current LOOK review; blocks full Start until pilot approval', async () => {
+  const calls=[];
+  const pf={status:'READY',creative:{storyboardShots:2,completeness:'PASS',continuity:'READY'},externalCalls:{},master:{}};
+  vi.stubGlobal('fetch',vi.fn((url,options={})=>{
+   calls.push([url,options]);
+   if(url==='/api/brands') return response([{id:brandId,name:'Test'}]);
+   if(url==='/api/providers') return response([]);
+   if(String(url).includes('/quality-director?')) return response({look:{status:'REVIEW_REQUIRED',reason:'Review existing frame',canApprove:true,approved:false,keyframeId:'kf',keyframeApprovalDecision:'APPROVED',expectedFingerprint:'context'},pilot:{approved:false}});
+   if(String(url).includes('/locked-keyframe/state?')) return response({keyframeResult:{keyframe:{id:'kf',approvalDecision:'APPROVED'},validation:{status:'PASS'}}});
+   if(String(url).startsWith('/api/v2.10/creative-drafts?')) return response([{id:draftId,revision:1,status:'PREFLIGHT_READY',creative_brief:{...savedBrief(),aspectRatio:'9:16'},final_preflight:pf}]);
+   throw new Error(`Unexpected ${url}`);
+  }));
+  render(<CreativeProduction/>);
+  fireEvent.change(await screen.findByLabelText('BRAND'),{target:{value:brandId}});
+  const review=await screen.findByRole('button',{name:'REVIEW & APPROVE CURRENT LOOK'});
+  await screen.findByText(/LOOK: REVIEW_REQUIRED/);
+  const image = screen.queryByRole('img');
+  if (image) fireEvent.load(image);
+  await waitFor(()=>expect(review.disabled).toBe(false));
+  expect(screen.getByRole('button',{name:'START PRODUCTION'}).disabled).toBe(true);
+  expect(screen.getByRole('button',{name:'FIRST VIDEO PREFLIGHT · 0 CALLS'}).disabled).toBe(true);
+  expect(screen.getByText(/LOOK: REVIEW_REQUIRED/)).toBeTruthy();
+  expect(calls.every(([,options])=>!options.method || options.method==='GET')).toBe(true);
+ });
+});

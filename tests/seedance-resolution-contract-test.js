@@ -1,0 +1,17 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { ProviderCatalog } = require('../src/v2.8/provider-catalog');
+const { buildSeedance25Input } = require('../src/providers/replicate-universal-video-adapter');
+const { MODELS } = require('../src/v2.8/provider-definitions');
+const model=MODELS.find(m=>m.provider==='replicate'&&m.modelId==='bytedance/seedance-2.5');
+assert.deepEqual(model.constraints.resolutions,['480p','720p']);
+assert.deepEqual(model.constraints.durationRange,[4,30]);
+for(const duration of [4,30]) assert.equal(buildSeedance25Input({prompt:'Test',duration}).duration,duration);
+for(const duration of [0,1,3,31]) assert.throws(()=>buildSeedance25Input({prompt:'Test',duration}));
+for(const profile of Object.values(model.profiles)) assert(['480p','720p'].includes(profile.resolution));
+for(const resolution of ['480p','720p']) assert.equal(buildSeedance25Input({prompt:'Test',resolution}).resolution,resolution);
+for(const resolution of ['1080p','4k','720P']) assert.throws(()=>buildSeedance25Input({prompt:'Test',resolution}),e=>e.code==='UNSUPPORTED_RESOLUTION');
+const catalog=new ProviderCatalog({env:{REPLICATE_API_TOKEN:'synthetic-test-token'}});
+assert.throws(()=>catalog.resolveSelection({provider:'replicate',model:'bytedance/seedance-2.5',profile:'PREMIUM',resolution:'1080p',capability:'TEXT_TO_VIDEO'}),e=>e.code==='UNSUPPORTED_RESOLUTION');
+assert.equal(MODELS.find(m=>m.provider==='fal'&&m.modelFamily==='SEEDANCE_2_5').profiles.PREMIUM.resolution,'1080p','other provider contracts remain independent');
+console.log('PASS: Replicate Seedance resolution catalog/adapter parity, stale 1080p rejection before HTTP, other providers preserved; real external calls: 0.');

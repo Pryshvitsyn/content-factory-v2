@@ -44,8 +44,14 @@ function assertWan3ReferenceGeometry(request, refs, aspectRatio) {
 function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16', duration = 5,
   image = null, lastFrameImage = null, referenceImages = [], referenceVideos = [], referenceAudios = [],
   generateAudio = false, watermark = false, seed } = {}) {
+  try {
+  if (!['480p','720p'].includes(resolution)) {
+    const error = new ProviderError('Replicate Seedance 2.5 supports only 480p or 720p', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
+    error.code = 'UNSUPPORTED_RESOLUTION';
+    throw error;
+  }
   if (!String(prompt || '').trim()) throw new ProviderError('Seedance 2.5 requires a prompt', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  if (!Number.isInteger(duration) || duration < 1 || duration > 30) throw new ProviderError('Seedance 2.5 duration must be 1-30 seconds', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
+  if (!Number.isInteger(duration) || duration < 4 || duration > 30) throw new ProviderError('Seedance 2.5 duration must be 4-30 seconds', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
   if ((image || lastFrameImage) && (referenceImages.length || referenceVideos.length || referenceAudios.length)) {
     throw new ProviderError('Seedance first/last frames cannot be combined with reference media', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
   }
@@ -57,6 +63,11 @@ function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16
     ...(lastFrameImage ? { last_frame_image: lastFrameImage } : {}), ...(referenceImages.length ? { reference_images: referenceImages } : {}),
     ...(referenceVideos.length ? { reference_videos: referenceVideos } : {}), ...(referenceAudios.length ? { reference_audios: referenceAudios } : {}),
     ...(seed == null ? {} : { seed }) };
+  } catch (error) {
+    error.code = error.code || 'REPLICATE_INPUT_INVALID';
+    error.details = { operation: 'LOCAL_INPUT_VALIDATION', providerExecutionOutcome: 'REJECTED_BEFORE_CREATION' };
+    throw error;
+  }
 }
 
 class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
