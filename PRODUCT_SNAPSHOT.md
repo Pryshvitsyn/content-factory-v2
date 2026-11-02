@@ -2,26 +2,26 @@
 Updated: 2026-11-02
 
 ## CURRENT STATE
-Content Factory V2 has a local Mac Dashboard, PostgreSQL, immutable media and a Script → Storyboard → LOOK → Pilot workflow. User restarted `n8n-postgres-1` and opened Dashboard. Mac checkout reports `4be55b5` with local preview, voice and approval-lifecycle fixes. Screenshot shows a PASS/APPROVED opening frame but missing current LOOK, blocking the first Tune Into Her video.
+Content Factory has a local Mac Dashboard, PostgreSQL and an immutable Script → Storyboard → LOOK → Pilot workflow. Mac screenshots show an approved opening frame, Seedance STANDARD/720p and pilot-only readiness. The first Tune Into Her video is not yet confirmed complete.
 
 ## LATEST DELTA
-Implemented context-bound LOOK approval on `fix/quality-look-lifecycle`, including the existing approval-cycle fix. Server verifies exact frame/creative approval identities; UI offers explicit review of an existing frame. Unchanged repeated approvals preserve Pilot/preflight. Preflight distinguishes pilot readiness from full-production authorization. No generation or approval is performed by installation.
+Implemented provider-outcome classification in both execution journals: explicit creation rejection becomes FAILED/NOT_CROSSED; uncertain outcomes stay fenced. Seedance catalog/adapter bounds agree (480p/720p, 4–30 seconds). Corrected canonical inputs resolve separate production identities while preserving the approved frame. A migration preserves history and excludes only the exact evidenced legacy resolution rejection from the active-attempt fence. First-video preflight checks unresolved attempts before readiness; continuation uses the accepted pilot's actual production.
 
 ## WORKING
-Local contract/service regressions, runtime/keyframe checks, 21 Dashboard tests and build pass. SQL migrations, LOOK reload, stale-context rejection and duplicate preservation pass under PGlite, including the updated full script-first integration fixture through a Pool adapter. Real external generation calls: 0. Validation uses Node 24; Node 22/native PostgreSQL CI remains separate.
+Mocked provider/stage/media tests, PGlite migration/history/concurrency/scope checks, durable-media and runtime regressions, real FFmpeg master checks, Dashboard tests and build pass. Guarded installation succeeds on the prior preview/voice/LOOK fixture. No real provider generation was used in these checks.
 
 ## BROKEN / MISSING
-The first Mac installer stopped before writes on preview/voice UI differences. Corrected package preserves image-load checks; full prior-package fixture passes installation/build and 27 UI tests. Mac installation is still pending. No completed or reviewed current pilot MP4 is evidenced. Local changes beyond the recovered approval package are preserved by guarded text patches rather than whole-file replacement.
+The new recovery package still needs installation and verification on the Mac. Earlier unknown-duration/network attempts may still require reconciliation; they are not automatically released. No reviewed current pilot MP4 is evidenced.
 
 ## BLOCKERS
-Installation and live verification require the Mac operator. Guarded installer stops if expected local code differs.
+Direct access to the Mac runtime is unavailable. Unknown local code makes the installer stop before writes.
 
 ## NEXT BEST MOVE
-Install with Dashboard stopped, restart, review the intended draft and existing frame, explicitly approve current LOOK, then run final and first-video preflights before one controlled pilot start.
+Install provider recovery with Dashboard stopped, restart through dashboard:local, inspect a fresh first-video preflight, then explicitly start one pilot if ready.
 
 ## PARALLEL
-GitHub review and CI; no cloud deployment is requested.
+GitHub review and Node 22/native PostgreSQL CI. Cloud deployment remains deferred.
 
 ## REFERENCES
-Repository: https://github.com/Pryshvitsyn/content-factory-v2
-Details: docs/QUALITY-LOOK-LIFECYCLE.md; GOAL.md; TASKS.md.
+https://github.com/Pryshvitsyn/content-factory-v2/pull/122
+Details: docs/PROVIDER-REJECTION-RECOVERY.md; docs/QUALITY-LOOK-LIFECYCLE.md; TASKS.md.

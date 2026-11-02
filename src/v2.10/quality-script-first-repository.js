@@ -1,5 +1,6 @@
 'use strict';
 
+const { legacyResolutionRejection, rejectedBeforeCreation } = require('../providers/execution-outcome');
 const { QualityScriptFirstPostgresRepository } = require('./quality-script-first-postgres-repository');
 
 const SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES = Object.freeze([
@@ -27,7 +28,9 @@ function isSafeLocalLockedStageRetry(attempt, stage) {
     && attempt?.status === 'FAILED'
     && attempt?.boundary_state === 'NOT_CROSSED'
     && SAFE_LOCAL_LOCKED_STAGE_RETRY_CODES.includes(attempt?.error?.code);
-  return deterministicLocalFailure || isKnownPreRequestSemanticTierFailure(attempt, stage);
+  return deterministicLocalFailure || isKnownPreRequestSemanticTierFailure(attempt, stage)
+    || (stage === 'FIRST_VIDEO' && attempt?.status === 'FAILED' && attempt?.boundary_state === 'NOT_CROSSED'
+      && rejectedBeforeCreation(attempt.error, attempt.provider_request_id));
 }
 
 class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPostgresRepository {
@@ -85,6 +88,28 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
       } });
   }
 
+  async markLockedContinuationStarted({ draftId,workspaceId,brandId,productionId }) {
+    const result = await this.db.query(`UPDATE v2_10.locked_keyframe_workflows w SET state='CONTINUATION_STARTED'
+      WHERE w.draft_id=$1 AND w.workspace_id=$2 AND w.brand_id=$3 AND w.state='FIRST_VIDEO_ACCEPTED'
+        AND (SELECT a.status='SUCCEEDED' AND a.result->>'productionId'=$4::text
+          AND a.result->>'accepted'='true'
+          FROM v2_10.locked_stage_attempts a WHERE a.workflow_id=w.id
+            AND a.workspace_id=w.workspace_id AND a.brand_id=w.brand_id AND a.stage='FIRST_VIDEO'
+          ORDER BY a.started_at DESC,a.id DESC LIMIT 1) RETURNING w.*`,
+    [draftId,workspaceId,brandId,productionId]);
+    return result.rows[0] || null;
+  }
+
+  async assertLockedStageAvailable({ workflowId,workspaceId,brandId,stage }) {
+    const result = await this.db.query(`SELECT * FROM v2_10.locked_stage_attempts
+      WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4
+        AND status IN ('RUNNING','NEEDS_RECONCILIATION')`, [workflowId,workspaceId,brandId,stage]);
+    const pending = result.rows.find(row => !isKnownPreRequestSemanticTierFailure(row,stage) && !legacyResolutionRejection(row));
+    if (pending) throw Object.assign(lockedStageConflict('Previous stage attempt needs reconciliation before preflight can be READY.'),
+      { details: { attemptId: pending.id, status: pending.status } });
+    return { available: true, providerCalls: 0 };
+  }
+
   async claimLockedStage({ workflowId, workspaceId, brandId, stage, preflightId }) {
     const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
     const ownsTransaction = client !== this.db;
@@ -99,7 +124,7 @@ class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPos
           AND status IN ('RUNNING','NEEDS_RECONCILIATION')
         ORDER BY started_at DESC,id DESC`,
       [workflowId, workspaceId, brandId, stage]);
-      const blockingActive = active.rows.find((row) => !isKnownPreRequestSemanticTierFailure(row, stage));
+      const blockingActive = active.rows.find((row) => !isKnownPreRequestSemanticTierFailure(row, stage) && !legacyResolutionRejection(row));
       if (blockingActive) throw lockedStageConflict();
 
       const latest = await client.query(`SELECT * FROM v2_10.locked_stage_attempts

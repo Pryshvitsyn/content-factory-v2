@@ -123,9 +123,9 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
     this.credentialCheck({ config: runtime.config, input: canonical.input, env: runtime.env });
     const rows = await runtime.service.createDraft({ input: canonical.input, config: runtime.config,
       command: { source: 'v2.10-locked-keyframe', requestId: draft.id, actor,
-        productionId, canonicalRawInput: canonical.raw, canonicalRequest: canonical.canonicalRequest } });
-    if (rows.production.id !== productionId) throw new LockedKeyframeError('LOCKED_PRODUCTION_ID_MISMATCH',
-      'Canonical production does not match the preallocated locked-keyframe production identity');
+        canonicalRawInput: canonical.raw, canonicalRequest: canonical.canonicalRequest } });
+    // The immutable frame retains its origin production. Each corrected canonical input
+    // resolves its own production through the existing revision-safe production key.
     return Object.freeze({ canonical, runtime, production: rows.production, job: rows.job });
   }
 
@@ -140,7 +140,7 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
     const prepared = await this.ensureLockedProduction({ draft, preflight, actor, productionId });
     if (beforeProviderBoundary) await beforeProviderBoundary();
     const media = await prepared.runtime.mediaExecutor.execute({ workspaceId: projection.canonical.input.workspaceId,
-      productionId, brandId: projection.canonical.input.brandId,
+      productionId: prepared.production.id, brandId: projection.canonical.input.brandId,
       workerId: prepared.runtime.config.workerId, asset: projection.asset });
     const quality = await prepared.runtime.visualQualityEvaluator.evaluate({ media,
       creativePlan: projection.canonical.input.creativePlan,
@@ -149,7 +149,7 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
       provider: media.provider, model: media.model,
       generationSettings: projection.asset.generation_requirements || {}, motionExpected: true,
       evaluationClass: 'SOURCE', semanticEvaluationRequired: true });
-    return Object.freeze({ productionId, jobId: prepared.job.id, media, quality,
+    return Object.freeze({ productionId: prepared.production.id, jobId: prepared.job.id, media, quality,
       accepted: quality.status !== 'FAIL', canonicalInputFingerprint: projection.canonical.input.fingerprint,
       executionFingerprint: projection.plan.executionFingerprint, plan: projection.plan,
       remainingProductionScheduled: false, publicationTriggered: false });

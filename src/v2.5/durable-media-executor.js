@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { rejectedBeforeCreation } = require('../providers/execution-outcome');
 const { generateMediaAsset, capabilityForAssetKind, normalizeMediaResult } = require('../../worker/v2.1-media-generation');
 const { canonicalFingerprint, contentTypeForKind } = require('../../worker/v2.1-master-production');
 const { fromAsset } = require('../v2.8/canonical-media-request');
@@ -150,7 +151,7 @@ class PostgresMediaExecutionRepository {
       UPDATE v2_5.media_executions SET status=$3,worker_id=NULL,error=$4::jsonb,updated_at=now()
       WHERE id=$1 AND ($2::text IS NULL OR worker_id=$2 OR worker_id IS NULL)`,
     [id, workerId || null, status, JSON.stringify({ code: error.code || 'MEDIA_EXECUTION_FAILED', message: error.message,
-      details: error.details || null })]);
+      details: error.details || null, predictionId: error.predictionId || null })]);
   }
 }
 
@@ -304,7 +305,8 @@ class DurableMediaExecutor {
       await this.registerAsset({ productionId, asset, media: resolved, workerId, identities, probe });
       return Object.freeze({ ...resolved, durableExecutionId: row.id });
     } catch (error) {
-      const terminal = /PREDICTION_(FAILED|CANCELED)/.test(error.code || '')
+      const terminal = rejectedBeforeCreation(error, row.provider_request_id)
+        || /PREDICTION_(FAILED|CANCELED)/.test(error.code || '')
         || error.code === 'PROVIDER_OUTPUT_GEOMETRY_MISMATCH';
       await this.repository.markFailure({ id: row.id, workerId, error, boundaryCrossed, terminal }).catch(() => {});
       throw error;

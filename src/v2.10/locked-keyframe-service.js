@@ -242,6 +242,8 @@ class LockedKeyframeService {
     const workflow = await this.repository.getLockedWorkflow({ draftId: id, ...scope, shotId: keyframe.shot_id });
     if (!workflow || workflow.production_id !== keyframe.production_id) throw new LockedKeyframeError('LOCKED_WORKFLOW_MISSING',
       'Approved keyframe does not belong to this production workflow');
+    if (this.repository.assertLockedStageAvailable) await this.repository.assertLockedStageAvailable({
+      workflowId: workflow.id, ...scope, stage: STAGES.FIRST_VIDEO });
     const projected = await this.starter.preflightLockedFirstVideo({ draft, preflight: draft.final_preflight, keyframe });
     const stored = await this.repository.saveLockedStagePreflight({ workflowId: workflow.id, ...scope,
       stage: STAGES.FIRST_VIDEO, draftRevision: draft.revision, keyframe, plan: projected.plan, actor: this.actor });
@@ -293,10 +295,13 @@ class LockedKeyframeService {
         accepted: result.accepted, result: response });
       return Object.freeze(response);
     } catch (error) {
+      const rejected = require('../providers/execution-outcome').rejectedBeforeCreation(error, error.predictionId);
+      const providerTerminal = Boolean(error.predictionId && ['REPLICATE_PREDICTION_FAILED','REPLICATE_PREDICTION_CANCELED'].includes(error.code));
       await this.repository.finishLockedStage({ attemptId: attempt.id,
-        status: boundary ? 'NEEDS_RECONCILIATION' : 'FAILED',
-        boundaryState: boundary ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
-        error: { code: error.code || 'FIRST_VIDEO_STAGE_FAILED', message: error.message } }).catch(() => {});
+        status: boundary && !rejected && !providerTerminal ? 'NEEDS_RECONCILIATION' : 'FAILED',
+        boundaryState: providerTerminal ? 'COMPLETED' : boundary && !rejected ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
+        providerRequestId: error.predictionId || null,
+        error: { code: error.code || 'FIRST_VIDEO_STAGE_FAILED', message: error.message, details: error.details || null } }).catch(() => {});
       throw error;
     }
   }

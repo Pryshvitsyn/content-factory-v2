@@ -155,6 +155,7 @@ class ReplicateWanVideoAdapter {
       }
       if (!response.ok) {
         lastError = providerError(`Replicate request failed with HTTP ${response.status}: ${payload?.detail || payload?.error || 'unknown error'}`, 'REPLICATE_HTTP_ERROR', { model: this.model, cause: payload });
+        lastError.httpStatus = response.status;
         if (retryable && (response.status === 429 || response.status >= 500) && attempt < this.maxHttpRetries) {
           await this.sleep(this.pollIntervalMs);
           continue;
@@ -261,16 +262,27 @@ class ReplicateWanVideoAdapter {
       'Cancel-After': `${Math.max(5, Math.ceil(this.timeoutMs / 1000))}s`,
     };
     const predictionUrl = `${this.baseURL}/models/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/predictions`;
-    let prediction = await this.requestJson(predictionUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ input }),
-    });
+    let prediction;
+    try {
+      prediction = await this.requestJson(predictionUrl, {
+        method: 'POST', headers, body: JSON.stringify({ input }),
+      });
+    } catch (error) {
+      // Only an explicit validation rejection of the creation POST proves no prediction was created.
+      if (error.code === 'REPLICATE_HTTP_ERROR' && [400,422].includes(error.httpStatus) && !error.cause?.id) {
+        error.details = { httpStatus: error.httpStatus, operation: 'CREATE_PREDICTION',
+          providerExecutionOutcome: 'REJECTED_BEFORE_CREATION' };
+      }
+      throw error;
+    }
     if (!prediction.id || typeof prediction.status !== 'string') {
       throw providerError('Replicate prediction response is missing id or status', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model });
     }
-    if (onProviderRequest) await onProviderRequest({ requestId: prediction.id, status: prediction.status, provider: 'replicate', model: this.model });
-    return this.finishPrediction({ prediction, headers, input, idempotencyKey });
+    try {
+      if (onProviderRequest) await onProviderRequest({ requestId: prediction.id, status: prediction.status, provider: 'replicate', model: this.model });
+      return await this.finishPrediction({ prediction, headers, input, idempotencyKey });
+    }
+    catch (error) { error.predictionId = error.predictionId || prediction.id; throw error; }
   }
 
   async recover({ capability, model, requestId } = {}) {
