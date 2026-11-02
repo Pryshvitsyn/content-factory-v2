@@ -2,26 +2,27 @@
 Updated: 2026-11-02
 
 ## CURRENT STATE
-Content Factory V2 exists in `Pryshvitsyn/content-factory-v2` (`main`). The repository documents a Node.js 22/PostgreSQL Dashboard-based, provider-routed, multi-brand production system with immutable artifacts, FFmpeg rendering and quality gates. Local Dashboard documented at `http://127.0.0.1:3000`.
+Content Factory V2 is a Node.js/PostgreSQL, multi-brand advertising-video system with a React Dashboard, provider routing, FFmpeg rendering, immutable artifacts and human review. Inspected GitHub baseline: `470cdf46818d10ca281838b20f758c40492f3f38` on `main`. Source exists; current live runtime and pilot output were not accessed.
 
 ## LATEST DELTA
-Latest operator report: `Final preflight READY. No production has started.` This is a reported local result, not independently verified in this GitHub inspection.
+Applied Originesis bootstrap to existing files on `docs/originesis-bootstrap-alignment`: shortened README, added progressive-context and completion rules to AGENTS, reconciled this snapshot and executable tasks. GOAL remains valid. Reused existing architecture and script-first workflow documentation; no duplicate architecture, decision log, agents or skills.
 
 ## WORKING
-Repository contains README and AGENTS with production workflow and explicit human approval boundaries. Prior local report confirms a READY preflight; no completed real production was evidenced here.
+On 2026-11-02: QUALITY script-first contract PASS; V2.10 runtime integration PASS (real external calls = 0); V2.1 stage sequence PASS; Dashboard production build PASS. Dependencies installed using package-lock. Checks ran on Node 24.22.1; documented target is Node 22. This is local verification, not live-production certification.
 
 ## BROKEN / MISSING
-A successfully generated, reviewed, playable final advertising MP4 has not been demonstrated in the current handoff. Runtime/provider availability and current local configuration are not independently verified.
+Current pilot has no verified playable, reviewed MP4 in this handoff. Earlier operator report says final preflight READY and production not started; it is not a fresh runtime check. Latest Mac fixes may be ahead of GitHub; installation/sync state is unknown.
 
 ## BLOCKERS
-No confirmed blocker to beginning the explicitly authorized run; paid generation and external provider access still require human authorization under AGENTS.md.
+Configured active runtime, current draft/approvals and local source revision are unavailable here for live verification. Paid generation still requires explicit start authorization.
 
 ## NEXT BEST MOVE
-Inspect the current approved script/storyboard and production readiness; obtain explicit authorization for paid production, then execute one controlled end-to-end run and verify the MP4 and quality evidence.
+Reconcile the active Mac checkout with this baseline and latest local fixes, then inspect the exact approved script/storyboard, selected models, voice, costs and fresh canonical preflight before any production start.
 
 ## PARALLEL
-Check provider configuration, quality evidence and documentation without generating media or exposing credentials.
+Read-only inspection of catalog capability and regression coverage can proceed independently of live production.
 
 ## REFERENCES
 Repo: https://github.com/Pryshvitsyn/content-factory-v2
-Branch: main. Local Dashboard: http://127.0.0.1:3000 (when running).
+Core: README.md, AGENTS.md, GOAL.md, TASKS.md.
+Details: docs/QUALITY-SCRIPT-FIRST-WORKFLOW.md; docs/ARCHITECTURE.md.

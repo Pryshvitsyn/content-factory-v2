@@ -16,9 +16,16 @@ Maintain and extend Content Factory V2 without weakening its certified V2.1 foun
 
 ## Working method
 
+Before substantial work:
+
+1. Read README.md, then these rules, GOAL.md and PRODUCT_SNAPSHOT.md.
+2. Check the relevant TASKS.md entries.
+3. Identify GOAL, STATE, GAP, REUSE, DEPENDENCIES, BLOCKERS, PARALLEL, RISK, PROOF and the fastest correct path before implementation.
+4. Open only the relevant decisions, documentation, tests, migrations and source files. Do not automatically read all history, docs or role files.
+
 Before changing code:
 
-- Read the nearest documentation, tests, migrations, and existing implementation.
+- Inspect the existing implementation; REUSE BEFORE BUILD. Keep one source of truth per concern and do not create duplicate systems or documents.
 - Identify the affected compatibility boundary and brand scope.
 - Check the working tree and preserve unrelated user changes.
 - If requirements conflict with a non-negotiable rule, stop and explain the conflict.
@@ -33,6 +40,10 @@ While changing code:
 - Do not silently repair, overwrite, or recertify historical records.
 
 Before handing off:
+
+- Implement → test → verify → update TASKS.md → update PRODUCT_SNAPSHOT.md after substantial work. Keep the snapshot around 150–300 words, with current state rather than a changelog.
+- Update README only when entry information changes; architecture only when architecture changes; decisions only for genuine durable choices not already recorded elsewhere.
+- Coordinate reasonable technical steps independently. Founder owns product strategy, priorities and substantial trade-offs; do not use Founder as a human task router.
 
 - Run the relevant unit, integration, migration, isolation, and regression tests available in the repository.
 - For migrations, test both a clean setup and an upgrade from the latest certified version when supported.
@@ -54,4 +65,4 @@ When approval is required, prepare the change and evidence, then pause at the bo
 
 ## Definition of done
 
-A task is done only when the requested behavior is implemented, relevant checks pass, migrations and documentation are included where needed, brand isolation and artifact immutability are preserved, no secrets are introduced, and all remaining human actions are clearly listed.
+A task is done only when the requested behavior is implemented and verified with objective evidence, relevant checks pass, TASKS.md and PRODUCT_SNAPSHOT.md reflect the result, migrations and documentation are included where needed, brand isolation and artifact immutability are preserved, no secrets are introduced, and all remaining human actions are clearly listed.
