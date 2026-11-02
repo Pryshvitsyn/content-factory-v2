@@ -2,27 +2,26 @@
 Updated: 2026-11-02
 
 ## CURRENT STATE
-Content Factory V2 is a Node.js/PostgreSQL, multi-brand advertising-video system with a React Dashboard, provider routing, FFmpeg rendering, immutable artifacts and human review. Inspected GitHub baseline: `470cdf46818d10ca281838b20f758c40492f3f38` on `main`. Source exists; current live runtime and pilot output were not accessed.
+Content Factory V2 has a local Mac Dashboard, PostgreSQL, immutable media and a Script → Storyboard → LOOK → Pilot workflow. User restarted `n8n-postgres-1` and opened Dashboard. Mac checkout reports `4be55b5` with local preview, voice and approval-lifecycle fixes. Screenshot shows a PASS/APPROVED opening frame but missing current LOOK, blocking the first Tune Into Her video.
 
 ## LATEST DELTA
-Applied Originesis bootstrap to existing files on `docs/originesis-bootstrap-alignment`: shortened README, added progressive-context and completion rules to AGENTS, reconciled this snapshot and executable tasks. GOAL remains valid. Reused existing architecture and script-first workflow documentation; no duplicate architecture, decision log, agents or skills.
+Implemented context-bound LOOK approval on `fix/quality-look-lifecycle`, including the existing approval-cycle fix. Server verifies exact frame/creative approval identities; UI offers explicit review of an existing frame. Unchanged repeated approvals preserve Pilot/preflight. Preflight distinguishes pilot readiness from full-production authorization. No generation or approval is performed by installation.
 
 ## WORKING
-On 2026-11-02: QUALITY script-first contract PASS; V2.10 runtime integration PASS (real external calls = 0); V2.1 stage sequence PASS; Dashboard production build PASS. Dependencies installed using package-lock. Checks ran on Node 24.22.1; documented target is Node 22. This is local verification, not live-production certification.
+Local contract/service regressions, runtime/keyframe checks, 21 Dashboard tests and build pass. SQL migrations, LOOK reload, stale-context rejection and duplicate preservation pass under PGlite, including the updated full script-first integration fixture through a Pool adapter. Real external generation calls: 0. Validation uses Node 24; Node 22/native PostgreSQL CI remains separate.
 
 ## BROKEN / MISSING
-Current pilot has no verified playable, reviewed MP4 in this handoff. Earlier operator report says final preflight READY and production not started; it is not a fresh runtime check. Latest Mac fixes may be ahead of GitHub; installation/sync state is unknown.
+The fix is prepared but not yet installed on the Mac. No completed or reviewed current pilot MP4 is evidenced. Local changes beyond the recovered approval package are preserved by guarded text patches rather than whole-file replacement.
 
 ## BLOCKERS
-Configured active runtime, current draft/approvals and local source revision are unavailable here for live verification. Paid generation still requires explicit start authorization.
+Installation and live verification require the Mac operator. Guarded installer stops if expected local code differs.
 
 ## NEXT BEST MOVE
-Reconcile the active Mac checkout with this baseline and latest local fixes, then inspect the exact approved script/storyboard, selected models, voice, costs and fresh canonical preflight before any production start.
+Install with Dashboard stopped, restart, review the intended draft and existing frame, explicitly approve current LOOK, then run final and first-video preflights before one controlled pilot start.
 
 ## PARALLEL
-Read-only inspection of catalog capability and regression coverage can proceed independently of live production.
+GitHub review and CI; no cloud deployment is requested.
 
 ## REFERENCES
-Repo: https://github.com/Pryshvitsyn/content-factory-v2
-Core: README.md, AGENTS.md, GOAL.md, TASKS.md.
-Details: docs/QUALITY-SCRIPT-FIRST-WORKFLOW.md; docs/ARCHITECTURE.md.
+Repository: https://github.com/Pryshvitsyn/content-factory-v2
+Details: docs/QUALITY-LOOK-LIFECYCLE.md; GOAL.md; TASKS.md.

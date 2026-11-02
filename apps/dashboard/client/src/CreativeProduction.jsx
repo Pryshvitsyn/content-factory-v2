@@ -96,9 +96,32 @@ export function CreativeProduction() {
   const [keyframePreflight, setKeyframePreflight] = useState(null);
   const [keyframeResult, setKeyframeResult] = useState(null);
   const [firstVideoPreflight, setFirstVideoPreflight] = useState(null);
+  const [director, setDirector] = useState(null);
+  const [editorDirty, setEditorDirty] = useState(false);
   const [attested, setAttested] = useState(false);
   const [video, setVideo] = useState(emptyVideo);
   const [busy, setBusy] = useState(null);
+
+  React.useEffect(() => {
+    let active = true;
+    setDirector(null);
+    if (draft?.id && brandId && !busy && !editorDirty) {
+      Promise.all([
+        api(`/api/v2.10/creative-drafts/${draft.id}/quality-director?brandId=${encodeURIComponent(brandId)}`),
+        api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/state?brandId=${encodeURIComponent(brandId)}`),
+      ]).then(([value, persisted]) => {
+        if (!active) return;
+        setDirector(value);
+        const result = persisted?.keyframeResult;
+        if (result?.keyframe?.id === value.look?.keyframeId) {
+          setKeyframeResult({ ...result, keyframe: { ...result.keyframe,
+            approvalDecision: value.look.keyframeApprovalDecision } });
+        } else setKeyframeResult(null);
+      })
+        .catch((error) => { if (active) setMessage(error.message); });
+    }
+    return () => { active = false; };
+  }, [draft?.id, draft?.revision, brandId, busy, editorDirty]);
 
   React.useEffect(() => {
     api('/api/brands').then(setBrands).catch((error) => setMessage(error.message));
@@ -126,7 +149,7 @@ export function CreativeProduction() {
   const voiceReady = !voiceNeedsApproval || brief.voice.approved === true;
   const imageProviders = providers.filter((provider) => provider.models?.some((model) => model.capabilities?.includes('TEXT_TO_IMAGE')));
 
-  const invalidate = () => setPreflight(null);
+  const invalidate = () => { setPreflight(null); setFirstVideoPreflight(null); setDirector(null); setEditorDirty(true); };
   const edit = (fn, voiceChange = false) => {
     setBrief((current) => {
       const next = fn(current);
@@ -152,6 +175,7 @@ export function CreativeProduction() {
     const provider = eligibleProviders.find((item) => item.id === persisted.provider);
     const model = provider?.models?.find((item) => item.modelId === persisted.model);
     const profile = persisted.profile && model?.profiles?.[persisted.profile] ? persisted.profile : defaultProfile(model);
+    setEditorDirty(false);
     setDraft(row);
     setBrief(loaded);
     setVideo({ provider: persisted.provider, model: persisted.model, modelFamily: model?.modelFamily || persisted.modelFamily || '',
@@ -272,6 +296,7 @@ export function CreativeProduction() {
     const body = { brandId, brief, providerSelection: currentProviderSelection(), voiceSelection: brief.voice };
     const value = draft ? await api(`/api/v2.10/creative-drafts/${draft.id}`, { method: 'PATCH', body: JSON.stringify(body) })
       : await api('/api/v2.10/creative-drafts', { method: 'POST', body: JSON.stringify(body) });
+    setEditorDirty(false);
     setDraft(value);
     if (announce) setMessage('Draft saved. External calls: 0.');
     return value;
@@ -343,7 +368,7 @@ export function CreativeProduction() {
   }
 
   async function start() {
-    if (!preflight || preflight.status !== 'READY') return;
+    if (!preflight || preflight.status !== 'READY' || !director?.look?.approved || !director?.pilot?.approved) return;
     if (!window.confirm(`START PRODUCTION?\nProvider: ${preflight.video?.providerDisplayName || preflight.video?.provider}\nModel: ${preflight.video?.model}\nProfile: ${preflight.video?.profile}\nMaximum external calls: ${preflight.externalCalls.maximum}\nKnown cost: ${preflight.costStatus}\nHuman approval: REQUIRED\nAuto publish: NO`)) return;
     setBusy('start');
     try {
@@ -394,17 +419,21 @@ export function CreativeProduction() {
   }
 
   async function approveLockedKeyframe() {
-    if (!keyframeResult?.keyframe?.id || keyframeResult.validation?.status !== 'PASS') return;
+    if (!keyframeResult?.keyframe?.id || keyframeResult.validation?.status !== 'PASS' || !director?.look?.canApprove) return;
     if (!window.confirm('APPROVE THIS EXACT IMMUTABLE KEYFRAME VERSION?\nThis binds its artifact ID, version and hash to shot 1 and invalidates production preflight.')) return;
     setBusy('keyframe-approve');
     try {
       const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/approve`, { method: 'POST',
-        body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id, confirmation: true }) });
+        body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id, confirmation: true,
+          lookFingerprint: director.look.expectedFingerprint }) });
       const reference = value.canonicalReference;
       edit((current) => ({ ...current, storyboard: current.storyboard.map((shot, index) => index === 0
         ? { ...shot, referencePolicy: 'UPLOADED_REFERENCE', referenceMedia: reference } : shot) }));
       setKeyframeResult((current) => ({ ...current, keyframe: { ...current.keyframe, approvalDecision: 'APPROVED' } }));
-      setPreflight(null); setMessage('Exact keyframe approved and bound. Run FINAL PRODUCTION PREFLIGHT next.');
+      setDirector(await api(`/api/v2.10/creative-drafts/${draft.id}/quality-director?brandId=${encodeURIComponent(brandId)}`));
+      setEditorDirty(false);
+      setPreflight(null); setFirstVideoPreflight(null);
+      setMessage('LOOK approved for the exact frame and current Script/Storyboard. Run final preflight, then FIRST VIDEO PREFLIGHT.');
     } catch (error) { setMessage(error.message); }
     finally { setBusy(null); }
   }
@@ -526,12 +555,13 @@ export function CreativeProduction() {
         <div className="actions">
           <button type="button" className="secondary" disabled={!lockedKeyframeSupported || !draft || busy || (keyframeSource === 'AI_GENERATED' && !keyframeRoute.model)} onClick={preflightKeyframeStage}>KEYFRAME PREFLIGHT · 0 CALLS</button>
           <button type="button" className="primary" disabled={!lockedKeyframeSupported || !keyframePreflight || busy || (keyframeSource === 'OPERATOR_UPLOAD' && !keyframeFile)} onClick={executeKeyframeStage}>EXECUTE KEYFRAME STAGE</button>
-          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || keyframeResult?.validation?.status !== 'PASS' || busy || keyframeResult?.keyframe?.approvalDecision === 'APPROVED'} onClick={approveLockedKeyframe}>APPROVE EXACT KEYFRAME</button>
+          <p role="status">LOOK: {director?.look?.status || 'CHECKING'} · {director?.look?.reason || 'Current exact frame and creative approvals are bound.'}</p>
+          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || keyframeResult?.validation?.status !== 'PASS' || busy || !director?.look?.canApprove || director.look.approved} onClick={approveLockedKeyframe}>{director?.look?.approved ? 'LOOK APPROVED' : 'REVIEW & APPROVE CURRENT LOOK'}</button>
         </div>
         {keyframePreflight ? <div className="plan-grid"><div className="key-value"><span>KEYFRAME CALLS</span><p>Image {keyframePreflight.externalCalls.imageGeneration} · Semantic {keyframePreflight.externalCalls.semanticImageEvaluation} · Retries 0 · Maximum {keyframePreflight.externalCalls.maximum}</p></div><div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {keyframePreflight.cost.status}</p></div></div> : null}
         {keyframeResult ? <div className="voice-status-line"><span>KEYFRAME VALIDATION / APPROVAL</span><strong className={keyframeResult.validation.status === 'PASS' ? 'pass' : 'fail'}>{keyframeResult.validation.status} · {keyframeResult.keyframe.approvalDecision || 'APPROVAL REQUIRED'}</strong></div> : null}
         <div className="actions">
-          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || !preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
+          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || !preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || !director?.look?.approved || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
           <button type="button" className="primary" disabled={!lockedKeyframeSupported || !firstVideoPreflight || busy} onClick={startLockedVideo}>START FIRST VIDEO ONLY</button>
         </div>
         {firstVideoPreflight ? <div className="plan-grid"><div className="key-value"><span>EXACT REFERENCE</span><p>{firstVideoPreflight.keyframe.artifactId} · v{firstVideoPreflight.keyframe.version} · {firstVideoPreflight.keyframe.contentHash}</p></div><div className="key-value"><span>BOUNDED EXECUTION</span><p>Video 1 · Semantic 1 · Voice 0 · Continuity 0 · Renderer 0 · Maximum 2</p></div></div> : null}
@@ -627,7 +657,7 @@ export function CreativeProduction() {
 
       <section className={`panel preflight ${preflight?.status === 'READY' ? 'preflight-ready' : ''}`}><h2 className="panel-title">PRODUCTION PREFLIGHT</h2>
         {preflight ? <>
-          <div className="preflight-status"><span>STATUS</span><strong className={preflight.status === 'READY' ? 'pass' : 'fail'}>{preflight.status}</strong>{preflight.blockers?.length ? <code>{preflight.blockers.join(' · ')}</code> : null}</div>
+          <div className="preflight-status"><span>STATUS</span><strong className={preflight.status === 'READY' ? 'pass' : 'fail'}>{preflight.readinessLabel || (director?.look?.approved && director?.pilot?.approved ? preflight.status : 'DIRECTOR APPROVAL REQUIRED')}</strong>{preflight.blockers?.length ? <code>{preflight.blockers.join(' · ')}</code> : null}</div>
           <div className="plan-grid">
             <div className="key-value"><span>VIDEO</span><p>{preflight.video?.providerDisplayName || preflight.video?.provider} · {preflight.video?.model} · {preflight.video?.profile} · {preflight.video?.resolvedSettings?.resolution || 'provider default'}</p></div>
             <div className="key-value"><span>CREATIVE</span><p>{preflight.creative.storyboardShots} shots · {preflight.creative.completeness} · continuity {preflight.creative.continuity}</p></div>
@@ -636,7 +666,7 @@ export function CreativeProduction() {
             <div className="key-value"><span>MASTER</span><p>{preflight.master?.profile} · {preflight.master?.resolution} · {preflight.master?.fps} fps</p></div>
             <div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {preflight.costStatus}</p></div>
           </div>
-          <button className="start" onClick={start} disabled={preflight.status !== 'READY' || completeness.status === 'FAIL' || !voiceReady || busy}>{busy === 'start' ? 'STARTING…' : 'START PRODUCTION'}</button>
+          <button className="start" onClick={start} disabled={preflight.status !== 'READY' || !director?.look?.approved || !director?.pilot?.approved || completeness.status === 'FAIL' || !voiceReady || busy}>{busy === 'start' ? 'STARTING…' : 'START PRODUCTION'}</button>
         </> : <p>No final preflight yet. Editing creative, route or voice invalidates the previous fingerprint.</p>}
       </section>
 

@@ -88,31 +88,28 @@ class QualityLockedKeyframeService extends LockedKeyframeService {
   }
 
   async approveKeyframe(args) {
-    await this.requireDirectorGate(args.id, args.brandId, ['SCRIPT', 'STORYBOARD']);
-    const result = await super.approveKeyframe(args);
-    if (typeof this.repository.recordQualityApproval === 'function') {
-      const scope = await this.scope(args.brandId);
-      const keyframe = result.keyframe;
-      const subjectFingerprint = fingerprint({
-        id: keyframe.id,
-        version: keyframe.version,
-        contentHash: keyframe.contentHash,
-        storageKey: keyframe.storageKey,
-        approvalEventId: keyframe.approvalEventId,
-      });
-      const latest = typeof this.repository.latestQualityStageEvent === 'function'
-        ? await this.repository.latestQualityStageEvent({ draftId: args.id, ...scope, stage: 'LOOK' }) : null;
-      if (!(latest?.decision === 'APPROVED' && latest.subject_fingerprint === subjectFingerprint)) {
-        await this.repository.recordQualityApproval({ draftId: args.id, ...scope, stage: 'LOOK',
-          subjectType: 'KEYFRAME', subjectId: keyframe.id, subjectFingerprint,
-          decision: 'APPROVED', reason: args.reason || 'APPROVED_EXACT_KEYFRAME', actor: this.actor });
-      }
-      if (typeof this.repository.invalidateQualityStages === 'function') {
-        await this.repository.invalidateQualityStages({ draftId: args.id, ...scope, fromStage: 'PILOT',
-          reason: 'LOOK_APPROVED_NEW_TRUTH', actor: this.actor });
-      }
+    const state = await this.requireDirectorGate(args.id, args.brandId, ['SCRIPT', 'STORYBOARD']);
+    if (!state?.look?.expectedFingerprint || state.look.keyframeId !== args.keyframeId
+      || args.lookFingerprint !== state.look.expectedFingerprint) {
+      throw new LockedKeyframeError('STALE_LOOK_APPROVAL', 'Reload and review the existing keyframe against the current Script and Storyboard.');
     }
-    return Object.freeze({ ...result, lookApproved: true,
+    if (args.confirmation !== true) throw new LockedKeyframeError('EXPLICIT_CONFIRMATION_REQUIRED', 'Explicit LOOK approval is required');
+    const scope = await this.scope(args.brandId);
+    const keyframe = await this.repository.getKeyframe({ id: args.keyframeId, ...scope });
+    if (state.look.approved) return Object.freeze({ keyframe: require('./locked-keyframe-service').publicKeyframe(keyframe),
+      canonicalReference: require('./locked-keyframe-contract').approvedKeyframeIdentity(keyframe),
+      lookApproved: true, reused: true, productionPreflightInvalidated: false, externalCalls: 0 });
+    const draft = await this.draft(args.id, scope);
+    const ref = draft.creative_brief?.storyboard?.[0]?.referenceMedia;
+    const alreadyBound = keyframe.approval_decision === 'APPROVED' && ref?.artifactId === keyframe.id
+      && Number(ref.version) === Number(keyframe.version) && ref.contentHash === keyframe.content_hash
+      && ref.storageKey === keyframe.storage_key;
+    const result = alreadyBound ? { keyframe: require('./locked-keyframe-service').publicKeyframe(keyframe),
+      canonicalReference: require('./locked-keyframe-contract').approvedKeyframeIdentity(keyframe),
+      productionPreflightInvalidated: true } : await super.approveKeyframe(args);
+    await this.repository.recordCurrentLookApproval({ draftId: args.id, ...scope, keyframeId: args.keyframeId,
+      expectedFingerprint: args.lookFingerprint, actor: this.actor, reason: args.reason || 'REVIEWED_CURRENT_LOOK' });
+    return Object.freeze({ ...result, lookApproved: true, externalCalls: 0,
       nextRequiredAction: 'RUN_FINAL_PRODUCTION_PREFLIGHT_THEN_PILOT' });
   }
 

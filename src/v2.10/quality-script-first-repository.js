@@ -32,15 +32,57 @@ function isSafeLocalLockedStageRetry(attempt, stage) {
 
 class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPostgresRepository {
   async recordQualityApproval(args) {
-    if (args.decision === 'APPROVED') {
-      const existing = await this.db.query(`SELECT * FROM v2_10.quality_stage_approval_events
-        WHERE draft_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage=$4
-          AND subject_fingerprint=$5 AND decision='APPROVED'
-        ORDER BY decided_at DESC,id DESC LIMIT 1`,
-      [args.draftId, args.workspaceId, args.brandId, args.stage, args.subjectFingerprint]);
-      if (existing.rows[0]) return existing.rows[0];
+    return require('./quality-approval-events').recordQualityApproval(this.db, args);
+  }
+
+  async getQualityDirectorState(args) {
+    const state = await super.getQualityDirectorState(args);
+    const draft = await this.getDraft({ id: args.draftId, ...args });
+    if (!draft) return { ...state, look: { approved: false, fingerprint: null, status: 'BLOCKED_UPSTREAM' } };
+    const workflow = await this.getLockedWorkflow(args);
+    const opening = draft.creative_brief?.storyboard?.[0];
+    let keyframe = null;
+    if (workflow && workflow.opening_shot_id === opening?.shotId) {
+      const rows = await this.db.query(`SELECT id FROM v2_10.keyframe_artifacts
+        WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND shot_id=$4 AND asset_id=$5
+        ORDER BY created_at DESC,version DESC LIMIT 1`,
+      [workflow.id, args.workspaceId, args.brandId, opening.shotId, opening.assetId]);
+      if (rows.rows[0]) keyframe = await this.getKeyframe({ id: rows.rows[0].id, ...args });
     }
-    return super.recordQualityApproval(args);
+    const event = await this.latestQualityStageEvent({ ...args, stage: 'LOOK' });
+    const look = require('./quality-look-lifecycle').describeLook(state, keyframe, opening?.referenceMedia, event);
+    return Object.freeze({ ...state, look,
+      pilot: look.approved ? state.pilot : { ...state.pilot, approved: false, fingerprint: null } });
+  }
+
+  async recordCurrentLookApproval({ draftId, workspaceId, brandId, keyframeId, expectedFingerprint, actor, reason }) {
+    const scope = { draftId, workspaceId, brandId };
+    const error = () => Object.assign(new Error('LOOK context changed. Reload and review the current frame and storyboard.'),
+      { code: 'STALE_LOOK_APPROVAL', status: 409 });
+    return this.recordQualityApproval({ ...scope, stage: 'LOOK', subjectType: 'KEYFRAME',
+      subjectId: keyframeId, subjectFingerprint: expectedFingerprint, decision: 'APPROVED', actor, reason,
+      verifyCurrent: async (client) => {
+        const reader = Object.create(this); reader.db = client;
+        const state = await reader.getQualityDirectorState(scope);
+        if (!state.look.canApprove || state.look.keyframeId !== keyframeId
+          || state.look.expectedFingerprint !== expectedFingerprint) throw error();
+        const draft = await reader.getDraft({ id: draftId, workspaceId, brandId });
+        if (draft.status === 'STARTED' || ['RUNNING','NEEDS_RECONCILIATION'].includes(draft.start_state)) throw error();
+      },
+      afterApprovalChanged: async (client) => {
+        // Append an invalidation; never rewrite immutable decisions or media.
+        await client.query(`INSERT INTO v2_10.quality_stage_approval_events
+          (draft_id,workspace_id,brand_id,stage,subject_type,subject_id,subject_fingerprint,decision,reason,actor)
+          SELECT draft_id,workspace_id,brand_id,stage,subject_type,subject_id,subject_fingerprint,
+            'INVALIDATED','LOOK_APPROVED_NEW_CONTEXT',$4 FROM (
+              SELECT * FROM v2_10.quality_stage_approval_events
+              WHERE draft_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage='PILOT'
+              ORDER BY decided_at DESC,id DESC LIMIT 1) p WHERE p.decision='APPROVED'`,
+        [draftId,workspaceId,brandId,actor]);
+        await client.query(`UPDATE v2_10.creative_drafts SET status='DRAFT',final_preflight=NULL,
+          preflight_fingerprint=NULL,preflight_request=NULL
+          WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND status<>'STARTED'`, [draftId,workspaceId,brandId]);
+      } });
   }
 
   async claimLockedStage({ workflowId, workspaceId, brandId, stage, preflightId }) {

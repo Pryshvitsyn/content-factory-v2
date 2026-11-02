@@ -45,6 +45,13 @@ jobs:
           node --check src/v2.10/locked-keyframe-state-service.js
           node --check apps/dashboard/server/http-server.js
           node --check apps/dashboard/server/index.js
+      - name: LOOK lifecycle and SQL migration regressions · zero real calls
+        run: |
+          npm install --no-save --package-lock=false @electric-sql/pglite@0.5.14
+          node tests/quality-approval-lifecycle-test.js
+          node tests/quality-approval-migration-test.js
+          node tests/quality-look-lifecycle-test.js
+          node tests/quality-look-postgres-test.js
       - name: Script-first director contract
         run: node tests/quality-script-first-test.js
       - name: Safe local locked-stage retry contract

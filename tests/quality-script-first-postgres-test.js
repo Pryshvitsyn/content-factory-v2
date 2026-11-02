@@ -49,8 +49,11 @@ async function main() {
     await apply('migrations/20260829_v2_10_completion.sql');
     await apply('migrations/20260901_locked_keyframe_production.sql');
     await apply('migrations/20260903_quality_script_first.sql');
+    await apply('migrations/20261101_quality_approval_lifecycle.sql');
 
-    const repository = new HardenedQualityScriptFirstPostgresRepository({ db });
+    const testBytes = new Map();
+    const repository = new HardenedQualityScriptFirstPostgresRepository({ db, storage: {
+      exists: async ({key}) => testBytes.has(key), put: async ({key,bytes}) => testBytes.set(key,bytes) } });
     const brief = creativeBrief();
     const draft = await repository.createDraft({ workspaceId: W1, brandId: B1, brief,
       validation: { status: 'PASS' }, actor: 'operator' });
@@ -89,16 +92,23 @@ async function main() {
     assert.equal((await repository.getLockedWorkflow({ draftId: draft.id, workspaceId: W1, brandId: B1,
       canonicalIntentFingerprint: 'intent-two' })).id, workflow2.id, 'workflow resolution can target exact creative intent');
 
-    await repository.recordQualityApproval({ draftId: draft.id, workspaceId: W1, brandId: B1, stage: 'LOOK',
-      subjectType: 'KEYFRAME', subjectId: workflow2.id, subjectFingerprint: fingerprint({ look: workflow2.id }),
-      decision: 'APPROVED', actor: 'operator' });
+    const frame = await repository.storeKeyframeArtifact({ workflowId: workflow2.id, workspaceId: W1, brandId: B1,
+      productionId: workflow2.production_id, shotId: 'shot-1', assetId: 'video-1', sourceType: 'OPERATOR_UPLOAD',
+      provider: 'operator', model: 'upload', promptFingerprint: 'opening', storageKey: 'immutable/test-opening',
+      contentHash: require('node:crypto').createHash('sha256').update('test').digest('hex'), contentType: 'image/png', bytes: Buffer.from('test'), width: 1080, height: 1920,
+      actor: 'operator' });
+    await repository.recordKeyframeValidation({ keyframeId: frame.id, workspaceId: W1, brandId: B1,
+      shotPlanFingerprint: 'opening', result: { status: 'PASS' }, semanticExternalCalls: 0 });
+    const approvedFrame = await repository.approveKeyframe({ keyframeId: frame.id, workspaceId: W1, brandId: B1, actor: 'operator' });
+    const bound = require('../src/v2.10/locked-keyframe-contract').bindApprovedKeyframe(brief, 'shot-1', approvedFrame);
+    await repository.updateDraft({ id: draft.id, workspaceId: W1, brandId: B1, brief: bound, validation: { status: 'PASS' } });
+    const look = (await repository.getQualityDirectorState({ draftId: draft.id, workspaceId: W1, brandId: B1 })).look;
+    await repository.recordCurrentLookApproval({ draftId: draft.id, workspaceId: W1, brandId: B1,
+      keyframeId: frame.id, expectedFingerprint: look.expectedFingerprint, actor: 'operator' });
     state = await repository.assertQualityDirectorGate({ draftId: draft.id, workspaceId: W1, brandId: B1,
       requiredStages: ['SCRIPT','STORYBOARD','LOOK'] });
     assert.equal(state.look.approved, true);
 
-    await db.query("UPDATE v2_10.locked_keyframe_workflows SET state='KEYFRAME_READY' WHERE id=$1", [workflow2.id]);
-    await db.query("UPDATE v2_10.locked_keyframe_workflows SET state='AWAITING_HUMAN_APPROVAL' WHERE id=$1", [workflow2.id]);
-    await db.query("UPDATE v2_10.locked_keyframe_workflows SET state='KEYFRAME_APPROVED' WHERE id=$1", [workflow2.id]);
     await db.query("UPDATE v2_10.locked_keyframe_workflows SET state='FIRST_VIDEO_RUNNING' WHERE id=$1", [workflow2.id]);
 
     const preflight = await repository.saveLockedStagePreflight({ workflowId: workflow2.id, workspaceId: W1, brandId: B1,
