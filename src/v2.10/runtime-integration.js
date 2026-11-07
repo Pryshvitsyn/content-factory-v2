@@ -12,7 +12,7 @@ const { createProductionRuntime } = require('../v2.7/production-runtime');
 const { qualityProfileFromSelection } = require('../v2.7/quality-video-profile');
 const { CAPABILITIES } = require('../v2.8/capabilities');
 const { canonicalFingerprint } = require('../../worker/v2.1-master-production');
-const { canonicalCreativeBrief, buildShotPrompt } = require('./creative-contract');
+const { SHOT_PROMPT_COMPILER_VERSION, canonicalCreativeBrief, buildShotPrompt, shotPromptSections } = require('./creative-contract');
 
 const CANONICAL_OBJECTIVES = Object.freeze(new Set([
   'ORGANIC_REACH','ENGAGEMENT','TRAFFIC','LEAD_GENERATION','APP_INSTALL','PURCHASE','BOOKING',
@@ -63,6 +63,13 @@ function requiredCapability(shot, capabilities = []) {
 async function resolveAuthoritativeVideo({ catalog, workspaceId, request, brief: input } = {}) {
   if (!catalog) throw new V210RuntimeError('V210_PROVIDER_CATALOG_REQUIRED', 'Authoritative Provider Catalog is required');
   const brief = canonicalCreativeBrief(input);
+  const conflicts = brief.storyboard.filter((shot, index) =>
+    (index === 0 && shot.referencePolicy === 'PREVIOUS_SHOT_FRAME') ||
+    (index > 0 && brief.continuity.referencePolicy === 'PREVIOUS_SHOT_FRAME' && shot.referencePolicy === 'NONE'));
+  if (conflicts.length) throw new V210RuntimeError('REFERENCE_PLAN_CONFLICT',
+    `Review reference policies for ${conflicts.map(shot => shot.shotId).join(', ')}. The continuity plan cannot silently execute these shots without the required frame. Use an approved opening frame when the next shot starts in a different pose/location.`,
+    { details: { operation: 'LOCAL_INPUT_VALIDATION', providerExecutionOutcome: 'REJECTED_BEFORE_CREATION',
+      affectedShots: conflicts.map(shot => shot.shotId) } });
   const requested = requestedVideoSelection({ ...request, aspectRatio: brief.aspectRatio });
   if (!requested.provider || !requested.model || !requested.profile) {
     throw new V210RuntimeError('VIDEO_SELECTION_INCOMPLETE', 'Explicit provider, model, and profile are required');
@@ -161,7 +168,7 @@ function canonicalRequestForDraft(draft, brief, video) {
     audience: brief.audienceIntent, publicationPolicy: { requiresHumanApproval: true, autoPublish: false } });
 }
 
-function buildCanonicalV210Input({ draft, preflight } = {}) {
+function buildCanonicalV210Input({ draft, preflight, env = process.env } = {}) {
   const brief = canonicalCreativeBrief(draft.creative_brief || draft.creativeBrief);
   if (!['9:16', '16:9'].includes(brief.aspectRatio)) {
     throw new V210RuntimeError('V210_ASPECT_RATIO_INVALID', 'Output aspect ratio must be 9:16 or 16:9');
@@ -198,7 +205,7 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
           model_family: video.modelFamily || null, provider_model_id: video.providerModelId || video.model,
           model_version: video.modelVersion || null, profile: video.profile, capability,
           resolved_settings: { ...(video.resolvedSettings || {}), duration: shot.durationSeconds },
-          prompt: buildShotPrompt(brief, shot), resolution: video.resolvedSettings?.resolution || qualityProfile.resolution,
+          prompt: buildShotPrompt(brief, shot), prompt_compiler_version: SHOT_PROMPT_COMPILER_VERSION, resolution: video.resolvedSettings?.resolution || qualityProfile.resolution,
           aspect_ratio: brief.aspectRatio, num_frames: numFrames, frames_per_second: fps,
           go_fast: qualityProfile.goFast === true, optimize_prompt: qualityProfile.optimizePrompt,
           interpolate_output: qualityProfile.interpolateOutput, sample_shift: qualityProfile.sampleShift },
@@ -249,16 +256,40 @@ function buildCanonicalV210Input({ draft, preflight } = {}) {
     publication_policy: { requires_human_approval: true, auto_publish: false, destination: 'disabled' } };
   const base = buildProductionInput(raw);
   const refs = new Map(brief.storyboard.map((shot, index) => [shot.assetId, { shot, index }]));
-  const assetPlan = Object.freeze({ ...base.assetPlan, assets: Object.freeze(base.assetPlan.assets.map((asset) => {
+  const compiler = require('../v2.8/provider-request-compiler');
+  // Bind every video to this exact approved shot at the final V2.10 assembly boundary.
+  // A lower-level legacy wrapper must not reintroduce whole-film actions or repeat the prompt.
+  const preparedAssets = base.assetPlan.assets.map(asset => {
     if (asset.kind !== 'video') return asset;
     const ref = refs.get(asset.asset_id);
-    if (!ref || ref.shot.referencePolicy === 'NONE') return asset;
-    const v210Reference = ref.shot.referencePolicy === 'PREVIOUS_SHOT_FRAME'
+    if (!ref) throw new V210RuntimeError('V210_SHOT_ASSET_MISMATCH', `No approved shot for ${asset.asset_id}`);
+    const prompt = buildShotPrompt(brief, ref.shot);
+    const requirements = { ...asset.generation_requirements, prompt,
+      prompt_compiler_version: SHOT_PROMPT_COMPILER_VERSION, request_compiler_version: compiler.COMPILER_VERSION };
+    delete requirements.provider_request_preflight;
+    if (ref.shot.referencePolicy !== 'NONE') requirements.v210_reference = ref.shot.referencePolicy === 'PREVIOUS_SHOT_FRAME'
       ? { policy: 'PREVIOUS_SHOT_FRAME', previousAssetId: brief.storyboard[ref.index - 1]?.assetId || null }
       : { policy: 'UPLOADED_REFERENCE', artifact: ref.shot.referenceMedia };
-    return Object.freeze({ ...asset, generation_requirements: Object.freeze({ ...asset.generation_requirements,
-      v210_reference: Object.freeze(v210Reference) }) });
-  })) });
+    return { ...asset, description: prompt, generation_requirements: requirements };
+  });
+  // Finish every local asset check before reporting the complete blocker list.
+  // Deferred references remain explicit and get no final-payload certificate.
+  const providerChecks = compiler.collectProviderPreflight(preparedAssets, { env }).map(check => {
+    const ref = refs.get(check.assetId);
+    return ref ? { ...check, sourceSections: shotPromptSections(brief, ref.shot).map(section => ({
+      field: section.field, characters: Array.from(section.text).length })) } : check;
+  });
+  compiler.assertProviderPreflight(providerChecks);
+  const byAsset = new Map(providerChecks.map(check => [check.assetId, check]));
+  const assets = preparedAssets.map(asset => {
+    const check = byAsset.get(asset.asset_id);
+    if (!check) return asset;
+    const requirements = { ...asset.generation_requirements, request_compiler_version: compiler.COMPILER_VERSION };
+    if (check.status === 'READY') requirements.provider_request_preflight = check;
+    else delete requirements.provider_request_preflight;
+    return Object.freeze({ ...asset, generation_requirements: Object.freeze(requirements) });
+  });
+  const assetPlan = Object.freeze({ ...base.assetPlan, assets: Object.freeze(assets) });
   const normalized = { ...base, assetPlan, productionNamespace: 'v2.7-operator', postProduction: brief.postProduction };
   delete normalized.fingerprint;
   const input = Object.freeze({ ...normalized, fingerprint: stableFingerprint(normalized) });
@@ -293,7 +324,7 @@ class V210CanonicalProductionStarter {
     return { ...runtime, config, env };
   }
   async preflight({ draft, preflight }) {
-    const canonical = buildCanonicalV210Input({ draft, preflight });
+    const canonical = buildCanonicalV210Input({ draft, preflight, env: this.env });
     const runtime = this.runtime(canonical.input, false);
     const prepared = await runtime.service.prepare({ input: canonical.input, config: runtime.config });
     return Object.freeze({ canonicalInputFingerprint: canonical.input.fingerprint, plan: prepared.plan,
@@ -334,7 +365,7 @@ class V210CanonicalProductionStarter {
       throw new V210RuntimeError('V210_EXECUTION_DISABLED',
         'LIVE_PAID_GENERATION=true is required after reviewing the final V2.10 preflight');
     }
-    const canonical = buildCanonicalV210Input({ draft, preflight });
+    const canonical = buildCanonicalV210Input({ draft, preflight, env: this.env });
     const runtime = this.runtime(canonical.input, true);
     try { this.credentialCheck({ config: runtime.config, input: canonical.input, env: runtime.env }); }
     catch (error) { throw new V210RuntimeError(error.code || 'V210_CREDENTIALS_MISSING', error.message, { boundaryState: 'NOT_CROSSED' }); }

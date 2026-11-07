@@ -86,7 +86,7 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       aspectRatio: request?.aspectRatio || requirements.aspect_ratio || '9:16', duration: request?.durationSeconds || Number(resolved.duration || requirements.duration || 5), seed: request?.seed ?? requirements.seed };
     const refs = request?.references || {};
     if (this.family === 'WAN_3') assertWan3ReferenceGeometry(request, refs, common.aspectRatio);
-    const input = this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,
+    const input = request ? require('../v2.8/provider-request-compiler').compileVideoRequest(request, { endpoint: `${this.baseURL}/models/${this.model}/predictions` }).payload.input : this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,
       negativePrompt: request?.negativePrompt || requirements.negative_prompt,
       enablePromptExpansion: resolved.enablePromptExpansion ?? requirements.enable_prompt_expansion ?? true })
       : buildSeedance25Input({ ...common, image: refs.firstFrame || null, lastFrameImage: refs.lastFrame || null,

@@ -90,7 +90,17 @@ async function main() {
       (error) => error.code === 'MEDIA_EXECUTION_CONFLICT');
     await assert.rejects(() => repository.ensure({ ...args, asset: videoAsset('cross-brand'), brandId: OTHER_BRAND_ID }),
       /ownership does not match production ownership/);
-    console.log('V2.5 PostgreSQL clean/repeatable migration, ownership, concurrency, and provider-boundary integration passed.');
+    const failedRow = await repository.ensure({ ...args, asset: videoAsset('failed-video'), fingerprint: 'failed-fingerprint', idempotencyKey: 'failed-request' });
+    await repository.claim({ id: failedRow.id, workerId: 'failure-worker' });
+    await repository.markBoundary({ id: failedRow.id, workerId: 'failure-worker' });
+    await repository.markFailure({ id: failedRow.id, workerId: 'failure-worker', boundaryCrossed: true, terminal: true,
+      error: Object.assign(new Error('provider refused'), { code: 'PROVIDER_FAILED', predictionId: 'accepted-before-failure',
+        details: { providerStatus: 'failed', providerExecutionOutcome: 'TERMINAL_FAILURE' } }) });
+    const failure = (await db.query('SELECT * FROM v2_5.media_executions WHERE id=$1', [failedRow.id])).rows[0];
+    assert.equal(failure.status, 'FAILED');
+    assert.equal(failure.provider_request_id, 'accepted-before-failure');
+    assert.equal(failure.provider_status, 'failed');
+    console.log('V2.5 PostgreSQL clean/repeatable migration, ownership, concurrency, accepted-ID persistence and provider-boundary integration passed.');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_5 CASCADE').catch(() => {});
     await db.query('DROP SCHEMA IF EXISTS v2_2 CASCADE').catch(() => {});

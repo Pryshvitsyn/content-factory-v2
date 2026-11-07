@@ -25,6 +25,7 @@ Safe local entry points after dependency installation:
 LIVE_PAID_GENERATION=false node tests/quality-script-first-test.js
 LIVE_PAID_GENERATION=false node tests/v2.10-runtime-integration-test.js
 npm run test:v2.1
+npm run test:provider-readiness
 npm run dashboard:build
 ```
 Run affected suites from [package.json](package.json) and relevant CI workflows. PostgreSQL suites require a prepared test database. `npm test` is an operator-invoked live smoke test that may incur provider cost; it is not the default unit-test command. Mock tests do not certify a live production.

@@ -96,6 +96,7 @@ export function CreativeProduction() {
   const [keyframePreflight, setKeyframePreflight] = useState(null);
   const [keyframeResult, setKeyframeResult] = useState(null);
   const [firstVideoPreflight, setFirstVideoPreflight] = useState(null);
+  const [providerFailures, setProviderFailures] = useState([]);
   const [director, setDirector] = useState(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [attested, setAttested] = useState(false);
@@ -113,7 +114,7 @@ export function CreativeProduction() {
         if (!active) return;
         setDirector(value);
         const result = persisted?.keyframeResult;
-        if (result?.keyframe?.id === value.look?.keyframeId) {
+        if (result?.keyframe?.id && result.keyframe.id === value.look?.keyframeId) {
           setKeyframeResult({ ...result, keyframe: { ...result.keyframe,
             approvalDecision: value.look.keyframeApprovalDecision } });
         } else setKeyframeResult(null);
@@ -313,14 +314,14 @@ export function CreativeProduction() {
     if (completeness.status !== 'PASS') { setMessage('Creative Validation must be PASS before final preflight.'); return; }
     if (!routeReady) { setMessage('Choose a configured video provider, model and profile.'); return; }
     if (!continuitySupported) { setMessage('Selected model does not support the reference policy used by the storyboard.'); return; }
-    setBusy('preflight'); setPreflight(null);
+    setBusy('preflight'); setPreflight(null); setFirstVideoPreflight(null); setProviderFailures([]);
     try {
       const saved = await persistDraft({ announce: false });
       const value = await api(`/api/v2.10/creative-drafts/${saved.id}/preflight`, { method: 'POST',
         body: JSON.stringify({ brandId, video: currentProviderSelection() }) });
       setPreflight(value);
-      setMessage(value.status === 'READY' ? 'Final preflight READY. No production has started.' : `Preflight BLOCKED: ${(value.blockers || []).join(', ')}`);
-    } catch (error) { setMessage(error.message); }
+      setMessage(value.status === 'READY' ? 'Локальная проверка пройдена. Генерация не запущена; проверка провайдером ещё предстоит.' : `Preflight BLOCKED: ${(value.blockers || []).join(', ')}`);
+    } catch (error) { setMessage(error.message); setProviderFailures(error.details?.providerPreflight?.results || []); }
     finally { setBusy(null); }
   }
 
@@ -439,7 +440,7 @@ export function CreativeProduction() {
   }
 
   async function preflightLockedVideo() {
-    setBusy('locked-video-preflight');
+    setBusy('locked-video-preflight'); setFirstVideoPreflight(null);
     try {
       const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/video-preflight`, { method: 'POST',
         body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id }) });
@@ -670,6 +671,13 @@ export function CreativeProduction() {
         </> : <p>No final preflight yet. Editing creative, route or voice invalidates the previous fingerprint.</p>}
       </section>
 
+      {providerFailures.length > 0 ? <section className="panel" aria-label="Provider preflight results">
+        <h2>Проверка всех материалов</h2>
+        <p>Генерация не запущена. Исправьте отмеченные условия и повторите preflight. Одобрение кадра не гарантирует принятие провайдером.</p>
+        <table><thead><tr><th>Материал</th><th>Модель</th><th>Результат</th><th>Длина / лимит</th></tr></thead>
+          <tbody>{providerFailures.map(row => <tr key={row.assetId}><td>{row.assetId}</td><td>{row.model}</td>
+            <td>{row.code || row.status}</td><td>{row.actual ?? row.promptLengthActual ?? row.promptCharacters ?? '—'} / {row.maximum ?? row.promptLimit ?? '—'}</td></tr>)}</tbody></table>
+      </section> : null}
       <button type="button" className="advanced-toggle" onClick={() => setAdvanced(!advanced)}>Advanced / Technical {advanced ? '−' : '+'}</button>
       {advanced ? <pre className="canonical">{JSON.stringify({ draftId: draft?.id || null, brief, requestedVideo: currentProviderSelection(), selectedModel: selectedModel ? {
         provider: video.provider, modelId: selectedModel.modelId, modelFamily: selectedModel.modelFamily, profiles: selectedModel.profiles,

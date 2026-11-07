@@ -22,7 +22,7 @@ async function main() {
       },
     },
   };
-  const provider = createOpenAIMediaProvider({ client, imageModel: 'image-test', speechModel: 'speech-test' });
+  const provider = createOpenAIMediaProvider({ client, imageModel: 'gpt-image-1.5', speechModel: 'gpt-4o-mini-tts' });
   const gateway = new ProviderGateway({ providers: { media: provider } });
 
   const image = await gateway.generate({
@@ -32,7 +32,7 @@ async function main() {
   });
   assert.equal(image.contentType, 'image/png');
   assert.equal(image.output.toString(), 'png');
-  assert.equal(calls[0].request.model, 'image-test');
+  assert.equal(calls[0].request.model, 'gpt-image-1.5');
   assert.match(calls[0].request.prompt, /cinematic/);
   assert.equal(calls[0].options.headers['Idempotency-Key'], 'image-idempotency');
 
@@ -43,13 +43,13 @@ async function main() {
   });
   assert.equal(speech.contentType, 'audio/mpeg');
   assert.equal(speech.output.toString(), 'mp3');
-  assert.equal(calls[1].request.model, 'speech-test');
+  assert.equal(calls[1].request.model, 'gpt-4o-mini-tts');
   assert.equal(calls[1].request.input, 'Try it today.');
   assert.equal(calls[1].request.voice, 'nova');
 
   await assert.rejects(
     () => gateway.generate({ capability: 'speech-generation', prompt: JSON.stringify({ description: '' }) }),
-    (error) => /Speech asset requires/.test(error.cause?.message || ''),
+    (error) => error.code === 'CANONICAL_PROMPT_REQUIRED',
   );
   console.log('v2.1 OpenAI image and speech provider certification passed');
 }

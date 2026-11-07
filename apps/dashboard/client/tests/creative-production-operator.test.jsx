@@ -117,3 +117,31 @@ describe('Current LOOK recovery', () => {
   expect(calls.every(([,options])=>!options.method || options.method==='GET')).toBe(true);
  });
 });
+
+describe('Complete provider blocker report', () => {
+ afterEach(() => vi.unstubAllGlobals());
+ it('shows every failed asset after preflight and keeps Start disabled', async () => {
+  const draft={id:draftId,revision:1,status:'DRAFT',creative_brief:{...savedBrief(),aspectRatio:'9:16'},provider_selection:{provider:'replicate',model:'alibaba/wan-3',profile:'STANDARD'}};
+  const results=[2,3,4].map(n=>({assetId:`video-${n}`,model:'alibaba/wan-3',status:'BLOCKED',code:'FINAL_PROMPT_TOO_LONG',actual:4500+n,maximum:4000}));
+  const calls=[];
+  vi.stubGlobal('fetch',vi.fn((url,options={})=>{
+   calls.push([url,options.method||'GET']);
+   if(url==='/api/brands')return response([{id:brandId,name:'Test'}]);
+   if(url==='/api/providers')return response([{id:'replicate',configured:true,models:[{modelId:'alibaba/wan-3',selectable:true,capabilities:['TEXT_TO_VIDEO','IMAGE_TO_VIDEO'],profiles:{STANDARD:{resolution:'720p'}}}]}]);
+   if(String(url).includes('/quality-director?'))return response({look:{approved:true},pilot:{approved:false}});
+   if(String(url).includes('/locked-keyframe/state?'))return response({});
+   if(String(url).endsWith('/preflight'))return response({error:{code:'PROVIDER_PREFLIGHT_FAILED',message:'All failed assets',details:{providerPreflight:{results}}}},false);
+   if(options.method==='PATCH')return response(draft);
+   if(String(url).startsWith('/api/v2.10/creative-drafts?'))return response([draft]);
+   throw Error(`Unexpected ${url}`);
+  }));
+  render(<CreativeProduction/>);
+  fireEvent.change(await screen.findByLabelText('BRAND'),{target:{value:brandId}});
+  const button=await screen.findByRole('button',{name:'FINAL PRODUCTION PREFLIGHT · 0 CALLS'});
+  await waitFor(()=>expect(button.disabled).toBe(false));fireEvent.click(button);
+  await screen.findByRole('region',{name:'Provider preflight results'});
+  for(const n of [2,3,4])expect(screen.getByText(`video-${n}`)).toBeTruthy();
+  expect(screen.getByRole('button',{name:'START FIRST VIDEO ONLY'}).disabled).toBe(true);
+  expect(calls.some(([url])=>String(url).endsWith('/video-start')||String(url).endsWith('/start'))).toBe(false);
+ });
+});

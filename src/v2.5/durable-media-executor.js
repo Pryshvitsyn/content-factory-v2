@@ -148,10 +148,12 @@ class PostgresMediaExecutionRepository {
   async markFailure({ id, workerId, error, boundaryCrossed, terminal = false }) {
     const status = terminal ? 'FAILED' : boundaryCrossed ? 'NEEDS_RECONCILIATION' : 'RETRYABLE';
     await this.db.query(`/* v2.5:fail-media-execution */
-      UPDATE v2_5.media_executions SET status=$3,worker_id=NULL,error=$4::jsonb,updated_at=now()
+      UPDATE v2_5.media_executions SET status=$3,worker_id=NULL,error=$4::jsonb,
+        provider_request_id=coalesce(provider_request_id,$5),provider_status=coalesce($6,provider_status),updated_at=now()
       WHERE id=$1 AND ($2::text IS NULL OR worker_id=$2 OR worker_id IS NULL)`,
     [id, workerId || null, status, JSON.stringify({ code: error.code || 'MEDIA_EXECUTION_FAILED', message: error.message,
-      details: error.details || null, predictionId: error.predictionId || null })]);
+      details: error.details || null, predictionId: error.predictionId || null }),
+      error.predictionId || error.details?.requestId || null, error.details?.providerStatus || null]);
   }
 }
 
@@ -183,7 +185,9 @@ class DurableMediaExecutor {
   }
 
   identities({ brandId, productionId, asset }) {
-    const fingerprint = canonicalFingerprint({ brandId, productionId, asset });
+    const identityAsset = { ...asset, generation_requirements: { ...(asset.generation_requirements || {}) } };
+    delete identityAsset.generation_requirements.provider_request_preflight;
+    const fingerprint = canonicalFingerprint({ brandId, productionId, asset: identityAsset });
     const artifactId = `brand:${brandId}:asset:${asset.asset_id}`;
     const idempotencyKey = `${brandId}:${productionId}:media:${asset.asset_id}:${fingerprint}`;
     return { fingerprint, artifactId, idempotencyKey, provenanceArtifactId: `${artifactId}:provenance`, provenanceIdempotencyKey: `${idempotencyKey}:provenance` };
@@ -211,7 +215,7 @@ class DurableMediaExecutor {
     };
   }
 
-  async execute({ workspaceId, productionId, brandId, workerId, asset }) {
+  async execute({ workspaceId, productionId, brandId, workerId, asset, onProviderRequest = null }) {
     const selection = this.selection(asset);
     const identities = this.identities({ brandId, productionId, asset });
     let row = await this.repository.ensure({ workspaceId, brandId, productionId, asset,
@@ -250,6 +254,12 @@ class DurableMediaExecutor {
         });
         media = normalizeMediaResult({ asset, response: recovered });
       } else {
+        if (asset.generation_requirements?.request_compiler_version) {
+          const compiler = require('../v2.8/provider-request-compiler');
+          const checks = compiler.collectProviderPreflight([asset]);
+          compiler.assertProviderPreflight(checks);
+          if (checks.some(check => check.status !== 'READY')) throw new DurableMediaError('REFERENCE_EVIDENCE_MISSING', 'Exact reference bytes must be materialized before generation');
+        }
         row = await this.repository.claim({ id: row.id, workerId });
         if (!row) throw new DurableMediaError('MEDIA_EXECUTION_NOT_CLAIMED', `Asset ${asset.asset_id} is already claimed or terminal`);
         row = await this.repository.markBoundary({ id: row.id, workerId, requestEvidence: {
@@ -265,6 +275,7 @@ class DurableMediaExecutor {
           providerGateway: this.providerGateway, asset, productionId, brandId, workerId,
           onProviderRequest: async ({ requestId, status }) => {
             row = await this.repository.recordProviderRequest({ id: row.id, workerId, requestId, providerStatus: status });
+            if (onProviderRequest) await onProviderRequest({ requestId, status });
           },
         });
         if (media.requestId && !row.provider_request_id) {
@@ -305,10 +316,10 @@ class DurableMediaExecutor {
       await this.registerAsset({ productionId, asset, media: resolved, workerId, identities, probe });
       return Object.freeze({ ...resolved, durableExecutionId: row.id });
     } catch (error) {
-      const terminal = rejectedBeforeCreation(error, row.provider_request_id)
-        || /PREDICTION_(FAILED|CANCELED)/.test(error.code || '')
+      const terminal = rejectedBeforeCreation(error, row?.provider_request_id)
+        || require('../providers/execution-outcome').terminalProviderFailure(error, row?.provider_request_id)
         || error.code === 'PROVIDER_OUTPUT_GEOMETRY_MISMATCH';
-      await this.repository.markFailure({ id: row.id, workerId, error, boundaryCrossed, terminal }).catch(() => {});
+      if (row?.id) await this.repository.markFailure({ id: row.id, workerId, error, boundaryCrossed, terminal }).catch(() => {});
       throw error;
     }
   }

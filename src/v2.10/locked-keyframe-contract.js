@@ -82,6 +82,12 @@ function buildKeyframeStagePlan({ draft, shotId, selection: rawSelection, semant
     ] },
     humanApprovalRequired: true, autoPublish: false,
   };
+  if (imageCalls) {
+    plan.providerRequest = require('../v2.8/provider-request-compiler').compileAuxiliaryRequest({
+      asset: { description: plan.prompt, generation_requirements: { prompt: plan.prompt,
+        size: selection.resolvedSettings?.size || '1024x1536', quality: selection.resolvedSettings?.quality || 'high' } },
+      capability: 'image-generation', provider: selection.provider, model: selection.model }).summary;
+  }
   plan.fingerprint = fingerprint(plan);
   return freeze(plan);
 }

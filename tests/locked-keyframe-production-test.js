@@ -54,7 +54,7 @@ async function main() {
   assert.equal(uploadPlan.humanApprovalRequired, true); assert.equal(uploadPlan.autoPublish, false);
 
   const aiPlan = buildKeyframeStagePlan({ draft, shotId: 'shot-1', selection: {
-    sourceType: 'AI_GENERATED', provider: 'openai', model: 'gpt-image-1', profile: 'STANDARD' },
+    sourceType: 'AI_GENERATED', provider: 'openai', model: 'gpt-image-1.5', profile: 'STANDARD' },
   semantic: { provider: 'mock-semantic', model: 'mock-still' } });
   assert.equal(aiPlan.externalCalls.imageGeneration, 1); assert.equal(aiPlan.externalCalls.maximum, 2);
   assert.equal(aiPlan.executionAssets.length, 1, 'keyframe stage contains one image only');
@@ -90,10 +90,10 @@ async function main() {
     'untrusted evaluator prose never becomes a downstream generation instruction');
 
   const catalog = new ProviderCatalog({ env: { OPENAI_API_KEY: 'synthetic-test-key' } });
-  const resolved = catalog.resolveSelection({ provider: 'openai', model: 'gpt-image-1', profile: 'STANDARD',
+  const resolved = catalog.resolveSelection({ provider: 'openai', model: 'gpt-image-1.5', profile: 'STANDARD',
     capability: 'TEXT_TO_IMAGE', aspectRatio: '9:16' });
   assert.equal(resolved.adapterFamily, 'openai-media'); assert.equal(resolved.capability, 'TEXT_TO_IMAGE');
-  assert.equal(resolved.model, 'gpt-image-1');
+  assert.equal(resolved.model, 'gpt-image-1.5');
   assert(!aiPlan.prompt.includes('Tune Into Her'), 'generic engine contains no product-specific corrective constant');
 
   console.log('Locked-keyframe isolation, approval, exact-reference, provider-catalog, trust-boundary and call-accounting tests passed. Real provider calls: 0.');

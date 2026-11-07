@@ -11,14 +11,15 @@ class RendererRoutingError extends Error {
 }
 
 class QualityRendererLane {
-  constructor({ masterOrchestrator, mediaExecutionRepository, qualityEvaluator = null } = {}) {
+  constructor({ masterOrchestrator, mediaExecutionRepository, qualityEvaluator = null, env = process.env } = {}) {
     if (!masterOrchestrator || typeof masterOrchestrator.build !== 'function') throw new Error('masterOrchestrator is required');
-    this.masterOrchestrator = masterOrchestrator;
+    this.env = env; this.masterOrchestrator = masterOrchestrator;
     this.mediaExecutionRepository = mediaExecutionRepository;
     this.qualityEvaluator = qualityEvaluator;
   }
 
   async preflight({ input, brand, existing }) {
+    const providerRequests = require('../v2.8/provider-request-compiler').preflightProviderAssets(input.assetPlan.assets, { env: this.env });
     let probe = null;
     let executions = [];
     if (input.schemaVersion >= 2) {
@@ -35,7 +36,7 @@ class QualityRendererLane {
       });
       if (existing?.productionId) executions = await this.mediaExecutionRepository.list(existing.productionId);
     }
-    return { probe, executions, availability: { configured: true, status: 'READY' } };
+    return { probe, executions, providerRequests, availability: { configured: true, status: 'READY' } };
   }
 
   plan({ input, config, existing, laneState }) {
@@ -58,6 +59,7 @@ class QualityRendererLane {
       : evaluatorPlan.finalPolicy;
     const expectedQualityEvaluatorCalls = evaluatorPlan.expectedExternalCalls;
     return {
+      providerRequests: laneState.providerRequests || [],
       renderMode: 'QUALITY',
       renderer: 'v2.5-quality',
       provider: videoProfile.provider || config.provider,

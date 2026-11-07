@@ -95,6 +95,7 @@ function normalizeVideoProfile(raw, aspectRatio, renderMode = 'QUALITY') {
     resolvedSettings: renderMode === 'FAST' ? {} : { ...(video.resolved_settings || {}) },
     negativeIntent: renderMode === 'FAST' || !video.negative_intent ? null : structuredClone(video.negative_intent),
     prompt: text('shot.video.prompt', video.prompt),
+    promptCompilerVersion: optionalText(video.prompt_compiler_version),
     resolution: video.resolution || '480p',
     aspectRatio: video.aspect_ratio || aspectRatio,
     numFrames: Number(video.num_frames ?? 81),
@@ -214,7 +215,7 @@ function buildProductionInput(raw = {}) {
       const assetId = text(`shot ${shotId}.asset_id`, shot.asset_id || `video-${shotId}`);
       const profile = normalizeVideoProfile(shot.video, aspectRatio, renderMode);
       const generationDurationMs = Math.round((profile.numFrames / profile.framesPerSecond) * 1000);
-      const continuityPrompt = [
+      const continuityPrompt = ['shot/2','shot/3','shot/4'].includes(profile.promptCompilerVersion) ? profile.prompt : [
         `Creative concept: ${creativeConcept}`,
         `Core message: ${coreMessage}`,
         `Scene: ${scene.visual}`,
@@ -260,6 +261,7 @@ function buildProductionInput(raw = {}) {
           resolved_settings: profile.resolvedSettings,
           negative_intent: profile.negativeIntent,
           prompt: continuityPrompt,
+          ...(profile.promptCompilerVersion ? { prompt_compiler_version: profile.promptCompilerVersion } : {}),
           resolution: profile.resolution,
           aspect_ratio: profile.aspectRatio,
           generate_audio: profile.generateAudio,

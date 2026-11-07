@@ -63,6 +63,8 @@ function createCanonicalMediaRequest(raw = {}) {
       modelFamily: selection.modelFamily || null, providerModelId: selection.providerModelId || selection.model,
       profile: String(selection.profile).toUpperCase() }),
     resolvedSettings: Object.freeze({ ...(raw.resolvedSettings || {}) }),
+    expectedProviderRequest: raw.expectedProviderRequest || null,
+    requestCompilerVersion: raw.requestCompilerVersion || null,
   });
 }
 
@@ -81,7 +83,8 @@ function fromAsset(asset) {
     profile: requirements.profile || 'STANDARD' };
   const translated = translateProviderPrompt({ canonicalPrompt: prompt,
     negativeIntent: requirements.negative_intent || DEFAULT_NEGATIVE_INTENT,
-    provider: selection.provider, model: selection.model });
+    provider: selection.provider, model: selection.model, capability,
+    promptCompilerVersion: requirements.prompt_compiler_version });
   return createCanonicalMediaRequest({
     capability, prompt, providerPrompt: translated.providerPrompt, negativeIntent: translated.negativeIntent,
     negativePrompt: requirements.negative_prompt, durationSeconds: (requirements.target_clip_duration_ms || 0) / 1000 || null,
@@ -92,7 +95,16 @@ function fromAsset(asset) {
     referenceGeometry: requirements.v210_reference_evidence || null,
     providerSelection: { ...selection, modelFamily: selection.modelFamily || requirements.model_family,
       providerModelId: selection.providerModelId || requirements.provider_model_id || selection.model },
-    resolvedSettings: requirements.resolved_settings || requirements,
+    resolvedSettings: { ...(requirements.resolved_settings || {}),
+      numFrames: requirements.resolved_settings?.numFrames ?? requirements.num_frames,
+      framesPerSecond: requirements.resolved_settings?.framesPerSecond ?? requirements.frames_per_second,
+      goFast: requirements.resolved_settings?.goFast ?? requirements.go_fast,
+      sampleShift: requirements.resolved_settings?.sampleShift ?? requirements.sample_shift,
+      optimizePrompt: requirements.resolved_settings?.optimizePrompt ?? requirements.optimize_prompt,
+      interpolateOutput: requirements.resolved_settings?.interpolateOutput ?? requirements.interpolate_output,
+    },
+    expectedProviderRequest: requirements.provider_request_preflight || null,
+    requestCompilerVersion: requirements.request_compiler_version || null,
   });
 }
 

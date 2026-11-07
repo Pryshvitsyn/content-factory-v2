@@ -66,3 +66,12 @@ When approval is required, prepare the change and evidence, then pause at the bo
 ## Definition of done
 
 A task is done only when the requested behavior is implemented and verified with objective evidence, relevant checks pass, TASKS.md and PRODUCT_SNAPSHOT.md reflect the result, migrations and documentation are included where needed, brand isolation and artifact immutability are preserved, no secrets are introduced, and all remaining human actions are clearly listed.
+
+## Provider changes and recurring failures
+
+- A failure on one asset requires inspecting every sibling asset and every route sharing the affected code, including optional later shots and voice/image assets.
+- Follow [provider execution readiness](docs/PRODUCTION-READINESS.md) and [prompt budget rules](docs/PROMPT-BUDGET-RULES.md). Run `npm run test:provider-readiness` plus affected integration/UI checks.
+- Validate the final serialized request and materialized references before HTTP; do not silently edit approved intent, increase a limit or switch providers to make a gate pass.
+- Model capabilities, reference eligibility, account availability and successful media quality are separate evidence. Do not label unverified behavior as READY.
+- Save accepted provider IDs before polling, preserve ambiguous outcomes and prohibit automatic paid creation retries. Add a regression covering the actual failure and sibling paths.
+- DONE requires observed proof. Keep source implementation, Mac installation, CI and live media acceptance explicitly distinguished in the snapshot.

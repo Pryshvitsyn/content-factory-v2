@@ -54,7 +54,6 @@ async function main() {
     ['replicate','wan-video/wan-2.2-t2v-fast','STANDARD','TEXT_TO_VIDEO'],
     ['fal','bytedance/seedance-2.0/text-to-video','STANDARD','TEXT_TO_VIDEO'],
     ['runway','gen4.5','STANDARD','TEXT_TO_VIDEO'],
-    ['google','veo-3.1-generate-preview','PREMIUM','TEXT_TO_VIDEO'],
     ['luma','ray-2','STANDARD','TEXT_TO_VIDEO'],
     ['moneyprinterturbo','v1.3.3','ECONOMY','FAST_RENDER'],
   ];
@@ -81,7 +80,7 @@ async function main() {
   ]);
   assert.equal(falCalls[0].body.prompt, 'A quiet human moment'); assert.equal(falCalls[0].body.aspect_ratio, '9:16');
   await adapterContract('runway', 'gen4.5', [{ body: { id: 'runway-1' } }, { body: { id: 'runway-1', status: 'SUCCEEDED', output: ['https://media.test/runway.mp4'] } }]);
-  await adapterContract('google', 'veo-3.1-generate-preview', [{ body: { name: 'operations/google-1' } }, { body: { done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: 'https://media.test/google.mp4' } }] } } } }]);
+  await assert.rejects(() => adapterContract('google', 'veo-3.1-generate-preview', []), error => error.code === 'MODEL_RETIRED');
   await adapterContract('luma', 'ray-2', [{ body: { id: 'luma-1', state: 'queued' } }, { body: { id: 'luma-1', state: 'completed', assets: { video: 'https://media.test/luma.mp4' } } }]);
 
   const timeout = new AsyncMediaProviderAdapter({ protocol: PROTOCOLS.runway, credential: 'x', pollIntervalMs: 1,

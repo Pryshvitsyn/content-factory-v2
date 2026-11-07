@@ -114,7 +114,16 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
       throw new LockedKeyframeError('FIRST_VIDEO_PROVIDER_MISMATCH',
         'Prepared bounded execution differs from the authoritative provider/model selection');
     }
-    return Object.freeze({ ...projection, providerExecutions: 0 });
+    const materialized = await runtime.mediaExecutor.materializeAsset({ asset: projection.asset,
+      workspaceId: projection.canonical.input.workspaceId, brandId: projection.canonical.input.brandId,
+      productionId: keyframe.production_id });
+    const summary = require('../v2.8/provider-request-compiler').preflightVideoAsset(materialized, { env: this.env });
+    if (summary.status !== 'READY') throw new LockedKeyframeError('REFERENCE_EVIDENCE_MISSING', 'Exact first-frame payload is not ready');
+    const asset = { ...materialized, generation_requirements: { ...materialized.generation_requirements,
+      provider_request_preflight: summary } };
+    const plan = buildFirstVideoStagePlan({ draft, canonical: projection.canonical, keyframe, executionAsset: asset,
+      semantic: { provider: this.env.SEMANTIC_VISUAL_PROVIDER, model: this.env.SEMANTIC_VISUAL_MODEL } });
+    return Object.freeze({ ...projection, asset, plan, providerExecutions: 0 });
   }
 
   async ensureLockedProduction({ draft, preflight, actor, productionId }) {
@@ -130,10 +139,10 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
   }
 
   async startLockedFirstVideo({ draft, preflight, keyframe, actor, productionId, expectedFingerprint,
-    beforeProviderBoundary = null }) {
+    beforeProviderBoundary = null, onProviderRequest = null }) {
     if (this.env.LIVE_PAID_GENERATION !== 'true') throw new LockedKeyframeError('V210_EXECUTION_DISABLED',
       'LIVE_PAID_GENERATION=true is required after reviewing the first-video preflight');
-    const projection = this.lockedFirstVideoProjection({ draft, preflight, keyframe });
+    const projection = await this.preflightLockedFirstVideo({ draft, preflight, keyframe });
     if (!expectedFingerprint || projection.plan.fingerprint !== expectedFingerprint) {
       throw new LockedKeyframeError('STALE_LOCKED_STAGE_PREFLIGHT', 'First-video input changed after authoritative preflight');
     }
@@ -141,9 +150,10 @@ class V210IntegratedProductionStarter extends V210CanonicalProductionStarter {
     if (beforeProviderBoundary) await beforeProviderBoundary();
     const media = await prepared.runtime.mediaExecutor.execute({ workspaceId: projection.canonical.input.workspaceId,
       productionId: prepared.production.id, brandId: projection.canonical.input.brandId,
-      workerId: prepared.runtime.config.workerId, asset: projection.asset });
+      workerId: prepared.runtime.config.workerId, asset: projection.asset, onProviderRequest });
     const quality = await prepared.runtime.visualQualityEvaluator.evaluate({ media,
-      creativePlan: projection.canonical.input.creativePlan,
+      creativePlan: { ...projection.canonical.input.creativePlan,
+        shots: (projection.canonical.input.creativePlan?.shots || []).filter(shot => shot.assetId === projection.asset.asset_id) },
       expectedAspectRatio: projection.canonical.input.aspectRatio || '9:16', intendedContentType: 'cinematic',
       qualityTier: projection.canonical.input.qualityVideoProfile?.name || 'STANDARD',
       provider: media.provider, model: media.model,

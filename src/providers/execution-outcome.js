@@ -3,8 +3,7 @@ const LEGACY_RESOLUTION_REJECTION = 'Replicate request failed with HTTP 422: - i
 function rejectedBeforeCreation(error, requestId = null) {
   if (requestId || error?.details?.providerExecutionOutcome !== 'REJECTED_BEFORE_CREATION') return false;
   return (error.details.operation === 'CREATE_PREDICTION' && [400,422].includes(error.details.httpStatus))
-    || (error.details.operation === 'LOCAL_INPUT_VALIDATION' && error.provider === 'replicate'
-      && ['REPLICATE_INPUT_INVALID','UNSUPPORTED_RESOLUTION'].includes(error.code));
+    || (error.details.operation === 'LOCAL_INPUT_VALIDATION');
 }
 function legacyResolutionRejection(row) {
   return !row?.provider_request_id && !row?.provider_status && !row?.artifact_id && !row?.artifact_version
@@ -15,4 +14,9 @@ function legacyResolutionRejection(row) {
     && row.error?.code === 'REPLICATE_HTTP_ERROR'
     && String(row.error?.message || '').trim() === LEGACY_RESOLUTION_REJECTION;
 }
-module.exports = { rejectedBeforeCreation, legacyResolutionRejection, LEGACY_RESOLUTION_REJECTION };
+function terminalProviderFailure(error, requestId = null) {
+  const id = requestId || error?.predictionId || error?.details?.requestId;
+  return Boolean(id && (error?.details?.providerExecutionOutcome === 'TERMINAL_FAILURE'
+    || ['REPLICATE_PREDICTION_FAILED','REPLICATE_PREDICTION_CANCELED'].includes(error?.code)));
+}
+module.exports = { terminalProviderFailure, rejectedBeforeCreation, legacyResolutionRejection, LEGACY_RESOLUTION_REJECTION };

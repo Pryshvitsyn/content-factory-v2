@@ -65,7 +65,7 @@ class AsyncMediaProviderAdapter extends UniversalMediaProviderAdapter {
   async submit(request) {
     if (!this.credential) throw new AsyncProviderError(this.provider, 'CREDENTIALS_MISSING', `${this.provider} credentials are missing`);
     const descriptor = this.protocol.submit(request);
-    const body = await this.requestJson(descriptor.url, { method: 'POST', headers: this.headers(), body: JSON.stringify(this.protocol.mapRequest(request)) });
+    const body = await this.requestJson(descriptor.url, { method: 'POST', headers: this.headers(), body: JSON.stringify(require('./provider-request-compiler').compileVideoRequest(request, { protocol: this.protocol }).payload) });
     const requestId = this.protocol.requestId(body);
     if (!requestId) throw new AsyncProviderError(this.provider, 'PROVIDER_REQUEST_ID_MISSING', `${this.provider} did not return a request ID`);
     return Object.freeze({ requestId, body });
@@ -101,7 +101,8 @@ class AsyncMediaProviderAdapter extends UniversalMediaProviderAdapter {
       ? externalRequestIdOrOptions.canonicalRequest || externalRequestIdOrOptions.request : null)
       || options.canonicalRequest || options.request || createCanonicalMediaRequest({ capability: 'TEXT_TO_VIDEO', prompt: 'recovered request',
       providerSelection: { provider: this.provider, model: model || this.modelFor(), profile: 'STANDARD' } });
-    return this.pollAndDownload({ requestId, request });
+    try { return await this.pollAndDownload({ requestId, request }); }
+    catch (error) { error.predictionId = requestId; error.details = { ...(error.details || {}), requestId }; throw error; }
   }
   async pollAndDownload({ requestId, request, initialBody = null }) {
     const startedAt = this.now(); let body = initialBody; let state = body ? this.protocol.state(body) : 'PENDING';
@@ -110,7 +111,7 @@ class AsyncMediaProviderAdapter extends UniversalMediaProviderAdapter {
       await this.sleep(this.pollIntervalMs);
       const polled = await this.status(requestId, request.providerSelection.model); state = polled.state; body = polled.body;
     }
-    if (state !== 'SUCCEEDED') throw new AsyncProviderError(this.provider, 'PROVIDER_FAILED', `${this.provider} generation ${state.toLowerCase()}`, { requestId, body });
+    if (state !== 'SUCCEEDED') throw new AsyncProviderError(this.provider, 'PROVIDER_FAILED', `${this.provider} generation ${state.toLowerCase()}`, { requestId, body, providerStatus: state.toLowerCase(), providerExecutionOutcome: 'TERMINAL_FAILURE' });
     const resultDescriptor = this.protocol.result(requestId, request.providerSelection.model, body);
     const resultBody = resultDescriptor.body || await this.requestJson(resultDescriptor.url, { method: 'GET', headers: this.headers() });
     const downloaded = await this.download(resultBody);
@@ -119,8 +120,14 @@ class AsyncMediaProviderAdapter extends UniversalMediaProviderAdapter {
   async generate({ canonicalRequest, prompt, model, onProviderRequest } = {}) {
     const request = this.validate(canonicalRequest || parseLegacyPrompt(prompt, model || this.modelFor(), this.provider));
     const submitted = await this.submit(request);
-    if (onProviderRequest) await onProviderRequest({ requestId: submitted.requestId, status: 'submitted' });
-    return this.pollAndDownload({ requestId: submitted.requestId, request, initialBody: submitted.body });
+    try {
+      if (onProviderRequest) await onProviderRequest({ requestId: submitted.requestId, status: 'submitted' });
+      return await this.pollAndDownload({ requestId: submitted.requestId, request, initialBody: submitted.body });
+    } catch (error) {
+      error.predictionId = submitted.requestId;
+      error.details = { ...(error.details || {}), requestId: submitted.requestId };
+      throw error;
+    }
   }
 }
 

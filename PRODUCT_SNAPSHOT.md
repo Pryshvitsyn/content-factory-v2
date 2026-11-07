@@ -1,27 +1,26 @@
 # PRODUCT SNAPSHOT
-Updated: 2026-11-02
+Updated: 2026-11-07
 
 ## CURRENT STATE
-Content Factory has a local Mac Dashboard, PostgreSQL and an immutable Script → Storyboard → LOOK → Pilot workflow. Mac screenshots show an approved opening frame, Seedance STANDARD/720p and pilot-only readiness. The first Tune Into Her video is not yet confirmed complete.
+The first Tune Into Her ad is not yet a verified finished MP4. The latest supplied live failure is a Seedance input-image privacy refusal. Work is now implemented in branch `fix/production-readiness-20261107`, based on GitHub PR #122 and the available November 7 source exports. It is not installed on the Mac.
 
 ## LATEST DELTA
-Mac startup failed with 23505 rebuilding a unique index over old unresolved attempts. Revised recovery migration preserves multiple historical unresolved rows, keeps RUNNING uniqueness and adds an advisory-lock database insert fence that blocks new active attempts beside unresolved evidence. Startup no longer replays the superseded September index. Provider outcome classification, Seedance input bounds and revision-safe canonical production identity remain in place. The upgrade fixture now includes three old ambiguous attempts in one workflow; migration reruns and concurrent insert checks pass.
+One compiler binds preflight to actual video/image/speech payloads. All-asset diagnostics, prompt budgets, immutable frame checks, accepted-ID persistence in both journals and no automatic creation retries are enforced. The unverified Seedance reference transport is blocked before payment. Global/per-shot reference conflicts are rejected; SOURCE QA uses the current clip. Existing approvals/history are preserved.
 
 ## WORKING
-Mocked provider/stage/media tests, PGlite migration/history/concurrency/scope checks, durable-media and runtime regressions, real FFmpeg master checks, Dashboard tests and build pass. Guarded installation succeeds on the prior preview/voice/LOOK fixture. No real provider generation was used in these checks.
+Local Node 24 tests cover eight HTTP payload mappings, stale inputs, four-shot failures, privacy/timeout/recovery outcomes, pilot identity, real synthetic FFmpeg video+audio, 22 UI tests and Dashboard build. Real generation calls: 0.
 
 ## BROKEN / MISSING
-Recovery v2 still needs installation and verification on the Mac. Earlier unknown-duration/network attempts may still require reconciliation; they are not automatically released. No reviewed current pilot MP4 is evidenced.
+Mac integration, live account eligibility, real pilot quality and final ad remain unverified. The supplied storyboard's third shot has a different opening pose from shot two's end; its reference transition requires review.
 
 ## BLOCKERS
-Direct access to the Mac runtime is unavailable. Unknown local code makes the installer stop before writes.
+No connected Mac browser/runtime is available. Only part of its newer source was exported, so this branch cannot safely overwrite that working tree blindly.
 
 ## NEXT BEST MOVE
-Install provider recovery with Dashboard stopped, restart through dashboard:local, inspect a fresh first-video preflight, then explicitly start one pilot if ready.
+Reconcile the Mac checkout with this reviewed branch; run a fresh dry preflight for the complete draft and exact opening frame, then review a compatible route before one explicit pilot Start.
 
 ## PARALLEL
-GitHub review and Node 22/native PostgreSQL CI. Cloud deployment remains deferred.
+Node 22 / PostgreSQL 17 CI and code review. Cloud deployment remains deferred.
 
 ## REFERENCES
-https://github.com/Pryshvitsyn/content-factory-v2/pull/122
-Details: docs/PROVIDER-REJECTION-RECOVERY.md; docs/QUALITY-LOOK-LIFECYCLE.md; TASKS.md.
+`docs/PRODUCTION-READINESS.md`, `docs/PROMPT-BUDGET-RULES.md`, `TASKS.md`; GitHub baseline PR #122.

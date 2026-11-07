@@ -185,7 +185,7 @@ class QualityScriptFirstService {
         environment: shot.environment,
         framing: shot.camera.framing,
         camera: shot.camera.movement,
-        lensComposition: [shot.camera.angle, shot.camera.lensIntent, shot.camera.composition].filter(Boolean).join('; '),
+        lensComposition: require('./creative-contract').uniqueCameraInstructions(shot.camera.angle, shot.camera.lensIntent, shot.camera.composition),
         lighting: shot.lighting,
         startState: shot.startState,
         intendedEndState: shot.intendedEndState,
@@ -254,3 +254,5 @@ class QualityScriptFirstService {
 }
 
 module.exports = { QualityScriptFirstService, publicRevision };
+
+// installer fixture: unrelated local change

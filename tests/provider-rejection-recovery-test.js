@@ -63,6 +63,7 @@ async function main(){
  starter.env={LIVE_PAID_GENERATION:'true'};
  starter.lockedFirstVideoProjection=()=>({plan:{fingerprint:'current',executionFingerprint:'execution'},
    canonical:{input:{workspaceId:'w',brandId:'b',qualityVideoProfile:{name:'STANDARD'}}},asset:{asset_id:'video-1'}});
+ starter.preflightLockedFirstVideo=async()=>starter.lockedFirstVideoProjection();
  starter.ensureLockedProduction=async()=>({production:{id:'corrected-production'},job:{id:'job'},runtime:{
    config:{workerId:'worker'},mediaExecutor:{execute:async(args)=>{executedProduction=args.productionId;return {provider:'replicate',model:'seedance'};}},
    visualQualityEvaluator:{evaluate:async()=>({status:'PASS'})}}});

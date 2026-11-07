@@ -1,28 +1,27 @@
 # TASKS
 
 ## NOW
-- [ ] Install guarded provider recovery v2 on Mac with Dashboard stopped; verify startup after the 23505 migration failure.
-- [ ] Inspect fresh first-video preflight for the intended Tune Into Her draft, approved frame/LOOK, STANDARD/720p and valid duration.
-- [ ] Reconcile any other genuinely unknown provider attempts surfaced by preflight before retrying.
+- [ ] Reconcile this branch with the actual Mac working tree while preserving uncommitted changes.
+- [ ] Run fresh all-asset and exact-frame preflight on the current draft.
+- [ ] Review a compatible video route and the shot-two/shot-three reference transition.
 
 ## NEXT
-- [ ] Explicitly start one pilot; inspect actual video and approve/reject motion.
-- [ ] Continue remaining shots only after pilot approval; verify final MP4/audio/QA and update snapshot.
+- [ ] Explicitly start one pilot and inspect video, motion and semantic evidence.
+- [ ] After approval, reuse that pilot, finish the remaining shots and verify the final MP4/audio.
 
 ## PARALLEL
-- [ ] Review GitHub changes and run Node 22/native PostgreSQL CI.
+- [ ] Verify Node 22 / disposable PostgreSQL 17 GitHub checks and review the patch.
 
 ## BLOCKED
-- [ ] Live pilot verification.
-  Blocked by: installation and operator actions on the Mac runtime.
+- [ ] Install and verify against the live Mac draft and storage.
+  Blocked by: no connected Mac runtime and incomplete export of Mac-only source.
 
 ## DONE
-- [x] Reuse existing project core and preserve local-only fixes through guarded patches.
-- [x] Bind LOOK to exact frame and current creative approvals; reject stale/foreign requests.
-- [x] Preserve downstream state on duplicate approvals; distinguish pilot/full readiness.
-- [x] Enforce Seedance resolution/duration parity before HTTP.
-- [x] Distinguish proven creation refusal from unknown outcomes in stage and media journals.
-- [x] Preserve immutable history and concurrency fences; use revision-safe canonical production identity for corrected input.
-- [x] Verify provider recovery, SQL migration, scope, durable media, runtime, FFmpeg and Dashboard behavior without real generation.
-
-- [x] Reproduce multi-attempt legacy upgrade; preserve history, enforce database insert fencing and stop replaying the superseded index.
+- [x] Preserve PR #122 approval/recovery behavior and immutable history.
+- [x] Integrate lossless prompt-budget repair with all-asset diagnostics.
+- [x] Bind compiled payload to canonical video and auxiliary execution.
+- [x] Add early Seedance reference-eligibility and continuity-plan gates.
+- [x] Persist accepted IDs before polling in stage/media journals; preserve IDs on recovery errors.
+- [x] Disable automatic paid creation retries; retain explicit Start and approval boundaries.
+- [x] Verify local contracts, recovery, FFmpeg master, UI tests and build with zero real generation.
+- [x] Add repeatable provider-readiness command, CI workflow and permanent agent rules.

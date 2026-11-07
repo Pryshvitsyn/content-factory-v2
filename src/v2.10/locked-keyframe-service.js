@@ -23,7 +23,7 @@ class KeyframeImageGateway {
     const response = await provider.generate({ capability: 'image-generation', model: selection.model,
       idempotencyKey, onProviderRequest, prompt: JSON.stringify({ description: prompt,
         generation_requirements: { prompt, size: selection.resolvedSettings?.size || '1024x1536',
-          quality: selection.resolvedSettings?.quality || 'high' } }) });
+          quality: selection.resolvedSettings?.quality || 'high', provider_request_preflight: selection.providerRequest || undefined } }) });
     const bytes = Buffer.isBuffer(response.output) ? response.output : Buffer.isBuffer(response.bytes) ? response.bytes : null;
     if (!bytes?.length) throw new LockedKeyframeError('KEYFRAME_PROVIDER_OUTPUT_INVALID',
       'Image provider returned no durable image bytes');
@@ -36,7 +36,7 @@ class KeyframeImageGateway {
 function createKeyframeImageGateway({ env = process.env } = {}) {
   const providers = {};
   if (env.OPENAI_API_KEY) providers.openai = createOpenAIMediaProvider({ apiKey: env.OPENAI_API_KEY,
-    imageModel: env.OPENAI_IMAGE_MODEL || 'gpt-image-1' });
+    imageModel: env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5' });
   return new KeyframeImageGateway({ providers });
 }
 
@@ -210,9 +210,14 @@ class LockedKeyframeService {
         error: validation.status === 'PASS' ? {} : { code: 'KEYFRAME_SEMANTIC_VALIDATION_FAILED' } });
       return Object.freeze(resolved);
     } catch (error) {
+      const { rejectedBeforeCreation, terminalProviderFailure } = require('../providers/execution-outcome');
+      const rejected = rejectedBeforeCreation(error, error.predictionId);
+      const terminal = terminalProviderFailure(error);
       await this.repository.finishLockedStage({ attemptId: attempt.id,
-        status: boundary ? 'NEEDS_RECONCILIATION' : 'FAILED', boundaryState: boundary ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
-        error: { code: error.code || 'KEYFRAME_STAGE_FAILED', message: error.message } }).catch(() => {});
+        status: boundary && !rejected && !terminal ? 'NEEDS_RECONCILIATION' : 'FAILED',
+        boundaryState: terminal ? 'COMPLETED' : boundary && !rejected ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
+        providerRequestId: error.predictionId || error.details?.requestId || null,
+        error: { code: error.code || 'KEYFRAME_STAGE_FAILED', message: error.message, details: error.details || null } }).catch(() => {});
       throw error;
     }
   }
@@ -275,6 +280,7 @@ class LockedKeyframeService {
     try {
       const result = await this.starter.startLockedFirstVideo({ draft, preflight: draft.final_preflight,
         keyframe, actor: this.actor, productionId: workflow.production_id, expectedFingerprint,
+        onProviderRequest: async ({ requestId }) => this.repository.recordLockedStageProviderRequest({ attemptId: attempt.id, providerRequestId: requestId }),
         beforeProviderBoundary: async () => { await this.repository.markLockedStageBoundary({ attemptId: attempt.id }); boundary = true; } });
       const safeQuality = sanitizeEvaluatorResult(result.quality);
       const response = { productionId: result.productionId, jobId: result.jobId,
@@ -296,11 +302,11 @@ class LockedKeyframeService {
       return Object.freeze(response);
     } catch (error) {
       const rejected = require('../providers/execution-outcome').rejectedBeforeCreation(error, error.predictionId);
-      const providerTerminal = Boolean(error.predictionId && ['REPLICATE_PREDICTION_FAILED','REPLICATE_PREDICTION_CANCELED'].includes(error.code));
+      const providerTerminal = require('../providers/execution-outcome').terminalProviderFailure(error);
       await this.repository.finishLockedStage({ attemptId: attempt.id,
         status: boundary && !rejected && !providerTerminal ? 'NEEDS_RECONCILIATION' : 'FAILED',
         boundaryState: providerTerminal ? 'COMPLETED' : boundary && !rejected ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
-        providerRequestId: error.predictionId || null,
+        providerRequestId: error.predictionId || error.details?.requestId || null,
         error: { code: error.code || 'FIRST_VIDEO_STAGE_FAILED', message: error.message, details: error.details || null } }).catch(() => {});
       throw error;
     }
