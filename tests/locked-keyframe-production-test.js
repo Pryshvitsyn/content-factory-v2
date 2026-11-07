@@ -77,7 +77,12 @@ async function main() {
     canonical, keyframe: keyframe(), executionAsset: asset, semantic: { provider: 'mock', model: 'critic' } });
   assert.equal(videoPlan.executionAssets.length, 1); assert.equal(videoPlan.executionAssets[0].assetId, 'video-1');
   assert.deepEqual(videoPlan.externalCalls, { imageGeneration: 0, video: 1, semanticVideoEvaluation: 1,
-    semanticRetries: 0, voice: 0, continuity: 0, renderer: 0, maximum: 2, alreadyMade: 0 });
+    semanticRetries: 0, voice: 0, continuity: 0, renderer: 0, referenceUploads: 0, maximum: 2, alreadyMade: 0 });
+  const uploadVideo = buildFirstVideoStagePlan({ draft: { ...draft, creative_brief: bound, revision: 8 }, canonical, keyframe: keyframe(),
+    executionAsset: { ...asset, generation_requirements: { ...asset.generation_requirements,
+      provider_request_preflight: { transportPlan: { uploadCalls: 1 } } } } });
+  assert.equal(uploadVideo.externalCalls.referenceUploads, 1); assert.equal(uploadVideo.externalCalls.maximum, 3);
+  assert.notEqual(uploadVideo.fingerprint, videoPlan.fingerprint);
   assert.equal(videoPlan.remainingProductionScheduled, false); assert.equal(videoPlan.autoPublish, false);
   assert.throws(() => buildFirstVideoStagePlan({ draft, canonical, keyframe: keyframe({ version: 3 }),
     executionAsset: asset }), (error) => error.code === 'KEYFRAME_REFERENCE_MISMATCH');

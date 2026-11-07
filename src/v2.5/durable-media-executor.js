@@ -121,6 +121,15 @@ class PostgresMediaExecutionRepository {
     return result.rows[0];
   }
 
+  async recordProviderRequestEvidence({ id, workerId, evidence }) {
+    const result = await this.db.query(`/* v2.5:record-provider-transport */
+      UPDATE v2_5.media_executions SET provenance=coalesce(provenance,'{}'::jsonb)||$3::jsonb,updated_at=now()
+      WHERE id=$1 AND worker_id=$2 AND status='MAY_HAVE_STARTED' RETURNING *`,
+    [id, workerId, JSON.stringify({ providerRequestTransport: evidence })]);
+    if (!result.rows[0]) throw new DurableMediaError('MEDIA_EXECUTION_FENCED', 'Execution ownership was lost while recording file transport');
+    return result.rows[0];
+  }
+
   async recordProviderRequest({ id, workerId, requestId, providerStatus = null }) {
     const result = await this.db.query(`/* v2.5:record-provider-request */
       UPDATE v2_5.media_executions SET provider_request_id=$3,provider_status=$4,updated_at=now()
@@ -135,7 +144,7 @@ class PostgresMediaExecutionRepository {
       UPDATE v2_5.media_executions SET status='SUCCEEDED',worker_id=NULL,
         provider_request_id=coalesce($3,provider_request_id),provider_status='succeeded',
         artifact_id=$4,artifact_version=$5,artifact_storage_key=$6,artifact_content_hash=$7,
-        content_type=$8,duration_ms=$9,media_probe=$10::jsonb,provenance=$11::jsonb,error='{}'::jsonb,
+        content_type=$8,duration_ms=$9,media_probe=$10::jsonb,provenance=coalesce(provenance,'{}'::jsonb)||$11::jsonb,error='{}'::jsonb,
         completed_at=now(),updated_at=now()
       WHERE id=$1 AND ($2::text IS NULL OR worker_id=$2 OR worker_id IS NULL) RETURNING *`,
     [id, workerId || null, media.requestId || media.provenance?.predictionId || null,
@@ -210,7 +219,7 @@ class DurableMediaExecutor {
       temporal: asset.temporal || asset.generation_requirements?.temporal || null,
       provider: recorded.provider || row.provider, model: recorded.model || row.model,
       requestId: recorded.requestId || row.provider_request_id || null, usage: recorded.usage || null,
-      provenance: Object.freeze({ ...(recorded.provenance || row.provenance || {}), source: 'immutable-artifact-cache' }),
+      provenance: Object.freeze({ ...(row.provenance || {}), ...(recorded.provenance || {}), source: 'immutable-artifact-cache' }),
       artifact, provenanceArtifact,
     };
   }
@@ -252,7 +261,8 @@ class DurableMediaExecutor {
           requestId: row.provider_request_id, canonicalRequest: fromAsset({ ...asset,
             generation_requirements: { ...(asset.generation_requirements || {}), provider: row.provider, model: row.model } }),
         });
-        media = normalizeMediaResult({ asset, response: recovered });
+        media = normalizeMediaResult({ asset, response: { ...recovered,
+          provenance: { ...(row.provenance || {}), ...(recovered.provenance || {}) } } });
       } else {
         if (asset.generation_requirements?.request_compiler_version) {
           const compiler = require('../v2.8/provider-request-compiler');
@@ -273,6 +283,9 @@ class DurableMediaExecutor {
         boundaryCrossed = true;
         media = await generateMediaAsset({
           providerGateway: this.providerGateway, asset, productionId, brandId, workerId,
+          onProviderRequestEvidence: async (evidence) => {
+            row = await this.repository.recordProviderRequestEvidence({ id: row.id, workerId, evidence });
+          },
           onProviderRequest: async ({ requestId, status }) => {
             row = await this.repository.recordProviderRequest({ id: row.id, workerId, requestId, providerStatus: status });
             if (onProviderRequest) await onProviderRequest({ requestId, status });

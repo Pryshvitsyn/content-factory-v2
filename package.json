@@ -86,7 +86,7 @@
     "test:v2.1:replicate-video": "node tests/v2.1-replicate-wan-video-adapter-test.js",
     "test:v2.1:replicate-master": "node tests/v2.1-replicate-master-integration-test.js",
     "test:v2.2:growth-foundation": "node tests/v2.2-growth-foundation-test.js && node tests/v2.2-brand-brain-opportunity-test.js",
-    "test:provider-readiness": "node tests/provider-contract-audit-regression-test.js && node tests/prompt-budget-regression-test.js && node tests/production-readiness-test.js && node tests/provider-rejection-recovery-test.js"
+    "test:provider-readiness": "node tests/replicate-file-transport-test.js && node tests/provider-contract-audit-regression-test.js && node tests/prompt-budget-regression-test.js && node tests/production-readiness-test.js && node tests/provider-rejection-recovery-test.js"
   },
   "keywords": [
     "content-factory",

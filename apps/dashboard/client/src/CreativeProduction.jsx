@@ -444,14 +444,14 @@ export function CreativeProduction() {
     try {
       const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/video-preflight`, { method: 'POST',
         body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id }) });
-      setFirstVideoPreflight(value); setMessage(`First-video preflight ready. Maximum external calls: ${value.externalCalls.maximum}. Calls made: 0.`);
+      setFirstVideoPreflight(value); setMessage(`First-video preflight ready. Reference uploads on Start: ${value.externalCalls.referenceUploads || 0}. Maximum external calls: ${value.externalCalls.maximum}. Calls made: 0.`);
     } catch (error) { setMessage(error.message); }
     finally { setBusy(null); }
   }
 
   async function startLockedVideo() {
     if (!firstVideoPreflight) return;
-    if (!window.confirm(`START ONLY FIRST VIDEO?\nKeyframe: ${firstVideoPreflight.keyframe.artifactId} v${firstVideoPreflight.keyframe.version}\nVideo calls: 1\nSemantic calls: 1\nContinuity/voice/renderer: 0\nMaximum calls: 2\nAuto publish: NO`)) return;
+    if (!window.confirm(`START ONLY FIRST VIDEO?\nKeyframe: ${firstVideoPreflight.keyframe.artifactId} v${firstVideoPreflight.keyframe.version}\nReference uploads: ${firstVideoPreflight.externalCalls.referenceUploads || 0}\nVideo calls: 1\nSemantic calls: 1\nContinuity/voice/renderer: 0\nMaximum calls: ${firstVideoPreflight.externalCalls.maximum}\nAuto publish: NO`)) return;
     setBusy('locked-video-start');
     try {
       const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/video-start`, { method: 'POST',
@@ -663,7 +663,7 @@ export function CreativeProduction() {
             <div className="key-value"><span>VIDEO</span><p>{preflight.video?.providerDisplayName || preflight.video?.provider} · {preflight.video?.model} · {preflight.video?.profile} · {preflight.video?.resolvedSettings?.resolution || 'provider default'}</p></div>
             <div className="key-value"><span>CREATIVE</span><p>{preflight.creative.storyboardShots} shots · {preflight.creative.completeness} · continuity {preflight.creative.continuity}</p></div>
             <div className="key-value"><span>VOICE</span><p>{preflight.voice?.sourceType || 'NO VOICE'} · {preflight.voice?.previewApproved ? 'APPROVED' : 'NO APPROVAL REQUIRED / PENDING'}</p></div>
-            <div className="key-value"><span>EXTERNAL CALLS</span><p>Video {preflight.externalCalls.video} · Speech {preflight.externalCalls.speech} · Semantic {preflight.externalCalls.semantic} · Maximum {preflight.externalCalls.maximum}</p></div>
+            <div className="key-value"><span>EXTERNAL CALLS</span><p>Reference uploads {preflight.externalCalls.referenceUploads || 0} · Video {preflight.externalCalls.video} · Speech {preflight.externalCalls.speech} · Semantic {preflight.externalCalls.semantic} · Maximum {preflight.externalCalls.maximum}</p></div>
             <div className="key-value"><span>MASTER</span><p>{preflight.master?.profile} · {preflight.master?.resolution} · {preflight.master?.fps} fps</p></div>
             <div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {preflight.costStatus}</p></div>
           </div>

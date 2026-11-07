@@ -91,7 +91,10 @@ async function main() {
     quality: { semanticCritic: 'mock-semantic', semanticCalls: 2, otherEvaluatorCalls: 0 },
     master: { profile: 'reels', resolution: '1080x1920', fps: 30, audioStrategy: 'uploaded-human' } };
   const preflight = buildProductionPreflight(input);
-  assert.equal(preflight.status, 'READY'); assert.deepEqual(preflight.externalCalls, { video: 2, speech: 0, semantic: 2, otherEvaluator: 0, maximum: 4 });
+  assert.equal(preflight.status, 'READY'); assert.deepEqual(preflight.externalCalls, { video: 2, speech: 0, semantic: 2, otherEvaluator: 0, referenceUploads: 0, maximum: 4 });
+  const uploads = buildProductionPreflight({ ...input, canonicalPlan: { expectedReferenceUploadCalls: 2 } });
+  assert.equal(uploads.externalCalls.referenceUploads, 2); assert.equal(uploads.externalCalls.maximum, 6);
+  assert.notEqual(uploads.fingerprint, preflight.fingerprint, 'changed upload budget requires a fresh Start confirmation');
   assert.equal(assertStartAllowed({ preflight, currentPreflight: preflight, confirmed: true }), true);
   const executionPlan = buildExecutionPlan({ draft: { id: 'draft-1', revision: 1, workspaceId: 'w', brandId: 'b', creativeBrief: ready }, preflight });
   assert.equal(executionPlan.video.shots.length, 2); assert.equal(executionPlan.voice.generationRequired, false);

@@ -69,6 +69,8 @@ class QualityRendererLane {
       numFrames: videoProfile.num_frames || videoProfile.numFrames,
       fps: videoProfile.frames_per_second || videoProfile.framesPerSecond,
       expectedVideoGenerations: pending.filter((asset) => asset.kind === 'video').length,
+      expectedReferenceUploadCalls: (laneState.providerRequests || []).filter(check => pending.some(asset => asset.asset_id === check.assetId))
+        .reduce((sum, check) => sum + (check.transportPlan?.uploadCalls ?? check.referenceUploadMaximum ?? 0), 0),
       expectedAudioGenerations: pending.filter((asset) => asset.kind === 'voice' || asset.kind === 'audio').length,
       audioProvider: audioProfile.provider || null,
       audioModel: audioProfile.model || null,

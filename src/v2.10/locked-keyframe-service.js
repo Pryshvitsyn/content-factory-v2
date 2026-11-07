@@ -289,7 +289,8 @@ class LockedKeyframeService {
           provenance: result.media.provenance }, quality: safeQuality,
         exactKeyframe: approvedKeyframeIdentity(keyframe), externalCalls: {
           video: 1, semantic: safeQuality.metadata.externalCalls, continuity: 0, voice: 0, renderer: 0,
-          total: 1 + safeQuality.metadata.externalCalls }, remainingProductionScheduled: false,
+          referenceUploads: result.media.provenance?.providerRequestTransport?.uploadCalls || 0,
+          total: 1 + safeQuality.metadata.externalCalls + (result.media.provenance?.providerRequestTransport?.uploadCalls || 0) }, remainingProductionScheduled: false,
         readyForContinuationPreflight: result.accepted,
         nextRequiredAction: result.accepted ? 'RUN_CONTINUATION_PREFLIGHT' : 'STOP_AND_REVIEW_FAILURE',
         humanApprovalRequired: true, autoPublish: false };

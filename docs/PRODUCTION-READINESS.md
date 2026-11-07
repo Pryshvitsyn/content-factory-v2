@@ -1,9 +1,9 @@
 # Provider execution readiness
-Updated: 2026-11-07
+Updated: 2026-11-08
 
 ## What changed
 
-A reviewed request is compiled by `src/v2.8/provider-request-compiler.js` (`provider-request/5`). Canonical video adapters send that compiler's payload, rather than rebuilding it independently. OpenAI image/speech and ElevenLabs speech use the same auxiliary compiler at preflight and execution. The fingerprint covers provider, model/version, capability, endpoint, compiler and final body. It is checked again before HTTP. Existing raw V2.1 Wan calls retain their legacy input path; new V2.10 assets carry the compiler version.
+A reviewed request is compiled by `src/v2.8/provider-request-compiler.js` (`provider-request/6`). Canonical video adapters send that compiler's payload, rather than rebuilding it independently. Replicate's large image path additionally binds the original bytes to a verified file receipt and certifies the resulting wire body as described below. OpenAI image/speech and ElevenLabs speech use the same auxiliary compiler at preflight and execution. The fingerprint covers provider, model/version, capability, endpoint, compiler, body and transport plan. It is checked again before HTTP. Existing raw V2.1 Wan calls retain their legacy input path; new V2.10 assets carry the compiler version.
 
 All generated video, image and speech assets are checked in one pass. A report contains every failing asset (the first compiler failure within each asset). Unknown auxiliary providers/models are blocked. Exact approved shot text is preserved; see [prompt rules](PROMPT-BUDGET-RULES.md). Runway uses UTF-16 units; the local 4000-character budget uses Unicode code points. The budget is not asserted to be a Seedance vendor limit. Wan frame-based footage must cover the timeline clip; longer footage may be trimmed by the existing renderer, and its nominal generated duration is reported separately.
 
@@ -23,6 +23,23 @@ Primary sources reviewed:
 - https://ai.google.dev/gemini-api/docs/video.md (shutdown notice checked directly; older indexed deprecation pages are stale)
 
 ## References, approvals and recovery
+
+### Replicate large reference files
+
+Wan 3 I2V keeps the exact materialized image in the canonical request and the existing geometry/SHA-256 guard. `replicate-files/1` plans a multipart upload for an inline image over the local 256 KiB threshold. Preflight performs no upload or generation. It reports uploads separately; future previous-shot references reserve up to one upload per pending I2V asset. Cached pilot assets reserve none. The call budget counts uploads, generation and evaluation, not polling GETs or artifact downloads.
+
+On explicit Start, after the durable claim and stale-certificate check, the adapter posts the original bytes to `/v1/files` using the official SDK's `content` multipart field. It verifies the response SHA-256, size, MIME, file identity, HTTPS download URL and declared expiry. A signed URL must survive the generation timeout. A documented nullable expiry is accepted; missing/invalid expiry is rejected. Only Replicate API file URLs or Replicate delivery hosts are accepted. No re-encoding, secret URL persistence, cross-brand file cache or inline fallback is introduced.
+
+The existing media journal's extensible `provenance` JSON stores versioned `providerRequestTransport`: upload progress, sanitized file receipts, canonical fingerprint and SHA-256 of the exact serialized prediction body after URL substitution. The wire certificate is persisted before prediction POST. File IDs remain separate from prediction IDs. Upload errors prove only that no prediction POST occurred; an incomplete upload may leave a temporary file. A crash with no prediction ID remains fenced conservatively. A later prediction timeout stays ambiguous; known IDs use GET-only recovery. Recovery and artifact adoption retain transport evidence. No schema migration or historical-row rewrite is required; the new field is additive producer provenance.
+
+Source checks, 2026-11-08:
+- [HTTP input file guidance](https://replicate.com/docs/reference/http#models.predictions.create) recommends URLs above 256 KB; this is transport guidance, not a model image limit.
+- [Input files](https://replicate.com/docs/topics/predictions/input-files) describes SDK-managed uploads.
+- Official JavaScript SDK [multipart implementation](https://github.com/replicate/replicate-javascript/blob/main/lib/files.js), [URL substitution](https://github.com/replicate/replicate-javascript/blob/main/lib/util.js) and [response contract tests](https://github.com/replicate/replicate-javascript/blob/main/index.test.ts).
+
+The user's local report identifies a 2.98 MiB approved PNG matching an OpenAI text-to-image artifact, and past Wan 3 success with a different image. Those are supplied findings, not new independent Mac observations. File transport does not establish this API key's live permissions or guarantee moderation/creative acceptance of that PNG.
+
+### Immutable references and prediction recovery
 
 - A global previous-frame requirement cannot silently become per-shot NONE. Every affected shot is reported. This structural check does not judge whether two free-text poses mean the same thing.
 - The supplied third shot starts after a time jump: he is at the stove and she is seated. Reusing shot two's ending frame without reviewing that mismatch is not a valid automatic repair. Approve a compatible start frame or revise the transition before continuation.

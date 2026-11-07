@@ -5,8 +5,8 @@ const { fingerprint, freeze } = require('../v2.10/creative-contract');
 const { fromAsset } = require('./canonical-media-request');
 
 // A deliberate version boundary: persisted preflights from an older compiler cannot authorize this payload.
-const COMPILER_VERSION = 'provider-request/5';
-const VERIFIED_AT = '2026-11-07';
+const COMPILER_VERSION = 'provider-request/6';
+const VERIFIED_AT = '2026-11-08';
 const LOCAL_VIDEO_PROMPT_BUDGET = 4000; // Unicode code points; operational policy, NOT a claimed upstream limit.
 const keyOf = (r) => `${r.providerSelection.provider}/${r.providerSelection.model}`;
 function invalid(code, message, details = {}) {
@@ -139,14 +139,15 @@ function compileVideoRequest(request, { protocol = null, env = process.env, endp
     if (!selectedProtocol) invalid('PROVIDER_CONTRACT_UNVERIFIED', 'Provider has no verified protocol');
     payload = selectedProtocol.mapRequest(request); target = selectedProtocol.submit(request).url;
   }
+  const transportPlan = provider === 'replicate' ? require('../providers/replicate-file-transport').planReplicateFiles(payload.input) : null;
   const identity = { compilerVersion: COMPILER_VERSION, provider, model, modelVersion: request.providerSelection.modelVersion,
-    capability: request.capability, target: endpoint || target, payload };
+    capability: request.capability, target: endpoint || target, payload, ...(transportPlan ? { transportPlan } : {}) };
   const hash = fingerprint(identity);
   const expected = request.expectedProviderRequest;
   if (expected && (expected.compilerVersion !== COMPILER_VERSION || expected.fingerprint !== hash)) invalid('STALE_PROVIDER_PREFLIGHT',
     'Final provider payload changed after preflight; run a fresh preflight before Start');
   const summary = { compilerVersion: COMPILER_VERSION, fingerprint: hash, verifiedAt: VERIFIED_AT,
-    provider, model, capability: request.capability, promptCharacters: Array.from(request.providerPrompt).length,
+    provider, model, capability: request.capability, transportPlan, promptCharacters: Array.from(request.providerPrompt).length,
     promptBytes: Buffer.byteLength(request.providerPrompt), promptSha256: fingerprint(request.providerPrompt),
     promptLimitUnit: contractFor(request).promptLimitUnit || 'UNICODE_CODE_POINTS',
     promptLengthActual: textLength(request.providerPrompt, contractFor(request).promptLimitUnit),
@@ -166,6 +167,7 @@ function preflightVideoAsset(asset, options = {}) {
     validateVideoRequest(request, { deferredReferences: true });
     return freeze({ assetId: asset.asset_id, status: 'DEFERRED_REFERENCE', compilerVersion: COMPILER_VERSION,
       ...promptMetrics(request),
+      referenceUploadMaximum: request.providerSelection.provider === 'replicate' && request.capability === 'IMAGE_TO_VIDEO' ? 1 : 0,
       reason: 'Final payload requires the immutable reference bytes; checked again before the provider boundary' });
   }
   return freeze({ assetId: asset.asset_id, status: 'READY', ...compileVideoRequest(request, options).summary });

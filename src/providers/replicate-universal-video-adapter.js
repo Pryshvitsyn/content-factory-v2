@@ -86,7 +86,8 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       aspectRatio: request?.aspectRatio || requirements.aspect_ratio || '9:16', duration: request?.durationSeconds || Number(resolved.duration || requirements.duration || 5), seed: request?.seed ?? requirements.seed };
     const refs = request?.references || {};
     if (this.family === 'WAN_3') assertWan3ReferenceGeometry(request, refs, common.aspectRatio);
-    const input = request ? require('../v2.8/provider-request-compiler').compileVideoRequest(request, { endpoint: `${this.baseURL}/models/${this.model}/predictions` }).payload.input : this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,
+    const compiled = request ? require('../v2.8/provider-request-compiler').compileVideoRequest(request, { endpoint: `${this.baseURL}/models/${this.model}/predictions` }) : null;
+    const input = compiled ? compiled.payload.input : this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,
       negativePrompt: request?.negativePrompt || requirements.negative_prompt,
       enablePromptExpansion: resolved.enablePromptExpansion ?? requirements.enable_prompt_expansion ?? true })
       : buildSeedance25Input({ ...common, image: refs.firstFrame || null, lastFrameImage: refs.lastFrame || null,
@@ -97,15 +98,33 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       capability: request?.capability || supportRequest.capability, requestedAspectRatio: common.aspectRatio,
       framingInheritedFrom: refs.firstFrame ? 'VERIFIED_FIRST_FRAME' : 'ASPECT_RATIO_PARAMETER',
       referenceGeometry: request?.referenceGeometry || null, resolvedSettings: resolved }) });
-    if (!options.idempotencyKey) return enrich(await this.runPrediction({ input, idempotencyKey: null, onProviderRequest: options.onProviderRequest }));
+    const run = async () => {
+      const transport = compiled?.transportPlan?.uploadCalls ? await require('./replicate-file-transport').prepareReplicateFiles({
+        input, plan: compiled.transportPlan, canonicalFingerprint: compiled.fingerprint, endpoint: compiled.target,
+        apiToken: this.apiToken, fetchImpl: this.fetch, now: this.now, minimumLifetimeMs: this.timeoutMs,
+        onEvidence: options.onProviderRequestEvidence,
+      }) : { input, evidence: null };
+      try {
+        const result = await this.runPrediction({ input: transport.input, idempotencyKey: options.idempotencyKey || null,
+          onProviderRequest: options.onProviderRequest });
+        return enrich({ ...result, provenance: { ...result.provenance,
+          ...(transport.evidence ? { providerRequestTransport: transport.evidence } : {}) } });
+      } catch (error) {
+        if (transport.evidence) {
+          require('./replicate-file-transport').redactTransportError(error, transport.input, compiled.transportPlan);
+          error.details = { ...error.details, transport: transport.evidence };
+        }
+        throw error;
+      }
+    };
+    if (!options.idempotencyKey) return run();
     const identity = JSON.stringify(input);
     if (this.inflight.has(options.idempotencyKey)) {
       const existing = this.inflight.get(options.idempotencyKey);
       if (existing.operationIdentity !== identity) throw new ProviderError('Replicate idempotency conflict', { provider: 'replicate', model: this.model });
       return existing.promise;
     }
-    const operation = this.runPrediction({ input, idempotencyKey: options.idempotencyKey,
-      onProviderRequest: options.onProviderRequest }).then(enrich);
+    const operation = run();
     this.inflight.set(options.idempotencyKey, { operationIdentity: identity, promise: operation });
     try { return await operation; } finally { this.inflight.delete(options.idempotencyKey); }
   }

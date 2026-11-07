@@ -1,26 +1,26 @@
 # PRODUCT SNAPSHOT
-Updated: 2026-11-07
+Updated: 2026-11-08
 
 ## CURRENT STATE
-The first Tune Into Her ad is not yet a verified finished MP4. The latest supplied live failure is a Seedance input-image privacy refusal. Work is now implemented in branch `fix/production-readiness-20261107`, based on GitHub PR #122 and the available November 7 source exports. It is not installed on the Mac.
+The first Tune Into Her ad remains unfinished. PR #123 contains provider-readiness repairs; branch `fix/replicate-file-transport-20261108` adds the missing large-image transport on top. Neither is verified as installed on the Mac.
 
 ## LATEST DELTA
-One compiler binds preflight to actual video/image/speech payloads. All-asset diagnostics, prompt budgets, immutable frame checks, accepted-ID persistence in both journals and no automatic creation retries are enforced. The unverified Seedance reference transport is blocked before payment. Global/per-shot reference conflicts are rejected; SOURCE QA uses the current clip. Existing approvals/history are preserved.
+Replicate Wan 3 keeps approved image bytes and SHA-256 through preflight, then uploads large references only on explicit Start. Receipt identity/expiry, durable evidence and the exact wire-body digest must pass before prediction submission. All pending shots include upload estimates; cached pilots require none. File IDs, prediction IDs and signed URLs have separate handling. Seedance's unverified portrait route remains blocked; no automatic retry or model switch was added.
 
 ## WORKING
-Local Node 24 tests cover eight HTTP payload mappings, stale inputs, four-shot failures, privacy/timeout/recovery outcomes, pilot identity, real synthetic FFmpeg video+audio, 22 UI tests and Dashboard build. Both GitHub workflows passed on implementation commit `59aa8ca`: Node 22, PostgreSQL 17 media journals and PostgreSQL 16 approval/recovery migrations. Real generation calls: 0.
+Local Node 24: 20 transport groups, existing eight-route contracts, prompt budgets, recovery, V2.5 synthetic FFmpeg video/audio, V2.9.2, V2.10, 22 UI tests and Dashboard build pass. Real uploads and generation calls: 0. Prior PR #123 CI passed on Node 22/PostgreSQL 16–17. New transport PostgreSQL checks are submitted to CI separately.
 
 ## BROKEN / MISSING
-Mac integration, live account eligibility, real pilot quality and final ad remain unverified. The supplied storyboard's third shot has a different opening pose from shot two's end; its reference transition requires review.
+The user's report identifies the approved 2.98 MiB PNG and its OpenAI provenance; this session has not independently accessed that file. Current API-key permissions, exact-image moderation, live pilot quality and final MP4 remain unverified.
 
 ## BLOCKERS
-No connected Mac browser/runtime is available. Only part of its newer source was exported, so this branch cannot safely overwrite that working tree blindly.
+No connected Mac runtime; incomplete export of its newer source prevents a safe blind overwrite.
 
 ## NEXT BEST MOVE
-Reconcile the Mac checkout with this reviewed branch; run a fresh dry preflight for the complete draft and exact opening frame, then review a compatible route before one explicit pilot Start.
+Finish transport CI/review, reconcile the Mac checkout preserving local changes, then run fresh all-asset and exact-frame preflights before one explicit pilot Start.
 
 ## PARALLEL
-Code review of PR #123. CI is green for the implementation; cloud deployment remains deferred.
+Review the shot-two/shot-three opening-pose transition and PR #123.
 
 ## REFERENCES
-`docs/PRODUCTION-READINESS.md`, `docs/PROMPT-BUDGET-RULES.md`, `TASKS.md`; [Implementation PR #123](https://github.com/Pryshvitsyn/content-factory-v2/pull/123); baseline PR #122.
+`TASKS.md`, `docs/PRODUCTION-READINESS.md`, `docs/PROMPT-BUDGET-RULES.md`; [base PR #123](https://github.com/Pryshvitsyn/content-factory-v2/pull/123).

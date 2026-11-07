@@ -22,8 +22,9 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
   const speechCalls = Number(plan.expectedAudioGenerations ?? (voiceEnabled && brief.voice.sourceType !== 'UPLOADED_AUDIO' ? 1 : 0));
   const semanticCalls = Number(plan.expectedSemanticEvaluationCalls ?? plan.expectedQualityEvaluatorCalls ?? quality.semanticCalls ?? 0);
   const otherEvaluatorCalls = Number(plan.expectedContinuityEvaluationCalls ?? quality.otherEvaluatorCalls ?? 0);
-  const calls = { video: videoCalls, speech: speechCalls, semantic: semanticCalls, otherEvaluator: otherEvaluatorCalls };
-  calls.maximum = calls.video + calls.speech + calls.semantic + calls.otherEvaluator;
+  const referenceUploads = Number(plan.expectedReferenceUploadCalls ?? 0);
+  const calls = { video: videoCalls, speech: speechCalls, semantic: semanticCalls, otherEvaluator: otherEvaluatorCalls, referenceUploads };
+  calls.maximum = calls.video + calls.speech + calls.semantic + calls.otherEvaluator + calls.referenceUploads;
   const blockers = [];
   if (creative.status === 'FAIL') blockers.push('CREATIVE_COMPLETENESS_FAILED');
   if (continuity.status === 'BLOCKED') blockers.push('CONTINUITY_UNSUPPORTED');
@@ -98,7 +99,7 @@ function buildProductionPreflight({ brief: input, authoritativeVideo = {}, voice
   };
   result.fingerprint = fingerprint({ brief, authoritativeVideo: authoritative, voiceRuntime, quality: result.quality,
     master: masterResolved, timingToleranceSeconds, canonicalInputFingerprint: result.canonicalInputFingerprint,
-    canonicalReadiness: result.canonicalReadiness });
+    canonicalReadiness: result.canonicalReadiness, externalCalls: calls });
   return Object.freeze(result);
 }
 

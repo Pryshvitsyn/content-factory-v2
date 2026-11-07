@@ -3,7 +3,8 @@ const LEGACY_RESOLUTION_REJECTION = 'Replicate request failed with HTTP 422: - i
 function rejectedBeforeCreation(error, requestId = null) {
   if (requestId || error?.details?.providerExecutionOutcome !== 'REJECTED_BEFORE_CREATION') return false;
   return (error.details.operation === 'CREATE_PREDICTION' && [400,422].includes(error.details.httpStatus))
-    || (error.details.operation === 'LOCAL_INPUT_VALIDATION');
+    || (error.details.operation === 'LOCAL_INPUT_VALIDATION')
+    || (error.details.operation === 'REFERENCE_FILE_UPLOAD' && error.details.predictionPostStarted === false);
 }
 function legacyResolutionRejection(row) {
   return !row?.provider_request_id && !row?.provider_status && !row?.artifact_id && !row?.artifact_version
