@@ -84,7 +84,7 @@ async function main() {
   let calls=0;const a={generation_requirements:{text:'Hello.',voice_id:'voice-123'}};
   const adapter=createElevenLabsTtsProvider({apiKey:'synthetic',maxHttpRetries:10,sleep:async()=>{},fetchImpl:async()=>{calls++;throw Error('connection lost');}});
   await assert.rejects(()=>adapter.generate({capability:'speech-generation',prompt:JSON.stringify(a)}));assert.equal(calls,1);
-  const events=[];const accepted=createElevenLabsTtsProvider({apiKey:'synthetic',fetchImpl:async()=>({ok:true,headers:{get:()=> 'accepted-voice'},arrayBuffer:async()=>{events.push('read');throw Error('download failed');}})});
+  const events=[];const accepted=createElevenLabsTtsProvider({apiKey:'synthetic',fetchImpl:async()=>({ok:true,status:200,headers:{get:()=> 'accepted-voice'},arrayBuffer:async()=>{events.push('read');throw Error('download failed');}})});
   await assert.rejects(()=>accepted.generate({capability:'speech-generation',prompt:JSON.stringify(a),onProviderRequest:async()=>events.push('journal')}),e=>e.predictionId==='accepted-voice');assert.deepEqual(events,['journal','read']);
  });
  await check('all image and speech assets are included, unknown providers fail closed',()=>{

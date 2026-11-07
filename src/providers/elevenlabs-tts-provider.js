@@ -20,14 +20,14 @@ function createElevenLabsTtsProvider({ apiKey = process.env.ELEVENLABS_API_KEY, 
       if (!voiceId) throw new ProviderError('ElevenLabs voiceId is required', { provider: 'elevenlabs', model });
       const compiled = require('../v2.8/provider-request-compiler').compileAuxiliaryRequest({ asset, capability, provider: 'elevenlabs', model });
       let response; let lastCause;
-        const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          response = await fetchImpl(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
-            method: 'POST', signal: controller.signal, headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-            body: JSON.stringify(compiled.payload),
-          });
-        } catch (cause) { lastCause = cause; response = null; } finally { clearTimeout(timer); }
-        if (response && response.status !== 429 && response.status < 500) throw new ProviderError(`ElevenLabs returned HTTP ${response.status}`, { provider: 'elevenlabs', model });
+      const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        response = await fetchImpl(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+          method: 'POST', signal: controller.signal, headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+          body: JSON.stringify(compiled.payload),
+        });
+      } catch (cause) { lastCause = cause; response = null; } finally { clearTimeout(timer); }
+      if (response && !response.ok && response.status !== 429 && response.status < 500) throw new ProviderError(`ElevenLabs returned HTTP ${response.status}`, { provider: 'elevenlabs', model });
       if (!response?.ok) throw new ProviderError('ElevenLabs creation outcome is unknown; automatic paid retry is disabled', { provider: 'elevenlabs', model, cause: lastCause });
       const requestId = response.headers?.get?.('request-id') || response.headers?.get?.('x-request-id') || null;
       let output;
