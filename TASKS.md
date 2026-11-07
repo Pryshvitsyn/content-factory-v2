@@ -10,14 +10,14 @@
 - [ ] After approval, reuse that pilot, finish the remaining shots and verify the final MP4/audio.
 
 ## PARALLEL
-- [ ] Verify the final Node 22 GitHub run and review PR #123.
+- [ ] Review PR #123.
 
 ## BLOCKED
 - [ ] Install and verify against the live Mac draft and storage.
   Blocked by: no connected Mac runtime and incomplete export of Mac-only source.
 
 ## DONE
-- [x] Verify PostgreSQL 17 journal, approval, migration and concurrent insertion checks in GitHub.
+- [x] Verify both GitHub workflows on implementation commit 59aa8ca: Node 22, PostgreSQL 17 media journals and PostgreSQL 16 approval/recovery checks.
 - [x] Preserve PR #122 approval/recovery behavior and immutable history.
 - [x] Integrate lossless prompt-budget repair with all-asset diagnostics.
 - [x] Bind compiled payload to canonical video and auxiliary execution.
