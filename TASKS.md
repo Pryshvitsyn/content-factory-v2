@@ -1,7 +1,6 @@
 # TASKS
 
 ## NOW
-- [ ] Verify the new file transport on Node 22 and disposable PostgreSQL in CI.
 - [ ] Reconcile this branch with the actual Mac working tree while preserving uncommitted changes.
 - [ ] Run fresh all-asset and exact-frame preflight on the current draft.
 - [ ] Review a compatible video route and the shot-two/shot-three reference transition.
@@ -18,9 +17,10 @@
   Blocked by: no connected Mac runtime and incomplete export of Mac-only source.
 
 ## DONE
+- [x] Verify both transport workflows on implementation commit de7f2a4: Node 22, PostgreSQL 17 file-receipt/fencing/adoption checks and PostgreSQL 16 approval/recovery checks.
 - [x] Implement Replicate large-image uploads preserving original SHA-256, durable file receipts and the exact prediction-body digest.
 - [x] Count uploads for all pending shots; keep preflight network-free and cached pilots reusable.
-- [x] Verify 20 synthetic transport groups, sibling routes, recovery, UI/build and local FFmpeg regression checks; zero real uploads or generation.
+- [x] Verify 21 synthetic transport groups, sibling routes, recovery, UI/build and local FFmpeg regression checks; zero real uploads or generation.
 - [x] Verify both GitHub workflows on implementation commit 59aa8ca: Node 22, PostgreSQL 17 media journals and PostgreSQL 16 approval/recovery checks.
 - [x] Preserve PR #122 approval/recovery behavior and immutable history.
 - [x] Integrate lossless prompt-budget repair with all-asset diagnostics.

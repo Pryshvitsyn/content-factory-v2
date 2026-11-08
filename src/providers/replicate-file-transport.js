@@ -100,9 +100,6 @@ async function prepareReplicateFiles({ input, plan, canonicalFingerprint, endpoi
       const parent = expected.path.slice(0, -1).reduce((value, key) => value[key], wire);
       parent[expected.path.at(-1)] = file.urls.get;
     }
-    for (const file of evidence.files) {
-      if (file.validUntil !== null && file.validUntil <= now() + minimumLifetimeMs) throw failure('REFERENCE_UPLOAD_EXPIRED', 'Reference URL expired while preparing the request');
-    }
     // This hash certifies the actual JSON body, including the returned file URL.
     // Persist only its digest; signed URLs are ephemeral credentials.
     evidence.wirePayloadSha256 = sha256(JSON.stringify({ input: wire }));
@@ -110,6 +107,11 @@ async function prepareReplicateFiles({ input, plan, canonicalFingerprint, endpoi
       wirePayloadSha256: evidence.wirePayloadSha256, files: evidence.files });
     evidence.phase = 'PREDICTION_PREPARED';
     if (plan.files.length) await onEvidence(freeze(structuredClone(evidence)));
+    // Journal I/O can take time. Check immediately after it, before returning
+    // the body for submission, not just when the upload response arrives.
+    for (const file of evidence.files) {
+      if (file.validUntil !== null && file.validUntil <= now() + minimumLifetimeMs) throw failure('REFERENCE_UPLOAD_EXPIRED', 'Reference URL expired while preparing the request');
+    }
     return { input: freeze(wire), evidence: freeze(evidence) };
   } catch (cause) {
     // This catch ends BEFORE the prediction POST. A failed upload can leave a

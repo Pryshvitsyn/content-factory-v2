@@ -147,6 +147,13 @@ async function main() {
     redactTransportError(error, { image: download }, c.transportPlan);
     assert(!JSON.stringify(error).includes('synthetic-secret')); assert(!error.stack.includes('synthetic-secret'));
   });
+  await check('expiry is checked again after delayed journal persistence', async () => {
+    const c = compiler.compileVideoRequest(req()); let clock = now;
+    await assert.rejects(() => prepareReplicateFiles({ input: c.payload.input, plan: c.transportPlan, canonicalFingerprint: c.fingerprint,
+      endpoint: c.target, apiToken: 'synthetic', now: () => clock, fetchImpl: async () => response(receipt()),
+      onEvidence: async value => { if (value.phase === 'PREDICTION_PREPARED') clock += 2 * 86400000; } }),
+    error => error.code === 'REFERENCE_UPLOAD_EXPIRED' && rejectedBeforeCreation(error));
+  });
   await check('legacy media worker forwards durable transport callback without changing route identity', async () => {
     const callback = async () => {};
     await assert.rejects(() => generateMediaAsset({ asset: { asset_id: 'video-1', kind: 'video', generation_requirements: {} }, productionId: 'P', brandId: 'B', workerId: 'W',
