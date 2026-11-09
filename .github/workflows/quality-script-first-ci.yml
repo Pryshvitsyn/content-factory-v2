@@ -79,6 +79,11 @@ jobs:
         run: node tests/v2.1-ffmpeg-master-renderer-test.js
       - name: Dashboard production build
         run: npm run dashboard:build
+      - name: Play saved MP4 in both review screens
+        run: |
+          npm install --no-save --package-lock=false playwright
+          npx playwright install --with-deps chromium
+          node tests/pilot-review-browser-test.js
       - name: Paid generation remains disabled
         run: |
           test "$LIVE_PAID_GENERATION" = "false"
@@ -113,7 +118,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: QUALITY script-first PostgreSQL certification
+      - name: Pilot service, playback, crash recovery and exact approval against PostgreSQL
         run: node tests/quality-script-first-postgres-test.js
       - name: Locked-keyframe PostgreSQL regression on isolated DB
         run: |

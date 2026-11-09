@@ -1,26 +1,26 @@
 # PRODUCT SNAPSHOT
-Updated: 2026-11-08
+Updated: 2026-11-09
 
 ## CURRENT STATE
-The first Tune Into Her ad remains unfinished. PR #123 contains provider-readiness repairs; branch `fix/replicate-file-transport-20261108` adds the missing large-image transport on top. Neither is verified as installed on the Mac.
+The operator reports one Tune Into Her Wan 3 pilot (5.04 s, 720×1280), no retry/publication. The connected Dashboard showed draft r19 in FIRST_VIDEO_REVIEW. Human acceptance and the completed three-shot master remain outstanding. The live MP4 has not been visually inspected in this cloud session.
 
 ## LATEST DELTA
-Replicate Wan 3 keeps approved image bytes and SHA-256 through preflight, then uploads large references only on explicit Start. Receipt identity/expiry, durable evidence and the exact wire-body digest must pass before prediction submission. All pending shots include upload estimates; cached pilots require none. File IDs, prediction IDs and signed URLs have separate handling. Seedance's unverified portrait route remains blocked; no automatic retry or model switch was added.
+Branch `fix/pilot-review-lifecycle-20261109`, based on PR #124, fixes the missing workflow transition before provider submission. The old PostgreSQL test manually inserted that transition; it now exercises the actual service and HTTP review flow. Saved media survives a subsequent local failure. A zero-generation recovery action restores review from exact completed evidence, never from an ambiguous attempt. Pilot playback, download and QA appear in both review screens. Approval binds the exact attempt and commits with workflow state; content is hash-verified.
 
 ## WORKING
-Local Node 24: 21 transport groups, existing eight-route contracts, prompt budgets, recovery, V2.5 synthetic FFmpeg video/audio, V2.9.2, V2.10, 22 UI tests and Dashboard build pass. Real uploads and generation calls: 0. Both transport workflows passed on implementation commit `de7f2a4`: Node 22 and PostgreSQL 16–17. Final checks are linked in PR #124.
+Local SQL/PGlite tests reproduce the original failure, then pass service execution, injected failure, reload, recovery, playback/ranges, corrupt-file and cross-brand denial, atomic approval, duplicates and PASS/FAIL/unknown outcomes. All provider-readiness checks, 26 UI tests, build, recovery/continuity and synthetic FFmpeg three-shot/audio master pass. Real provider calls this repair: 0. Native PostgreSQL 16/17 and Chromium checks run in GitHub CI; see the branch PR for their current results.
 
 ## BROKEN / MISSING
-The user's report identifies the approved 2.98 MiB PNG and its OpenAI provenance; this session has not independently accessed that file. Current API-key permissions, exact-image moderation, live pilot quality and final MP4 remain unverified.
+Cloud Chromium is not installed. This repair is not installed on the Mac; its separate uncommitted source must be preserved. Live visual acceptance, remaining generation and final master verification are unfinished.
 
 ## BLOCKERS
-No connected Mac runtime; incomplete export of its newer source prevents a safe blind overwrite.
+No connected Mac filesystem/runtime for installation; browser access alone cannot replace that.
 
 ## NEXT BEST MOVE
-Review PR #124 and reconcile the Mac checkout preserving local changes, then run fresh all-asset and exact-frame preflights before one explicit pilot Start.
+Verify CI, reconcile this repair into the Mac checkout, then review the existing pilot inside the factory before any continuation.
 
 ## PARALLEL
-Review the shot-two/shot-three opening-pose transition and PR #123.
+Review the shot-one ending against shot-two and shot-three continuity.
 
 ## REFERENCES
-`TASKS.md`, `docs/PRODUCTION-READINESS.md`, `docs/PROMPT-BUDGET-RULES.md`; [transport PR #124](https://github.com/Pryshvitsyn/content-factory-v2/pull/124), stacked on #123.
+`TASKS.md`, `AGENTS.md`, `tests/quality-script-first-postgres-test.js`; PR #124 is the transport base. Reported prediction: `fd2pr4zft5rmy0d1qcctgjzang`.

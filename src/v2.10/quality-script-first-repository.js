@@ -34,6 +34,40 @@ function isSafeLocalLockedStageRetry(attempt, stage) {
 }
 
 class HardenedQualityScriptFirstPostgresRepository extends QualityScriptFirstPostgresRepository {
+  async decidePilot({ draftId, workspaceId, brandId, workflowId, attemptId, decision, actor, reason }) {
+    if (!attemptId || !['APPROVED','REJECTED'].includes(decision)) throw Object.assign(new Error('Review the exact current pilot first'),
+      { code: 'PILOT_ATTEMPT_MISMATCH', status: 409 });
+    const scope = { draftId, workspaceId, brandId };
+    const stale = () => Object.assign(new Error('Pilot or approvals changed. Reload and review the current pilot.'),
+      { code: 'PILOT_ATTEMPT_MISMATCH', status: 409 });
+    const attempt = await this.getLatestLockedStageAttempt({ workflowId, workspaceId, brandId, stage: 'FIRST_VIDEO' });
+    if (attempt?.id !== attemptId) throw stale();
+    const target = decision === 'APPROVED' ? 'FIRST_VIDEO_ACCEPTED' : 'FIRST_VIDEO_REJECTED';
+    let workflow;
+    const event = await this.recordQualityApproval({ ...scope, stage: 'PILOT', subjectType: 'PILOT_ATTEMPT',
+      subjectId: attemptId, subjectFingerprint: require('./creative-contract').fingerprint({ workflowId, attemptId,
+        artifact: attempt.result?.media?.artifact, quality: attempt.result?.quality }), decision, actor, reason,
+      verifyCurrent: async client => {
+        const reader = Object.create(this); reader.db = client;
+        workflow = (await client.query(`SELECT * FROM v2_10.locked_keyframe_workflows
+          WHERE id=$1 AND draft_id=$2 AND workspace_id=$3 AND brand_id=$4 FOR UPDATE`,
+        [workflowId, draftId, workspaceId, brandId])).rows[0];
+        const current = await reader.getLatestLockedStageAttempt({ workflowId, workspaceId, brandId, stage: 'FIRST_VIDEO' });
+        if (!workflow || !['FIRST_VIDEO_REVIEW',target].includes(workflow.state) || current?.id !== attemptId
+          || current.status !== 'SUCCEEDED' || current.result?.accepted !== true) throw stale();
+        await reader.assertQualityDirectorGate({ ...scope, requiredStages: ['SCRIPT','STORYBOARD','LOOK'] });
+      },
+      afterApprovalChanged: async client => {
+        workflow = (await client.query(`UPDATE v2_10.locked_keyframe_workflows SET state=$5
+          WHERE id=$1 AND draft_id=$2 AND workspace_id=$3 AND brand_id=$4 RETURNING *`,
+        [workflowId, draftId, workspaceId, brandId, target])).rows[0];
+        await client.query(`UPDATE v2_10.creative_drafts SET status='DRAFT',final_preflight=NULL,
+          preflight_fingerprint=NULL,preflight_request=NULL
+          WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND status<>'STARTED'`, [draftId,workspaceId,brandId]);
+      } });
+    return { event, workflow };
+  }
+
   async recordQualityApproval(args) {
     return require('./quality-approval-events').recordQualityApproval(this.db, args);
   }

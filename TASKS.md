@@ -1,22 +1,26 @@
 # TASKS
 
 ## NOW
-- [ ] Reconcile this branch with the actual Mac working tree while preserving uncommitted changes.
-- [ ] Run fresh all-asset and exact-frame preflight on the current draft.
-- [ ] Review a compatible video route and the shot-two/shot-three reference transition.
+- [ ] Verify native PostgreSQL 16/17 and Chromium CI for the pilot lifecycle repair.
+- [ ] Reconcile the reviewed repair into the actual Mac checkout without losing local changes.
+- [ ] Review the existing pilot and its bag-placement warning in the factory; record an explicit exact-pilot decision.
 
 ## NEXT
-- [ ] Explicitly start one pilot and inspect video, motion and semantic evidence.
-- [ ] After approval, reuse that pilot, finish the remaining shots and verify the final MP4/audio.
+- [ ] After pilot approval, reuse its saved artifact, generate only remaining shots, and verify final MP4, audio and continuity.
 
 ## PARALLEL
-- [ ] Review PR #123.
+- [ ] Review stacked PRs #123 and #124 together with this lifecycle repair.
 
 ## BLOCKED
-- [ ] Install and verify against the live Mac draft and storage.
-  Blocked by: no connected Mac runtime and incomplete export of Mac-only source.
+- [ ] Install and verify this repair on the live Mac draft and storage.
+  Blocked by: no connected Mac filesystem/runtime and incomplete export of Mac-only source.
 
 ## DONE
+- [x] Replace manual test-state preparation with actual service and HTTP execution against SQL constraints; reproduce the missing FIRST_VIDEO_RUNNING transition before fixing it.
+- [x] Commit provider-boundary/workflow advancement together; recover review from completed immutable evidence after a local failure with zero new generation.
+- [x] Add saved MP4 playback, download and QA to both review screens; verify original content hash and exact-attempt atomic approval.
+- [x] Check corruption, foreign brand, stale attempt, duplicate decision, failed quality, ambiguous execution and historical completed-result recovery.
+- [x] Confirm UI state FIRST_VIDEO_REVIEW/r19 after the operator's single-pilot report; no human pilot approval performed in this session.
 - [x] Verify both transport workflows on implementation commit de7f2a4: Node 22, PostgreSQL 17 file-receipt/fencing/adoption checks and PostgreSQL 16 approval/recovery checks.
 - [x] Implement Replicate large-image uploads preserving original SHA-256, durable file receipts and the exact prediction-body digest.
 - [x] Count uploads for all pending shots; keep preflight network-free and cached pilots reusable.

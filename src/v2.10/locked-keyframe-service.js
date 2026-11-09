@@ -275,8 +275,13 @@ class LockedKeyframeService {
       'Prepared first-video execution changed after preflight');
     const attempt = await this.repository.claimLockedStage({ workflowId: workflow.id, ...scope,
       stage: STAGES.FIRST_VIDEO, preflightId });
-    if (attempt.reused) return attempt.result;
+    if (attempt.reused) {
+      await this.repository.recordFirstVideoResult({ workflowId: workflow.id, ...scope,
+        attemptId: attempt.id, accepted: attempt.result.accepted, result: attempt.result });
+      return attempt.result;
+    }
     let boundary = false;
+    let resultPersisted = false;
     try {
       const result = await this.starter.startLockedFirstVideo({ draft, preflight: draft.final_preflight,
         keyframe, actor: this.actor, productionId: workflow.production_id, expectedFingerprint,
@@ -291,17 +296,22 @@ class LockedKeyframeService {
           video: 1, semantic: safeQuality.metadata.externalCalls, continuity: 0, voice: 0, renderer: 0,
           referenceUploads: result.media.provenance?.providerRequestTransport?.uploadCalls || 0,
           total: 1 + safeQuality.metadata.externalCalls + (result.media.provenance?.providerRequestTransport?.uploadCalls || 0) }, remainingProductionScheduled: false,
-        readyForContinuationPreflight: result.accepted,
-        nextRequiredAction: result.accepted ? 'RUN_CONTINUATION_PREFLIGHT' : 'STOP_AND_REVIEW_FAILURE',
+        readyForContinuationPreflight: result.accepted && !this.repository.requiresHumanPilotReview,
+        humanPilotApprovalRequired: result.accepted && this.repository.requiresHumanPilotReview === true,
+        nextRequiredAction: result.accepted ? (this.repository.requiresHumanPilotReview ? 'APPROVE_LOOK_AND_MOTION' : 'RUN_CONTINUATION_PREFLIGHT') : 'STOP_AND_REVIEW_FAILURE',
         humanApprovalRequired: true, autoPublish: false };
       await this.repository.finishLockedStage({ attemptId: attempt.id,
         status: result.accepted ? 'SUCCEEDED' : 'FAILED', boundaryState: 'COMPLETED',
         providerRequestId: result.media.requestId, result: response,
         error: result.accepted ? {} : { code: 'FIRST_VIDEO_VALIDATION_FAILED' } });
+      resultPersisted = true;
       await this.repository.recordFirstVideoResult({ workflowId: workflow.id, ...scope,
-        accepted: result.accepted, result: response });
+        attemptId: attempt.id, accepted: result.accepted, result: response });
       return Object.freeze(response);
     } catch (error) {
+      if (resultPersisted) throw new LockedKeyframeError('PILOT_REVIEW_SYNC_REQUIRED',
+        'Pilot result is saved. Restore review from the saved result; do not generate another video.',
+        { attemptId: attempt.id, workflowId: workflow.id, automaticRetryAllowed: false, operatorAction: 'RESTORE_SAVED_PILOT_REVIEW' });
       const rejected = require('../providers/execution-outcome').rejectedBeforeCreation(error, error.predictionId);
       const providerTerminal = require('../providers/execution-outcome').terminalProviderFailure(error);
       await this.repository.finishLockedStage({ attemptId: attempt.id,

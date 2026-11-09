@@ -74,6 +74,12 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         && segments[2] === 'creative-drafts' && segments[4] === 'quality-director' && segments.length === 5) {
         return json(response, 200, await qualityDirectorService.state({ id: segments[3], brandId: url.searchParams.get('brandId') }));
       }
+      if (qualityDirectorService && ['GET','HEAD'].includes(request.method) && segments[0] === 'api'
+        && segments[1] === 'v2.10' && segments[2] === 'creative-drafts' && segments[4] === 'pilot'
+        && segments[6] === 'content' && segments.length === 7) {
+        const content = await qualityDirectorService.pilotContent({ id: segments[3], brandId: url.searchParams.get('brandId'), attemptId: segments[5] });
+        return require('./video-response').sendVideo(request, response, content);
+      }
       if (lockedKeyframeStateService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments[4] === 'locked-keyframe' && segments[5] === 'state'
         && segments.length === 6) {
@@ -130,6 +136,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (action === 'storyboard-approve') return json(response, 200, await qualityDirectorService.approveStoryboard(args));
         if (action === 'pilot-approve') return json(response, 200, await qualityDirectorService.approvePilot(args));
         if (action === 'pilot-reject') return json(response, 200, await qualityDirectorService.rejectPilot(args));
+        if (action === 'pilot-restore-review') return json(response, 200, await qualityDirectorService.restorePilotReview(args));
       }
       if (lockedKeyframeService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments[4] === 'locked-keyframe' && segments.length === 6) {

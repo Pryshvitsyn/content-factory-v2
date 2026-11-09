@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { api } from './api';
+import { PilotReview } from './PilotReview';
 import './CreativeProduction.css';
 
 const ROLES = ['HOOK','TENSION','INSIGHT','ACTION','RESOLUTION','CTA'];
@@ -457,7 +458,22 @@ export function CreativeProduction() {
       const value = await api(`/api/v2.10/creative-drafts/${draft.id}/locked-keyframe/video-start`, { method: 'POST',
         body: JSON.stringify({ brandId, keyframeId: keyframeResult.keyframe.id,
           preflightId: firstVideoPreflight.preflightId, fingerprint: firstVideoPreflight.fingerprint, confirmation: true }) });
-      setMessage(value.accepted ? 'First conditioned video accepted. Remaining production is still stopped.' : 'First video failed validation. Remaining production is blocked.');
+      setMessage(value.accepted ? 'Pilot saved. Review it below before approving; remaining production is stopped.' : 'Pilot saved but failed validation. Review the evidence below.');
+    } catch (error) { setMessage(error.message); }
+    finally { setFirstVideoPreflight(null); setPreflight(null); setBusy(null); }
+  }
+
+  async function reviewPilot(action) {
+    const review = director?.pilotReview;
+    if (!review || busy) return;
+    if (action !== 'restore-review' && !window.confirm(`${action === 'approve' ? 'APPROVE' : 'REJECT'} THIS EXACT PILOT?\nNo generation or publication will start.`)) return;
+    setBusy('pilot-review');
+    try {
+      await api(`/api/v2.10/creative-drafts/${draft.id}/quality-director/pilot-${action}`, { method: 'POST',
+        body: JSON.stringify({ brandId, workflowId: review.workflowId, attemptId: review.attemptId, confirmation: true }) });
+      setPreflight(null); setFirstVideoPreflight(null);
+      setMessage(action === 'approve' ? 'Pilot approved. Run final production preflight to continue with the remaining shots.'
+        : action === 'reject' ? 'Pilot rejected. Remaining production is stopped.' : 'Saved pilot review restored. No new provider calls.');
     } catch (error) { setMessage(error.message); }
     finally { setBusy(null); }
   }
@@ -562,11 +578,13 @@ export function CreativeProduction() {
         {keyframePreflight ? <div className="plan-grid"><div className="key-value"><span>KEYFRAME CALLS</span><p>Image {keyframePreflight.externalCalls.imageGeneration} · Semantic {keyframePreflight.externalCalls.semanticImageEvaluation} · Retries 0 · Maximum {keyframePreflight.externalCalls.maximum}</p></div><div className="key-value"><span>POLICY</span><p>HUMAN APPROVAL REQUIRED · AUTO PUBLISH NO · COST {keyframePreflight.cost.status}</p></div></div> : null}
         {keyframeResult ? <div className="voice-status-line"><span>KEYFRAME VALIDATION / APPROVAL</span><strong className={keyframeResult.validation.status === 'PASS' ? 'pass' : 'fail'}>{keyframeResult.validation.status} · {keyframeResult.keyframe.approvalDecision || 'APPROVAL REQUIRED'}</strong></div> : null}
         <div className="actions">
-          <button type="button" className="secondary" disabled={!lockedKeyframeSupported || !preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || !director?.look?.approved || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
-          <button type="button" className="primary" disabled={!lockedKeyframeSupported || !firstVideoPreflight || busy} onClick={startLockedVideo}>START FIRST VIDEO ONLY</button>
+          <button type="button" className="secondary" disabled={director?.pilotReview?.blocksNewStart || !lockedKeyframeSupported || !preflight || preflight.status !== 'READY' || keyframeResult?.keyframe?.approvalDecision !== 'APPROVED' || !director?.look?.approved || busy} onClick={preflightLockedVideo}>FIRST VIDEO PREFLIGHT · 0 CALLS</button>
+          <button type="button" className="primary" disabled={!lockedKeyframeSupported || !firstVideoPreflight || director?.pilotReview?.blocksNewStart || busy} onClick={startLockedVideo}>START FIRST VIDEO ONLY</button>
         </div>
-        {firstVideoPreflight ? <div className="plan-grid"><div className="key-value"><span>EXACT REFERENCE</span><p>{firstVideoPreflight.keyframe.artifactId} · v{firstVideoPreflight.keyframe.version} · {firstVideoPreflight.keyframe.contentHash}</p></div><div className="key-value"><span>BOUNDED EXECUTION</span><p>Video 1 · Semantic 1 · Voice 0 · Continuity 0 · Renderer 0 · Maximum 2</p></div></div> : null}
+        {firstVideoPreflight ? <div className="plan-grid"><div className="key-value"><span>EXACT REFERENCE</span><p>{firstVideoPreflight.keyframe.artifactId} · v{firstVideoPreflight.keyframe.version} · {firstVideoPreflight.keyframe.contentHash}</p></div><div className="key-value"><span>BOUNDED EXECUTION</span><p>Video 1 · Semantic 1 · Voice 0 · Continuity 0 · Renderer 0 · Uploads {firstVideoPreflight.externalCalls.referenceUploads || 0} · Maximum {firstVideoPreflight.externalCalls.maximum}</p></div></div> : null}
       </section>
+
+      <PilotReview review={director?.pilotReview} busy={busy} onDecision={reviewPilot} onRestore={() => reviewPilot('restore-review')} />
 
       <section className="panel"><h2 className="panel-title">CONTINUITY</h2><div className="form-grid">
         {CONTINUITY_FIELDS.map((field) => <Field key={field} label={field.replaceAll(/([A-Z])/g, ' $1').toUpperCase()} value={brief.continuity[field]}
