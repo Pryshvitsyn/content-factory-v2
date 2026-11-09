@@ -27,9 +27,10 @@ class HardenedQualityScriptFirstService extends QualityScriptFirstService {
       ? await this.repository.getLockedWorkflow({ draftId: id, ...scope }) : null;
     const pilotAttempt = workflow && typeof this.repository.getLatestLockedStageAttempt === 'function'
       ? await this.repository.getLatestLockedStageAttempt({ workflowId: workflow.id, ...scope, stage: 'FIRST_VIDEO' }) : null;
+    const review = require('./pilot-review').pilotReview({ draftId: id, brandId, workflow, attempt: pilotAttempt });
     return Object.freeze({
       ...state,
-      pilotReview: require('./pilot-review').pilotReview({ draftId: id, brandId, workflow, attempt: pilotAttempt }),
+      pilotReview: review ? { ...review, canApprove: review.canApprove && state.script.approved && state.storyboard.approved && state.look.approved } : null,
       workflow: workflow ? {
         id: workflow.id,
         productionId: pilotAttempt?.result?.productionId || workflow.production_id,

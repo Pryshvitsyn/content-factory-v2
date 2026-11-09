@@ -1,7 +1,6 @@
 # TASKS
 
 ## NOW
-- [ ] Verify native PostgreSQL 16/17 and Chromium CI for the pilot lifecycle repair.
 - [ ] Reconcile the reviewed repair into the actual Mac checkout without losing local changes.
 - [ ] Review the existing pilot and its bag-placement warning in the factory; record an explicit exact-pilot decision.
 
@@ -16,6 +15,7 @@
   Blocked by: no connected Mac filesystem/runtime and incomplete export of Mac-only source.
 
 ## DONE
+- [x] Verify the actual pilot service/review path on native PostgreSQL 16 and 17 at implementation commit 14b2a35; final-commit and Chromium checks are tracked in PR #125.
 - [x] Replace manual test-state preparation with actual service and HTTP execution against SQL constraints; reproduce the missing FIRST_VIDEO_RUNNING transition before fixing it.
 - [x] Commit provider-boundary/workflow advancement together; recover review from completed immutable evidence after a local failure with zero new generation.
 - [x] Add saved MP4 playback, download and QA to both review screens; verify original content hash and exact-attempt atomic approval.

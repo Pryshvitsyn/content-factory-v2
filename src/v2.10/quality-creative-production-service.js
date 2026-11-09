@@ -36,10 +36,13 @@ class QualityCreativeProductionService extends CreativeProductionService {
     const result = await super.preflight(args);
     const scope = await this.scope(args.brandId);
     const state = await this.repository.getQualityDirectorState({ draftId: args.id, ...scope });
+    const workflow = typeof this.repository.getLockedWorkflow === 'function'
+      ? await this.repository.getLockedWorkflow({ draftId: args.id, ...scope }) : null;
+    const reviewPending = workflow?.state === 'FIRST_VIDEO_REVIEW';
     return Object.freeze({ ...result, director: state,
       startAllowed: result.status === 'READY' && state.look.approved && state.pilot.approved,
-      readinessLabel: result.status !== 'READY' ? 'BLOCKED' : state.pilot.approved ? 'READY FOR PRODUCTION' : 'READY FOR PILOT ONLY',
-      nextRequiredAction: state.pilot.approved ? 'START_PRODUCTION' : 'RUN_FIRST_VIDEO_PREFLIGHT' });
+      readinessLabel: result.status !== 'READY' ? 'BLOCKED' : state.pilot.approved ? 'READY FOR PRODUCTION' : reviewPending ? 'PILOT REVIEW REQUIRED' : 'READY FOR PILOT ONLY',
+      nextRequiredAction: state.pilot.approved ? 'START_PRODUCTION' : reviewPending ? 'REVIEW_SAVED_PILOT' : 'RUN_FIRST_VIDEO_PREFLIGHT' });
   }
 
   async start(args) {

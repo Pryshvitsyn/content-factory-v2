@@ -171,6 +171,17 @@ async function main() {
       assert.equal(restored.pilotReview.canApprove, true);
       assert.equal(restored.pilotReview.quality.checks[0].reason, 'Bag placement is not visible.');
       assert(!restored.pilotReview.canRestoreReview);
+      const core = require('../src/v2.10/creative-production-service').CreativeProductionService.prototype;
+      const originalPreflight = core.preflight;
+      try {
+        core.preflight = async () => ({ status: 'READY' }); // expensive provider planning is covered by readiness tests
+        const creative = Object.create(require('../src/v2.10/quality-creative-production-service').QualityCreativeProductionService.prototype);
+        creative.repository = repository; creative.scope = async () => scope;
+        const next = await creative.preflight({ id: draft.id, brandId: B1 });
+        assert.equal(next.startAllowed, false);
+        assert.equal(next.nextRequiredAction, 'REVIEW_SAVED_PILOT', 'fresh preflight cannot send operator back to generation');
+        assert.equal(next.readinessLabel, 'PILOT REVIEW REQUIRED');
+      } finally { core.preflight = originalPreflight; }
       assert.equal((await post('pilot-restore-review', decision)).status, 200, 'restore is idempotent');
       const contentUrl = base + restored.pilotReview.contentUrl;
       const full = await fetch(contentUrl);
@@ -214,6 +225,8 @@ async function main() {
     assert.equal(state.storyboard.approved, false);
     assert.equal(state.look.approved, false);
     assert.equal(state.pilot.approved, false);
+    assert.equal((await director.state({ id: draft.id, brandId: B1 })).pilotReview.canApprove, false,
+      'invalidated creative approvals never advertise pilot approval');
 
     await assert.rejects(() => db.query("UPDATE v2_10.quality_script_revisions SET content='{}' WHERE id=$1", [scriptRow.id]), /immutable/);
     await assert.rejects(() => db.query("UPDATE v2_10.quality_stage_approval_events SET actor='other' WHERE draft_id=$1", [draft.id]), /immutable/);

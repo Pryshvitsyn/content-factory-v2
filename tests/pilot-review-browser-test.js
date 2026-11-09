@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn, execFileSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 const { chromium } = require('playwright');
 
 async function main() {
@@ -21,18 +21,16 @@ async function main() {
 import React from 'react'; import {createRoot} from 'react-dom/client'; import {PilotReview} from './src/PilotReview.jsx'; import './src/CreativeProduction.css';
 createRoot(document.getElementById('root')).render(React.createElement(PilotReview,{review:{state:'FIRST_VIDEO_REVIEW',status:'SUCCEEDED',contentUrl:'/synthetic-pilot.mp4',canApprove:true,canReject:true,quality:{status:'WARN',checks:[{code:'PROP_NOT_VISIBLE',status:'WARN',reason:'Bag placement is not visible.'}]}},onDecision:()=>{document.body.dataset.decided='true'}}));
 </script></body></html>`, { flag: 'wx' });
-    vite = spawn(process.execPath, [path.join(path.dirname(require.resolve('vite/package.json')), 'bin/vite.js'), '--config','apps/dashboard/client/vite.config.js','--port','3127'],
-      { cwd: root, env: { ...process.env, LIVE_PAID_GENERATION: 'false' }, stdio: ['ignore','pipe','pipe'] });
-    await new Promise((resolve,reject) => {
-      const timeout = setTimeout(() => reject(new Error('Vite startup timed out')),15000);
-      vite.on('error', reject); vite.on('exit', code => { clearTimeout(timeout); reject(new Error(`Vite exited ${code}`)); });
-      vite.stdout.on('data', chunk => { if (String(chunk).includes('Local:')) { clearTimeout(timeout); resolve(); } });
-    });
+    const { createServer } = await import('vite');
+    vite = await createServer({ configFile: path.join(root,'apps/dashboard/client/vite.config.js'),
+      server: { host:'127.0.0.1',port:0 }, logLevel:'error' });
+    await vite.listen();
+    const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
     browser = await chromium.launch({ headless:true });
     const page = await browser.newPage({ viewport:{width:1280,height:900} });
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.route('**/synthetic-pilot.mp4', route => route.fulfill({ contentType:'video/mp4', body:bytes }));
-    await page.goto(`http://127.0.0.1:3127/${name}`);
+    await page.goto(`${origin}/${name}`);
     await page.waitForFunction(() => document.querySelector('video')?.readyState >= 2);
     await page.getByLabel('Saved pilot video').evaluate(video => video.play());
     await page.waitForFunction(() => document.querySelector('video')?.currentTime > 0);
@@ -54,7 +52,7 @@ createRoot(document.getElementById('root')).render(React.createElement(PilotRevi
       else { writes.push({path:url.pathname,body:route.request().postDataJSON()});body={approved:true}; }
       await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
     });
-    await page.goto('http://127.0.0.1:3127/quality-director.html');
+    await page.goto(origin + '/quality-director.html');
     await page.locator('#brand').selectOption('brand');
     await page.locator('#draft').selectOption('draft');
     await page.waitForFunction(() => document.querySelector('video')?.readyState >= 2);
@@ -68,7 +66,7 @@ createRoot(document.getElementById('root')).render(React.createElement(PilotRevi
     assert.deepEqual(errors,[]);
     console.log('PASS Chromium: real local MP4 playback, mobile layout, both review screens, exact attempt decision; real provider calls: 0.');
   } finally {
-    await browser?.close(); vite?.kill('SIGTERM');
+    await browser?.close(); await vite?.close();
     await fs.rm(fixture,{force:true}); await fs.rm(temp,{recursive:true,force:true});
   }
 }
