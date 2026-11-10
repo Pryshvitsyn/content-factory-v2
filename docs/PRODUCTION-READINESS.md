@@ -1,5 +1,5 @@
 # Provider execution readiness
-Updated: 2026-11-08
+Updated: 2026-11-10
 
 ## What changed
 
@@ -56,4 +56,18 @@ Local Node 24.22.1: provider-readiness suite (10 contract groups, 30 prompt chec
 
 Integration baseline: GitHub PR #122 head `9f2222655e8b9db506a11e1e80b9eaf9dcbe0e98`, plus the supplied November 7 compiler/runtime exports and reviewed prompt-budget changes. Only a subset of the Mac's newer source was exported. This branch is not proof that all Mac-only changes have been reconciled. No production migration, deployment, approval, paid generation or publication was performed.
 
-Before installation, reconcile the actual Mac working tree against this branch, preserving its uncommitted work. Then run a fresh dry preflight against the current draft and frame. A compatible route/reference plan must be explicitly reviewed before one paid pilot. Local readiness cannot guarantee upstream moderation, account access or creative quality.
+## Local continuation after main integration
+
+PR #125 was merged at `8b9d611183c48b5e1546e85be893708a81ede490`, with all eight main-target workflows passing at `901d3cf1375b9e1775b22d2b5b1f3008eed5a136`. Source tree: `c4aa637a26202d0df3fe158290f70b6c6142355f`. This proves GitHub integration, not installation on the Mac. The user accepted the saved Tune Into Her pilot after confirming that the bag is on the floor. Do not generate that pilot again.
+
+The next agent needs local access to `/Users/eliogenesis/Documents/content-factory-first-ad` and must complete these steps as one task:
+
+1. Read the project core, inspect Git status/HEAD and running processes. Back up tracked and untracked local work without committing secrets or media. Reconcile merged main with those changes in an isolated branch/worktree; do not use destructive reset/clean or replace the whole checkout. In particular preserve local KeyframePreview/VoicePlayback features and existing repair evidence. Record the resulting source identity and diff from the merged source.
+2. Inspect the actual database and storage configuration without printing credentials. Before startup/migrations, make and verify a working-database backup with a server-compatible `pg_dump` (the reported server is PostgreSQL 17; the earlier Homebrew 15 client failed). Verify the custom archive with compatible `pg_restore`; keep media immutable. Inspect which migrations are already applied. Use the normal ordered migration/startup process, never ad-hoc updates to approvals or history.
+3. Run `npm run test:provider-readiness`, V2.4–V2.7 affected checks, actual PostgreSQL approval/recovery tests against a disposable database, and dashboard tests/build. Restart the existing local dashboard deliberately, initially with generation disabled. Confirm the served API/UI expose the saved-pilot player and exact-attempt decision path. A Git commit alone does not establish the running version.
+4. Reload Tune Into Her draft `d760bf82-addd-41fb-9ab9-41ef01ed36ad`, brand `a03def76-bd3d-4c8e-b00a-ec77616c5191` (observed r19; verify current revision). Match saved prediction `fd2pr4zft5rmy0d1qcctgjzang`, immutable MP4 hash and FIRST_VIDEO attempt. The supplied result was 5.04 seconds, 720×1280. Record the founder's existing acceptance through the supported exact-attempt approval operation. Do not infer acceptance of a different or newer artifact. Reload to prove the decision persisted; playback and approval make zero generation calls.
+5. Inspect every shot, voice and final payload. In the observed r19, shots two/three have `referencePolicy: NONE`; textual identity instructions do not provide visual references. Shot two starts from the pilot's end. Shot three jumps to him at the stove and her seated. Prepare a compatible reference/transition proposal using the existing reference machinery; review any material storyboard/reference revision and its approval consequences before changing it. Do not silently force the previous frame into the incompatible third-shot pose or invalidate/recreate the accepted pilot.
+6. Run a fresh continuation preflight on the final reviewed revision. Prove video-1 reuses the accepted artifact and no new pilot prediction is planned. Report remaining video, speech, semantic and upload calls, their maximum, known costs and unknown costs. Use the existing approved Wan 3 route unless the founder approves a change. Start only within the authorized reviewed plan/budget; no automatic creation retry or provider switch.
+7. Verify remaining source clips, identity/scene continuity, voice timing, master duration/resolution/audio and final human playback. Save the immutable final MP4 and provenance, update TASKS and PRODUCT_SNAPSHOT, and report separate GitHub/installation/database/media states. Publication remains a separate decision.
+
+No new generation, working-database migration or approval was performed by the cloud integration session. Local readiness cannot guarantee upstream moderation or creative quality.

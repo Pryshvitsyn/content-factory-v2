@@ -1,7 +1,6 @@
 # TASKS
 
 ## NOW
-- [ ] Merge the verified cumulative PR #125 into main after full main-target CI; reconcile superseded stacked PRs.
 - [ ] Reconcile the reviewed repair into the actual Mac checkout without losing local changes.
 - [ ] Record the founder's November 10 acceptance against the exact saved pilot in the factory, then inspect a fresh continuation preflight.
 
@@ -16,7 +15,8 @@
   Blocked by: no connected Mac filesystem/runtime and incomplete export of Mac-only source.
 
 ## DONE
-- [x] Reproduce and repair full-main integration failures: retain the V2.4 frame-based Wan boundary without weakening canonical checks, and include reference uploads in the PostgreSQL accounting assertion. Add both paths to all-branch provider CI; full final-head validation remains pending.
+- [x] Merge cumulative PR #125 after all eight main-target workflows passed at `901d3cf`; verify main merge `8b9d611` has identical source and includes #121–124.
+- [x] Reproduce and repair full-main integration failures: retain the V2.4 frame-based Wan boundary without weakening canonical checks, and include reference uploads in the PostgreSQL accounting assertion. Add both paths to all-branch provider CI; all eight main-target workflows subsequently passed at `901d3cf`.
 - [x] Founder viewed the existing pilot and confirmed the bag ends on the floor; conversation acceptance is recorded without claiming a database approval.
 - [x] Recheck GitHub #121–125, their exact heads, CI and ancestry; retarget cumulative #125 to main with no unrelated changes.
 - [x] Verify the actual pilot service/review path on native PostgreSQL 16 and 17 at implementation commit 14b2a35; final-commit and Chromium checks are tracked in PR #125.
