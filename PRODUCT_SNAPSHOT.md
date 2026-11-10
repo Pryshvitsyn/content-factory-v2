@@ -1,26 +1,26 @@
 # PRODUCT SNAPSHOT
-Updated: 2026-11-09
+Updated: 2026-11-10
 
 ## CURRENT STATE
-The operator reports one Tune Into Her Wan 3 pilot (5.04 s, 720×1280), no retry/publication. The connected Dashboard showed draft r19 in FIRST_VIDEO_REVIEW. Human acceptance and the completed three-shot master remain outstanding. The live MP4 has not been visually inspected in this cloud session.
+One saved Tune Into Her Wan 3 pilot is reported: 5.04 s, 720×1280, prediction `fd2pr4zft5rmy0d1qcctgjzang`. On November 10 the founder viewed it, confirmed the bag is placed on the floor and accepted this result for continuation. This conversation decision is not yet proof of a recorded database approval. No new generation or publication in this integration session.
 
 ## LATEST DELTA
-Branch `fix/pilot-review-lifecycle-20261109`, based on PR #124, fixes the missing workflow transition before provider submission. The old PostgreSQL test manually inserted that transition; it now exercises the actual service and HTTP review flow. Saved media survives a subsequent local failure. A zero-generation recovery action restores review from exact completed evidence, never from an ambiguous attempt. Pilot playback, download and QA appear in both review screens. Approval binds the exact attempt and commits with workflow state; content is hash-verified.
+PR #125 now targets `main` and includes the complete #121–124 repair stack. Remote main was an unchanged ancestor, twelve commits behind. All stacked-head CI passed; full main-target validation precedes merge. The implementation preserves exact approvals, validates all asset payloads, transports immutable references, and restores/reviews completed pilots without regeneration.
 
 ## WORKING
-Local SQL/PGlite tests reproduce the original failure, then pass service execution, injected failure, reload, recovery, playback/ranges, corrupt-file and cross-brand denial, atomic approval, duplicates and PASS/FAIL/unknown outcomes. All provider-readiness checks, 26 UI tests, build, recovery/continuity and synthetic FFmpeg three-shot/audio master pass. Real provider calls this repair: 0. Native PostgreSQL 16/17 also passed on implementation commit `14b2a35`. Chromium playback and final-commit checks are recorded in [PR #125](https://github.com/Pryshvitsyn/content-factory-v2/pull/125).
+Node 22 / PostgreSQL 16 and 17 checks passed on implementation head `2acfb84`. Actual service/HTTP tests cover failure after result persistence, reload, recovery, hash-verified playback, isolation and atomic approval. Chromium playback in both review screens, 26 UI tests, provider-readiness regressions and synthetic FFmpeg three-shot/audio master passed. See PR #125 for final integration evidence.
 
 ## BROKEN / MISSING
-Cloud Chromium is not installed. This repair is not installed on the Mac; its separate uncommitted source must be preserved. Live visual acceptance, remaining generation and final master verification are unfinished.
+Mac installation is unverified; its separate uncommitted source must be preserved. Exact database pilot approval, remaining shots, voice/master and final human review are unfinished. Shot-three reference compatibility still requires current-draft inspection.
 
 ## BLOCKERS
-No connected Mac filesystem/runtime for installation; browser access alone cannot replace that.
+No connected Mac filesystem/runtime for source integration or restart. Browser access does not establish installed source identity.
 
 ## NEXT BEST MOVE
-Reconcile the CI-verified repair into the Mac checkout, then review the existing pilot inside the factory before any continuation.
+Complete reviewed main integration; reconcile that version into the Mac checkout, verify the saved pilot identity, record the founder's decision and inspect a fresh continuation preflight before Start.
 
 ## PARALLEL
-Review the shot-one ending against shot-two and shot-three continuity.
+Inspect the live draft and its shot-two/shot-three transitions through the operator UI.
 
 ## REFERENCES
-`TASKS.md`, `AGENTS.md`, `tests/quality-script-first-postgres-test.js`; PR #124 is the transport base. Reported prediction: `fd2pr4zft5rmy0d1qcctgjzang`.
+`TASKS.md`, `AGENTS.md`, `docs/PRODUCTION-READINESS.md`; [PR #125](https://github.com/Pryshvitsyn/content-factory-v2/pull/125).

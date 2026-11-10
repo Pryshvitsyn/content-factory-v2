@@ -1,20 +1,23 @@
 # TASKS
 
 ## NOW
+- [ ] Merge the verified cumulative PR #125 into main after full main-target CI; reconcile superseded stacked PRs.
 - [ ] Reconcile the reviewed repair into the actual Mac checkout without losing local changes.
-- [ ] Review the existing pilot and its bag-placement warning in the factory; record an explicit exact-pilot decision.
+- [ ] Record the founder's November 10 acceptance against the exact saved pilot in the factory, then inspect a fresh continuation preflight.
 
 ## NEXT
 - [ ] After pilot approval, reuse its saved artifact, generate only remaining shots, and verify final MP4, audio and continuity.
 
 ## PARALLEL
-- [ ] Review stacked PRs #123 and #124 together with this lifecycle repair.
+- [ ] Inspect every current shot transition, especially the shot-two ending versus shot-three opening/reference.
 
 ## BLOCKED
 - [ ] Install and verify this repair on the live Mac draft and storage.
   Blocked by: no connected Mac filesystem/runtime and incomplete export of Mac-only source.
 
 ## DONE
+- [x] Founder viewed the existing pilot and confirmed the bag ends on the floor; conversation acceptance is recorded without claiming a database approval.
+- [x] Recheck GitHub #121–125, their exact heads, CI and ancestry; retarget cumulative #125 to main with no unrelated changes.
 - [x] Verify the actual pilot service/review path on native PostgreSQL 16 and 17 at implementation commit 14b2a35; final-commit and Chromium checks are tracked in PR #125.
 - [x] Replace manual test-state preparation with actual service and HTTP execution against SQL constraints; reproduce the missing FIRST_VIDEO_RUNNING transition before fixing it.
 - [x] Commit provider-boundary/workflow advancement together; recover review from completed immutable evidence after a local failure with zero new generation.
