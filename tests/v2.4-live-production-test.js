@@ -155,6 +155,22 @@ async function main() {
   assert.doesNotMatch(JSON.stringify(logs), /never-print-this-token/, 'operator summary must not expose token');
   assert.equal(dryDb.production, null, 'dry-run must not create durable execution state');
   assert.equal(dryArtifactCalls.length, 0, 'dry-run must not create artifacts');
+  assert.equal(dry.plan.providerRequests[0].contract, 'V2.4_FRAME_BASED_WAN');
+  assert.equal(dry.plan.providerRequests[0].generatedDurationSeconds, 81 / 16,
+    'legacy frame-based duration is preserved, not rounded into a canonical seconds request');
+  assert.equal(dry.plan.providerRequests[0].fingerprint, undefined,
+    'legacy validation must not manufacture a canonical request certificate');
+  await assert.rejects(() => dryService.run({ input: { ...input, schemaVersion: 2 },
+    config: resolveLiveConfiguration(environment()) }), error => error.code === 'PROVIDER_PREFLIGHT_FAILED',
+  'a newer input missing its route must not fall back to legacy validation');
+  const markedInput = structuredClone(input);
+  markedInput.assetPlan.assets[0].generation_requirements.request_compiler_version = 'provider-request/6';
+  await assert.rejects(() => dryService.run({ input: markedInput, config: resolveLiveConfiguration(environment()) }),
+    error => error.code === 'PROVIDER_PREFLIGHT_FAILED', 'canonical evidence requires canonical validation even without schemaVersion');
+  await assert.rejects(() => dryService.run({ input,
+    config: resolveLiveConfiguration(environment({ REPLICATE_VIDEO_MODEL: 'alibaba/wan-3' })) }),
+    error => error.code === 'LEGACY_PROVIDER_MISMATCH');
+  assert.equal(dryCalls.length, 0, 'compatibility checks make no provider calls');
 
   const missingBrandDb = new FakeDb(); missingBrandDb.brand.id = OTHER_BRAND_ID;
   const missingBrandService = new LiveProductionService({ ...SAFE_PREFLIGHT, db: missingBrandDb, masterOrchestrator: masterMock(missingBrandDb, []), artifactService: artifactMock(), storageRoot: '/tmp/artifacts', storageValidator: async () => {} });

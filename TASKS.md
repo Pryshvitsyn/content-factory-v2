@@ -16,6 +16,7 @@
   Blocked by: no connected Mac filesystem/runtime and incomplete export of Mac-only source.
 
 ## DONE
+- [x] Reproduce and repair full-main integration failures: retain the V2.4 frame-based Wan boundary without weakening canonical checks, and include reference uploads in the PostgreSQL accounting assertion. Add both paths to all-branch provider CI; full final-head validation remains pending.
 - [x] Founder viewed the existing pilot and confirmed the bag ends on the floor; conversation acceptance is recorded without claiming a database approval.
 - [x] Recheck GitHub #121–125, their exact heads, CI and ancestry; retarget cumulative #125 to main with no unrelated changes.
 - [x] Verify the actual pilot service/review path on native PostgreSQL 16 and 17 at implementation commit 14b2a35; final-commit and Chromium checks are tracked in PR #125.

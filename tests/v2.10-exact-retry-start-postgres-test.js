@@ -205,9 +205,10 @@ async function main() {
     assert.equal(final.creative.continuity, 'READY');
     assert.equal(final.voice.sourceType, 'AI_PRESET');
     assert.equal(final.voice.previewApproved, true);
-    assert.deepEqual(final.externalCalls, { video: 3, speech: 1, semantic: 4, otherEvaluator: 1, maximum: 9 });
+    assert.deepEqual(final.externalCalls, { video: 3, speech: 1, semantic: 4, otherEvaluator: 1, referenceUploads: 0, maximum: 9 });
     assert.equal(final.externalCalls.maximum,
-      final.externalCalls.video + final.externalCalls.speech + final.externalCalls.semantic + final.externalCalls.otherEvaluator,
+      final.externalCalls.video + final.externalCalls.speech + final.externalCalls.semantic + final.externalCalls.otherEvaluator
+        + final.externalCalls.referenceUploads,
       'maximum external calls must be fully explainable by accounting categories');
     assert.equal(final.master.profile, 'SOCIAL_VERTICAL');
     assert.equal(final.master.resolution, '1080x1920');

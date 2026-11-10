@@ -20,6 +20,8 @@ jobs:
       - run: npm ci
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm run test:provider-readiness
+      - name: Legacy live-production and renderer compatibility
+        run: npm run test:v2.4:live-production && npm run test:v2.6
       - run: npm run test:v2.10
       - run: npm run test:v2.5
       - run: npm run test:v2.9.2
@@ -52,5 +54,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node tests/v2.5-postgres-integration-test.js
+      - name: Exact final-preflight and retry accounting
+        run: npm run test:v2.10:postgres
       - name: Pilot service and review lifecycle on PostgreSQL 17
         run: node tests/quality-script-first-postgres-test.js
