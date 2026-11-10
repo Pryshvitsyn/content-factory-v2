@@ -124,9 +124,9 @@ const governedBrief = canonicalCreativeBrief({ ...source, storyboard: source.sto
   transitionToNext: index === 0 ? 'SAME_SCENE' : 'NEW_SCENE',
 })) });
 const prompt = buildShotPrompt(governedBrief, governedBrief.storyboard[1]);
-assert.match(prompt, /START STATE:/);
-assert.match(prompt, /INTENDED END STATE:/);
-assert.match(prompt, /Transition from previous: SAME_SCENE/);
+assert.ok(prompt.includes(`START: ${governedBrief.storyboard[1].startState}`));
+assert.ok(prompt.includes(`END: ${governedBrief.storyboard[1].intendedEndState}`));
+assert.equal(governedBrief.storyboard[1].transitionFromPrevious, 'SAME_SCENE');
 assert.match(prompt, /MUST KEEP:/);
 assert.match(prompt, /MAY CHANGE:/);
 

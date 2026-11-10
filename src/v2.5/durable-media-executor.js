@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { rejectedBeforeCreation } = require('../providers/execution-outcome');
 const { generateMediaAsset, capabilityForAssetKind, normalizeMediaResult } = require('../../worker/v2.1-media-generation');
 const { canonicalFingerprint, contentTypeForKind } = require('../../worker/v2.1-master-production');
 const { fromAsset } = require('../v2.8/canonical-media-request');
@@ -120,6 +121,15 @@ class PostgresMediaExecutionRepository {
     return result.rows[0];
   }
 
+  async recordProviderRequestEvidence({ id, workerId, evidence }) {
+    const result = await this.db.query(`/* v2.5:record-provider-transport */
+      UPDATE v2_5.media_executions SET provenance=coalesce(provenance,'{}'::jsonb)||$3::jsonb,updated_at=now()
+      WHERE id=$1 AND worker_id=$2 AND status='MAY_HAVE_STARTED' RETURNING *`,
+    [id, workerId, JSON.stringify({ providerRequestTransport: evidence })]);
+    if (!result.rows[0]) throw new DurableMediaError('MEDIA_EXECUTION_FENCED', 'Execution ownership was lost while recording file transport');
+    return result.rows[0];
+  }
+
   async recordProviderRequest({ id, workerId, requestId, providerStatus = null }) {
     const result = await this.db.query(`/* v2.5:record-provider-request */
       UPDATE v2_5.media_executions SET provider_request_id=$3,provider_status=$4,updated_at=now()
@@ -134,7 +144,7 @@ class PostgresMediaExecutionRepository {
       UPDATE v2_5.media_executions SET status='SUCCEEDED',worker_id=NULL,
         provider_request_id=coalesce($3,provider_request_id),provider_status='succeeded',
         artifact_id=$4,artifact_version=$5,artifact_storage_key=$6,artifact_content_hash=$7,
-        content_type=$8,duration_ms=$9,media_probe=$10::jsonb,provenance=$11::jsonb,error='{}'::jsonb,
+        content_type=$8,duration_ms=$9,media_probe=$10::jsonb,provenance=coalesce(provenance,'{}'::jsonb)||$11::jsonb,error='{}'::jsonb,
         completed_at=now(),updated_at=now()
       WHERE id=$1 AND ($2::text IS NULL OR worker_id=$2 OR worker_id IS NULL) RETURNING *`,
     [id, workerId || null, media.requestId || media.provenance?.predictionId || null,
@@ -147,10 +157,12 @@ class PostgresMediaExecutionRepository {
   async markFailure({ id, workerId, error, boundaryCrossed, terminal = false }) {
     const status = terminal ? 'FAILED' : boundaryCrossed ? 'NEEDS_RECONCILIATION' : 'RETRYABLE';
     await this.db.query(`/* v2.5:fail-media-execution */
-      UPDATE v2_5.media_executions SET status=$3,worker_id=NULL,error=$4::jsonb,updated_at=now()
+      UPDATE v2_5.media_executions SET status=$3,worker_id=NULL,error=$4::jsonb,
+        provider_request_id=coalesce(provider_request_id,$5),provider_status=coalesce($6,provider_status),updated_at=now()
       WHERE id=$1 AND ($2::text IS NULL OR worker_id=$2 OR worker_id IS NULL)`,
     [id, workerId || null, status, JSON.stringify({ code: error.code || 'MEDIA_EXECUTION_FAILED', message: error.message,
-      details: error.details || null })]);
+      details: error.details || null, predictionId: error.predictionId || null }),
+      error.predictionId || error.details?.requestId || null, error.details?.providerStatus || null]);
   }
 }
 
@@ -182,7 +194,9 @@ class DurableMediaExecutor {
   }
 
   identities({ brandId, productionId, asset }) {
-    const fingerprint = canonicalFingerprint({ brandId, productionId, asset });
+    const identityAsset = { ...asset, generation_requirements: { ...(asset.generation_requirements || {}) } };
+    delete identityAsset.generation_requirements.provider_request_preflight;
+    const fingerprint = canonicalFingerprint({ brandId, productionId, asset: identityAsset });
     const artifactId = `brand:${brandId}:asset:${asset.asset_id}`;
     const idempotencyKey = `${brandId}:${productionId}:media:${asset.asset_id}:${fingerprint}`;
     return { fingerprint, artifactId, idempotencyKey, provenanceArtifactId: `${artifactId}:provenance`, provenanceIdempotencyKey: `${idempotencyKey}:provenance` };
@@ -205,12 +219,12 @@ class DurableMediaExecutor {
       temporal: asset.temporal || asset.generation_requirements?.temporal || null,
       provider: recorded.provider || row.provider, model: recorded.model || row.model,
       requestId: recorded.requestId || row.provider_request_id || null, usage: recorded.usage || null,
-      provenance: Object.freeze({ ...(recorded.provenance || row.provenance || {}), source: 'immutable-artifact-cache' }),
+      provenance: Object.freeze({ ...(row.provenance || {}), ...(recorded.provenance || {}), source: 'immutable-artifact-cache' }),
       artifact, provenanceArtifact,
     };
   }
 
-  async execute({ workspaceId, productionId, brandId, workerId, asset }) {
+  async execute({ workspaceId, productionId, brandId, workerId, asset, onProviderRequest = null }) {
     const selection = this.selection(asset);
     const identities = this.identities({ brandId, productionId, asset });
     let row = await this.repository.ensure({ workspaceId, brandId, productionId, asset,
@@ -247,8 +261,15 @@ class DurableMediaExecutor {
           requestId: row.provider_request_id, canonicalRequest: fromAsset({ ...asset,
             generation_requirements: { ...(asset.generation_requirements || {}), provider: row.provider, model: row.model } }),
         });
-        media = normalizeMediaResult({ asset, response: recovered });
+        media = normalizeMediaResult({ asset, response: { ...recovered,
+          provenance: { ...(row.provenance || {}), ...(recovered.provenance || {}) } } });
       } else {
+        if (asset.generation_requirements?.request_compiler_version) {
+          const compiler = require('../v2.8/provider-request-compiler');
+          const checks = compiler.collectProviderPreflight([asset]);
+          compiler.assertProviderPreflight(checks);
+          if (checks.some(check => check.status !== 'READY')) throw new DurableMediaError('REFERENCE_EVIDENCE_MISSING', 'Exact reference bytes must be materialized before generation');
+        }
         row = await this.repository.claim({ id: row.id, workerId });
         if (!row) throw new DurableMediaError('MEDIA_EXECUTION_NOT_CLAIMED', `Asset ${asset.asset_id} is already claimed or terminal`);
         row = await this.repository.markBoundary({ id: row.id, workerId, requestEvidence: {
@@ -262,8 +283,12 @@ class DurableMediaExecutor {
         boundaryCrossed = true;
         media = await generateMediaAsset({
           providerGateway: this.providerGateway, asset, productionId, brandId, workerId,
+          onProviderRequestEvidence: async (evidence) => {
+            row = await this.repository.recordProviderRequestEvidence({ id: row.id, workerId, evidence });
+          },
           onProviderRequest: async ({ requestId, status }) => {
             row = await this.repository.recordProviderRequest({ id: row.id, workerId, requestId, providerStatus: status });
+            if (onProviderRequest) await onProviderRequest({ requestId, status });
           },
         });
         if (media.requestId && !row.provider_request_id) {
@@ -304,9 +329,10 @@ class DurableMediaExecutor {
       await this.registerAsset({ productionId, asset, media: resolved, workerId, identities, probe });
       return Object.freeze({ ...resolved, durableExecutionId: row.id });
     } catch (error) {
-      const terminal = /PREDICTION_(FAILED|CANCELED)/.test(error.code || '')
+      const terminal = rejectedBeforeCreation(error, row?.provider_request_id)
+        || require('../providers/execution-outcome').terminalProviderFailure(error, row?.provider_request_id)
         || error.code === 'PROVIDER_OUTPUT_GEOMETRY_MISMATCH';
-      await this.repository.markFailure({ id: row.id, workerId, error, boundaryCrossed, terminal }).catch(() => {});
+      if (row?.id) await this.repository.markFailure({ id: row.id, workerId, error, boundaryCrossed, terminal }).catch(() => {});
       throw error;
     }
   }

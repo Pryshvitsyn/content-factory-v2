@@ -44,8 +44,14 @@ function assertWan3ReferenceGeometry(request, refs, aspectRatio) {
 function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16', duration = 5,
   image = null, lastFrameImage = null, referenceImages = [], referenceVideos = [], referenceAudios = [],
   generateAudio = false, watermark = false, seed } = {}) {
+  try {
+  if (!['480p','720p'].includes(resolution)) {
+    const error = new ProviderError('Replicate Seedance 2.5 supports only 480p or 720p', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
+    error.code = 'UNSUPPORTED_RESOLUTION';
+    throw error;
+  }
   if (!String(prompt || '').trim()) throw new ProviderError('Seedance 2.5 requires a prompt', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
-  if (!Number.isInteger(duration) || duration < 1 || duration > 30) throw new ProviderError('Seedance 2.5 duration must be 1-30 seconds', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
+  if (!Number.isInteger(duration) || duration < 4 || duration > 30) throw new ProviderError('Seedance 2.5 duration must be 4-30 seconds', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
   if ((image || lastFrameImage) && (referenceImages.length || referenceVideos.length || referenceAudios.length)) {
     throw new ProviderError('Seedance first/last frames cannot be combined with reference media', { provider: 'replicate', model: 'bytedance/seedance-2.5' });
   }
@@ -57,6 +63,11 @@ function buildSeedance25Input({ prompt, resolution = '720p', aspectRatio = '9:16
     ...(lastFrameImage ? { last_frame_image: lastFrameImage } : {}), ...(referenceImages.length ? { reference_images: referenceImages } : {}),
     ...(referenceVideos.length ? { reference_videos: referenceVideos } : {}), ...(referenceAudios.length ? { reference_audios: referenceAudios } : {}),
     ...(seed == null ? {} : { seed }) };
+  } catch (error) {
+    error.code = error.code || 'REPLICATE_INPUT_INVALID';
+    error.details = { operation: 'LOCAL_INPUT_VALIDATION', providerExecutionOutcome: 'REJECTED_BEFORE_CREATION' };
+    throw error;
+  }
 }
 
 class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
@@ -75,7 +86,8 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       aspectRatio: request?.aspectRatio || requirements.aspect_ratio || '9:16', duration: request?.durationSeconds || Number(resolved.duration || requirements.duration || 5), seed: request?.seed ?? requirements.seed };
     const refs = request?.references || {};
     if (this.family === 'WAN_3') assertWan3ReferenceGeometry(request, refs, common.aspectRatio);
-    const input = this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,
+    const compiled = request ? require('../v2.8/provider-request-compiler').compileVideoRequest(request, { endpoint: `${this.baseURL}/models/${this.model}/predictions` }) : null;
+    const input = compiled ? compiled.payload.input : this.family === 'WAN_3' ? buildWan3Input({ ...common, image: refs.firstFrame || null,
       negativePrompt: request?.negativePrompt || requirements.negative_prompt,
       enablePromptExpansion: resolved.enablePromptExpansion ?? requirements.enable_prompt_expansion ?? true })
       : buildSeedance25Input({ ...common, image: refs.firstFrame || null, lastFrameImage: refs.lastFrame || null,
@@ -86,15 +98,33 @@ class ReplicateUniversalVideoAdapter extends ReplicateWanVideoAdapter {
       capability: request?.capability || supportRequest.capability, requestedAspectRatio: common.aspectRatio,
       framingInheritedFrom: refs.firstFrame ? 'VERIFIED_FIRST_FRAME' : 'ASPECT_RATIO_PARAMETER',
       referenceGeometry: request?.referenceGeometry || null, resolvedSettings: resolved }) });
-    if (!options.idempotencyKey) return enrich(await this.runPrediction({ input, idempotencyKey: null, onProviderRequest: options.onProviderRequest }));
+    const run = async () => {
+      const transport = compiled?.transportPlan?.uploadCalls ? await require('./replicate-file-transport').prepareReplicateFiles({
+        input, plan: compiled.transportPlan, canonicalFingerprint: compiled.fingerprint, endpoint: compiled.target,
+        apiToken: this.apiToken, fetchImpl: this.fetch, now: this.now, minimumLifetimeMs: this.timeoutMs,
+        onEvidence: options.onProviderRequestEvidence,
+      }) : { input, evidence: null };
+      try {
+        const result = await this.runPrediction({ input: transport.input, idempotencyKey: options.idempotencyKey || null,
+          onProviderRequest: options.onProviderRequest });
+        return enrich({ ...result, provenance: { ...result.provenance,
+          ...(transport.evidence ? { providerRequestTransport: transport.evidence } : {}) } });
+      } catch (error) {
+        if (transport.evidence) {
+          require('./replicate-file-transport').redactTransportError(error, transport.input, compiled.transportPlan);
+          error.details = { ...error.details, transport: transport.evidence };
+        }
+        throw error;
+      }
+    };
+    if (!options.idempotencyKey) return run();
     const identity = JSON.stringify(input);
     if (this.inflight.has(options.idempotencyKey)) {
       const existing = this.inflight.get(options.idempotencyKey);
       if (existing.operationIdentity !== identity) throw new ProviderError('Replicate idempotency conflict', { provider: 'replicate', model: this.model });
       return existing.promise;
     }
-    const operation = this.runPrediction({ input, idempotencyKey: options.idempotencyKey,
-      onProviderRequest: options.onProviderRequest }).then(enrich);
+    const operation = run();
     this.inflight.set(options.idempotencyKey, { operationIdentity: identity, promise: operation });
     try { return await operation; } finally { this.inflight.delete(options.idempotencyKey); }
   }

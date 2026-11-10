@@ -101,11 +101,17 @@ async function main() {
       asset: recoverableAsset, fingerprint: recoverableIds.fingerprint, idempotencyKey: recoverableIds.idempotencyKey,
       provider: 'mock-video', model: 'mock-v1' });
     recoverable.status = 'NEEDS_RECONCILIATION'; recoverable.provider_request_id = 'prediction-existing';
+    recoverable.provenance = { providerRequestTransport: { version: 'replicate-files/1', uploadCalls: 1,
+      files: [{ fileId: 'file-original', sha256: 'original-bytes' }], wirePayloadSha256: 'original-wire' } };
     const recovered = await executor.execute({ workspaceId: WORKSPACE_ID, brandId: BRAND_ID, productionId: PRODUCTION_ID,
       workerId: 'worker-4', asset: recoverableAsset });
     assert.equal(recovered.requestId, 'prediction-existing');
+    assert.deepEqual(recovered.provenance.providerRequestTransport, recoverable.provenance.providerRequestTransport);
+    const cachedRecovery = await executor.execute({ workspaceId: WORKSPACE_ID, brandId: BRAND_ID, productionId: PRODUCTION_ID,
+      workerId: 'worker-5', asset: recoverableAsset });
+    assert.equal(cachedRecovery.provenance.providerRequestTransport.files[0].fileId, 'file-original');
     assert.equal(recoveries, 1); assert.equal(generations, 1, 'reconciliation must poll existing request, not POST another');
-    assert.equal(registered, 3, 'generated, cached, and reconciled assets remain visible in the registry');
+    assert.equal(registered, 4, 'generated, cached, reconciled and cached-recovery assets remain visible in the registry');
     console.log('V2.5 durable per-asset idempotency and crash/reconciliation contract passed (provider calls mocked).');
   } finally {
     await fs.rm(root, { recursive: true, force: true });

@@ -54,7 +54,7 @@ async function main() {
   assert.equal(uploadPlan.humanApprovalRequired, true); assert.equal(uploadPlan.autoPublish, false);
 
   const aiPlan = buildKeyframeStagePlan({ draft, shotId: 'shot-1', selection: {
-    sourceType: 'AI_GENERATED', provider: 'openai', model: 'gpt-image-1', profile: 'STANDARD' },
+    sourceType: 'AI_GENERATED', provider: 'openai', model: 'gpt-image-1.5', profile: 'STANDARD' },
   semantic: { provider: 'mock-semantic', model: 'mock-still' } });
   assert.equal(aiPlan.externalCalls.imageGeneration, 1); assert.equal(aiPlan.externalCalls.maximum, 2);
   assert.equal(aiPlan.executionAssets.length, 1, 'keyframe stage contains one image only');
@@ -77,7 +77,12 @@ async function main() {
     canonical, keyframe: keyframe(), executionAsset: asset, semantic: { provider: 'mock', model: 'critic' } });
   assert.equal(videoPlan.executionAssets.length, 1); assert.equal(videoPlan.executionAssets[0].assetId, 'video-1');
   assert.deepEqual(videoPlan.externalCalls, { imageGeneration: 0, video: 1, semanticVideoEvaluation: 1,
-    semanticRetries: 0, voice: 0, continuity: 0, renderer: 0, maximum: 2, alreadyMade: 0 });
+    semanticRetries: 0, voice: 0, continuity: 0, renderer: 0, referenceUploads: 0, maximum: 2, alreadyMade: 0 });
+  const uploadVideo = buildFirstVideoStagePlan({ draft: { ...draft, creative_brief: bound, revision: 8 }, canonical, keyframe: keyframe(),
+    executionAsset: { ...asset, generation_requirements: { ...asset.generation_requirements,
+      provider_request_preflight: { transportPlan: { uploadCalls: 1 } } } } });
+  assert.equal(uploadVideo.externalCalls.referenceUploads, 1); assert.equal(uploadVideo.externalCalls.maximum, 3);
+  assert.notEqual(uploadVideo.fingerprint, videoPlan.fingerprint);
   assert.equal(videoPlan.remainingProductionScheduled, false); assert.equal(videoPlan.autoPublish, false);
   assert.throws(() => buildFirstVideoStagePlan({ draft, canonical, keyframe: keyframe({ version: 3 }),
     executionAsset: asset }), (error) => error.code === 'KEYFRAME_REFERENCE_MISMATCH');
@@ -90,10 +95,10 @@ async function main() {
     'untrusted evaluator prose never becomes a downstream generation instruction');
 
   const catalog = new ProviderCatalog({ env: { OPENAI_API_KEY: 'synthetic-test-key' } });
-  const resolved = catalog.resolveSelection({ provider: 'openai', model: 'gpt-image-1', profile: 'STANDARD',
+  const resolved = catalog.resolveSelection({ provider: 'openai', model: 'gpt-image-1.5', profile: 'STANDARD',
     capability: 'TEXT_TO_IMAGE', aspectRatio: '9:16' });
   assert.equal(resolved.adapterFamily, 'openai-media'); assert.equal(resolved.capability, 'TEXT_TO_IMAGE');
-  assert.equal(resolved.model, 'gpt-image-1');
+  assert.equal(resolved.model, 'gpt-image-1.5');
   assert(!aiPlan.prompt.includes('Tune Into Her'), 'generic engine contains no product-specific corrective constant');
 
   console.log('Locked-keyframe isolation, approval, exact-reference, provider-catalog, trust-boundary and call-accounting tests passed. Real provider calls: 0.');

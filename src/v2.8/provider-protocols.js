@@ -100,7 +100,7 @@ const PROTOCOLS = Object.freeze({
     state: (body) => state(body.state, { queued: 'PENDING', dreaming: 'RUNNING', completed: 'SUCCEEDED', failed: 'FAILED' }),
     mapRequest: (request) => ({ generation_type: 'video', model: request.providerSelection.model, prompt: request.providerPrompt,
       aspect_ratio: request.aspectRatio, resolution: request.resolution,
-      duration: request.resolvedSettings.duration || `${request.durationSeconds || 5}s`, loop: false,
+      duration: `${request.durationSeconds || Number(String(request.resolvedSettings.duration || '5').replace(/s$/, ''))}s`, loop: false,
       ...(request.references.firstFrame || request.references.lastFrame ? { keyframes: {
         ...(request.references.firstFrame ? { frame0: { type: 'image', url: request.references.firstFrame } } : {}),
         ...(request.references.lastFrame ? { frame1: { type: 'image', url: request.references.lastFrame } } : {}) } } : {}) }),

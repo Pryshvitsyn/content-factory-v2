@@ -23,7 +23,7 @@ class KeyframeImageGateway {
     const response = await provider.generate({ capability: 'image-generation', model: selection.model,
       idempotencyKey, onProviderRequest, prompt: JSON.stringify({ description: prompt,
         generation_requirements: { prompt, size: selection.resolvedSettings?.size || '1024x1536',
-          quality: selection.resolvedSettings?.quality || 'high' } }) });
+          quality: selection.resolvedSettings?.quality || 'high', provider_request_preflight: selection.providerRequest || undefined } }) });
     const bytes = Buffer.isBuffer(response.output) ? response.output : Buffer.isBuffer(response.bytes) ? response.bytes : null;
     if (!bytes?.length) throw new LockedKeyframeError('KEYFRAME_PROVIDER_OUTPUT_INVALID',
       'Image provider returned no durable image bytes');
@@ -36,7 +36,7 @@ class KeyframeImageGateway {
 function createKeyframeImageGateway({ env = process.env } = {}) {
   const providers = {};
   if (env.OPENAI_API_KEY) providers.openai = createOpenAIMediaProvider({ apiKey: env.OPENAI_API_KEY,
-    imageModel: env.OPENAI_IMAGE_MODEL || 'gpt-image-1' });
+    imageModel: env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5' });
   return new KeyframeImageGateway({ providers });
 }
 
@@ -210,9 +210,14 @@ class LockedKeyframeService {
         error: validation.status === 'PASS' ? {} : { code: 'KEYFRAME_SEMANTIC_VALIDATION_FAILED' } });
       return Object.freeze(resolved);
     } catch (error) {
+      const { rejectedBeforeCreation, terminalProviderFailure } = require('../providers/execution-outcome');
+      const rejected = rejectedBeforeCreation(error, error.predictionId);
+      const terminal = terminalProviderFailure(error);
       await this.repository.finishLockedStage({ attemptId: attempt.id,
-        status: boundary ? 'NEEDS_RECONCILIATION' : 'FAILED', boundaryState: boundary ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
-        error: { code: error.code || 'KEYFRAME_STAGE_FAILED', message: error.message } }).catch(() => {});
+        status: boundary && !rejected && !terminal ? 'NEEDS_RECONCILIATION' : 'FAILED',
+        boundaryState: terminal ? 'COMPLETED' : boundary && !rejected ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
+        providerRequestId: error.predictionId || error.details?.requestId || null,
+        error: { code: error.code || 'KEYFRAME_STAGE_FAILED', message: error.message, details: error.details || null } }).catch(() => {});
       throw error;
     }
   }
@@ -242,6 +247,8 @@ class LockedKeyframeService {
     const workflow = await this.repository.getLockedWorkflow({ draftId: id, ...scope, shotId: keyframe.shot_id });
     if (!workflow || workflow.production_id !== keyframe.production_id) throw new LockedKeyframeError('LOCKED_WORKFLOW_MISSING',
       'Approved keyframe does not belong to this production workflow');
+    if (this.repository.assertLockedStageAvailable) await this.repository.assertLockedStageAvailable({
+      workflowId: workflow.id, ...scope, stage: STAGES.FIRST_VIDEO });
     const projected = await this.starter.preflightLockedFirstVideo({ draft, preflight: draft.final_preflight, keyframe });
     const stored = await this.repository.saveLockedStagePreflight({ workflowId: workflow.id, ...scope,
       stage: STAGES.FIRST_VIDEO, draftRevision: draft.revision, keyframe, plan: projected.plan, actor: this.actor });
@@ -268,11 +275,17 @@ class LockedKeyframeService {
       'Prepared first-video execution changed after preflight');
     const attempt = await this.repository.claimLockedStage({ workflowId: workflow.id, ...scope,
       stage: STAGES.FIRST_VIDEO, preflightId });
-    if (attempt.reused) return attempt.result;
+    if (attempt.reused) {
+      await this.repository.recordFirstVideoResult({ workflowId: workflow.id, ...scope,
+        attemptId: attempt.id, accepted: attempt.result.accepted, result: attempt.result });
+      return attempt.result;
+    }
     let boundary = false;
+    let resultPersisted = false;
     try {
       const result = await this.starter.startLockedFirstVideo({ draft, preflight: draft.final_preflight,
         keyframe, actor: this.actor, productionId: workflow.production_id, expectedFingerprint,
+        onProviderRequest: async ({ requestId }) => this.repository.recordLockedStageProviderRequest({ attemptId: attempt.id, providerRequestId: requestId }),
         beforeProviderBoundary: async () => { await this.repository.markLockedStageBoundary({ attemptId: attempt.id }); boundary = true; } });
       const safeQuality = sanitizeEvaluatorResult(result.quality);
       const response = { productionId: result.productionId, jobId: result.jobId,
@@ -281,22 +294,31 @@ class LockedKeyframeService {
           provenance: result.media.provenance }, quality: safeQuality,
         exactKeyframe: approvedKeyframeIdentity(keyframe), externalCalls: {
           video: 1, semantic: safeQuality.metadata.externalCalls, continuity: 0, voice: 0, renderer: 0,
-          total: 1 + safeQuality.metadata.externalCalls }, remainingProductionScheduled: false,
-        readyForContinuationPreflight: result.accepted,
-        nextRequiredAction: result.accepted ? 'RUN_CONTINUATION_PREFLIGHT' : 'STOP_AND_REVIEW_FAILURE',
+          referenceUploads: result.media.provenance?.providerRequestTransport?.uploadCalls || 0,
+          total: 1 + safeQuality.metadata.externalCalls + (result.media.provenance?.providerRequestTransport?.uploadCalls || 0) }, remainingProductionScheduled: false,
+        readyForContinuationPreflight: result.accepted && !this.repository.requiresHumanPilotReview,
+        humanPilotApprovalRequired: result.accepted && this.repository.requiresHumanPilotReview === true,
+        nextRequiredAction: result.accepted ? (this.repository.requiresHumanPilotReview ? 'APPROVE_LOOK_AND_MOTION' : 'RUN_CONTINUATION_PREFLIGHT') : 'STOP_AND_REVIEW_FAILURE',
         humanApprovalRequired: true, autoPublish: false };
       await this.repository.finishLockedStage({ attemptId: attempt.id,
         status: result.accepted ? 'SUCCEEDED' : 'FAILED', boundaryState: 'COMPLETED',
         providerRequestId: result.media.requestId, result: response,
         error: result.accepted ? {} : { code: 'FIRST_VIDEO_VALIDATION_FAILED' } });
+      resultPersisted = true;
       await this.repository.recordFirstVideoResult({ workflowId: workflow.id, ...scope,
-        accepted: result.accepted, result: response });
+        attemptId: attempt.id, accepted: result.accepted, result: response });
       return Object.freeze(response);
     } catch (error) {
+      if (resultPersisted) throw new LockedKeyframeError('PILOT_REVIEW_SYNC_REQUIRED',
+        'Pilot result is saved. Restore review from the saved result; do not generate another video.',
+        { attemptId: attempt.id, workflowId: workflow.id, automaticRetryAllowed: false, operatorAction: 'RESTORE_SAVED_PILOT_REVIEW' });
+      const rejected = require('../providers/execution-outcome').rejectedBeforeCreation(error, error.predictionId);
+      const providerTerminal = require('../providers/execution-outcome').terminalProviderFailure(error);
       await this.repository.finishLockedStage({ attemptId: attempt.id,
-        status: boundary ? 'NEEDS_RECONCILIATION' : 'FAILED',
-        boundaryState: boundary ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
-        error: { code: error.code || 'FIRST_VIDEO_STAGE_FAILED', message: error.message } }).catch(() => {});
+        status: boundary && !rejected && !providerTerminal ? 'NEEDS_RECONCILIATION' : 'FAILED',
+        boundaryState: providerTerminal ? 'COMPLETED' : boundary && !rejected ? 'MAY_HAVE_STARTED' : 'NOT_CROSSED',
+        providerRequestId: error.predictionId || error.details?.requestId || null,
+        error: { code: error.code || 'FIRST_VIDEO_STAGE_FAILED', message: error.message, details: error.details || null } }).catch(() => {});
       throw error;
     }
   }

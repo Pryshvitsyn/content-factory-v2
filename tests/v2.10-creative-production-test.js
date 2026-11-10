@@ -91,18 +91,21 @@ async function main() {
     quality: { semanticCritic: 'mock-semantic', semanticCalls: 2, otherEvaluatorCalls: 0 },
     master: { profile: 'reels', resolution: '1080x1920', fps: 30, audioStrategy: 'uploaded-human' } };
   const preflight = buildProductionPreflight(input);
-  assert.equal(preflight.status, 'READY'); assert.deepEqual(preflight.externalCalls, { video: 2, speech: 0, semantic: 2, otherEvaluator: 0, maximum: 4 });
+  assert.equal(preflight.status, 'READY'); assert.deepEqual(preflight.externalCalls, { video: 2, speech: 0, semantic: 2, otherEvaluator: 0, referenceUploads: 0, maximum: 4 });
+  const uploads = buildProductionPreflight({ ...input, canonicalPlan: { expectedReferenceUploadCalls: 2 } });
+  assert.equal(uploads.externalCalls.referenceUploads, 2); assert.equal(uploads.externalCalls.maximum, 6);
+  assert.notEqual(uploads.fingerprint, preflight.fingerprint, 'changed upload budget requires a fresh Start confirmation');
   assert.equal(assertStartAllowed({ preflight, currentPreflight: preflight, confirmed: true }), true);
   const executionPlan = buildExecutionPlan({ draft: { id: 'draft-1', revision: 1, workspaceId: 'w', brandId: 'b', creativeBrief: ready }, preflight });
   assert.equal(executionPlan.video.shots.length, 2); assert.equal(executionPlan.voice.generationRequired, false);
-  assert.match(executionPlan.video.shots[0].prompt, /Appearance: Partner one has short dark curls/);
+  assert.match(executionPlan.video.shots[0].prompt, /Partner one has short dark curls/);
   let starts = 0; const starter = new V210ProductionStarter({ executor: { async start({ plan }) { starts += 1; return { productionId: `mock-${plan.draftId}` }; } } });
   assert.equal((await starter.start({ draft: { id: 'draft-1', revision: 1, creativeBrief: ready }, preflight })).productionId, 'mock-draft-1'); assert.equal(starts, 1);
   const edited = JSON.parse(JSON.stringify(input)); edited.brief.storyboard[0].action += ' now';
   const editedPreflight = buildProductionPreflight(edited);
   assert.throws(() => assertStartAllowed({ preflight, currentPreflight: editedPreflight, confirmed: true }), { code: 'STALE_PREFLIGHT' });
   const prompt = buildShotPrompt(ready, ready.storyboard[0]);
-  assert.doesNotMatch(prompt, /Notice the moment today/); assert.match(prompt, /Do not render typography/);
+  assert.doesNotMatch(prompt, /Notice the moment today/); assert.match(prompt, /Avoid: generated text/);
   const ffmpeg = buildFfmpegArgs({ assembly: { durationMs: 10000, clips: [{ kind: 'video', durationMs: 10000, sourceOffsetMs: 0 }] },
     inputPaths: ['/mock/video.mp4'], outputPath: '/mock/master.mp4', postProduction: ready.postProduction, endTitlePath: '/mock/end-title.png' });
   assert.match(ffmpeg[ffmpeg.indexOf('-filter_complex') + 1], /overlay=.*between/);

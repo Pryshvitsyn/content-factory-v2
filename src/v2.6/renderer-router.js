@@ -11,14 +11,39 @@ class RendererRoutingError extends Error {
 }
 
 class QualityRendererLane {
-  constructor({ masterOrchestrator, mediaExecutionRepository, qualityEvaluator = null } = {}) {
+  constructor({ masterOrchestrator, mediaExecutionRepository, qualityEvaluator = null, env = process.env } = {}) {
     if (!masterOrchestrator || typeof masterOrchestrator.build !== 'function') throw new Error('masterOrchestrator is required');
-    this.masterOrchestrator = masterOrchestrator;
+    this.env = env; this.masterOrchestrator = masterOrchestrator;
     this.mediaExecutionRepository = mediaExecutionRepository;
     this.qualityEvaluator = qualityEvaluator;
   }
 
-  async preflight({ input, brand, existing }) {
+  async preflight({ input, brand, existing, config }) {
+    const assets = input.assetPlan.assets;
+    const legacyAsset = assets.length === 1 && assets[0].kind === 'video' ? assets[0] : null;
+    const requirements = legacyAsset?.generation_requirements || {};
+    // V2.4 uses a frame-based Wan request, without canonical provider selection.
+    // Keep its payload/fingerprint intact; missing selection in newer input must still fail.
+    const legacy = (input.schemaVersion == null || input.schemaVersion === 1) && input.profile && legacyAsset
+      && !['provider_selection', 'provider', 'model', 'capability', 'references', 'v210_reference',
+        'request_compiler_version', 'provider_request_preflight', 'prompt_compiler_version']
+        .some(key => Object.hasOwn(requirements, key));
+    let providerRequests;
+    if (legacy) {
+      const { buildWanInput, DEFAULT_MODEL } = require('../providers/replicate-wan-video-adapter');
+      if (config?.provider !== 'replicate' || config?.model !== DEFAULT_MODEL) {
+        throw new RendererRoutingError('LEGACY_PROVIDER_MISMATCH', 'V2.4 frame-based input requires its configured Wan 2.2 route');
+      }
+      const payload = buildWanInput({ prompt: requirements.prompt || legacyAsset.description,
+        resolution: requirements.resolution, aspectRatio: requirements.aspect_ratio,
+        numFrames: requirements.num_frames, framesPerSecond: requirements.frames_per_second,
+        goFast: requirements.go_fast, seed: requirements.seed, sampleShift: requirements.sample_shift,
+        optimizePrompt: requirements.optimize_prompt, interpolateOutput: requirements.interpolate_output });
+      providerRequests = [{ assetId: legacyAsset.asset_id, status: 'READY', contract: 'V2.4_FRAME_BASED_WAN',
+        provider: config.provider, model: config.model, generatedDurationSeconds: payload.num_frames / payload.frames_per_second }];
+    } else {
+      providerRequests = require('../v2.8/provider-request-compiler').preflightProviderAssets(assets, { env: this.env });
+    }
     let probe = null;
     let executions = [];
     if (input.schemaVersion >= 2) {
@@ -35,7 +60,7 @@ class QualityRendererLane {
       });
       if (existing?.productionId) executions = await this.mediaExecutionRepository.list(existing.productionId);
     }
-    return { probe, executions, availability: { configured: true, status: 'READY' } };
+    return { probe, executions, providerRequests, availability: { configured: true, status: 'READY' } };
   }
 
   plan({ input, config, existing, laneState }) {
@@ -58,6 +83,7 @@ class QualityRendererLane {
       : evaluatorPlan.finalPolicy;
     const expectedQualityEvaluatorCalls = evaluatorPlan.expectedExternalCalls;
     return {
+      providerRequests: laneState.providerRequests || [],
       renderMode: 'QUALITY',
       renderer: 'v2.5-quality',
       provider: videoProfile.provider || config.provider,
@@ -67,6 +93,8 @@ class QualityRendererLane {
       numFrames: videoProfile.num_frames || videoProfile.numFrames,
       fps: videoProfile.frames_per_second || videoProfile.framesPerSecond,
       expectedVideoGenerations: pending.filter((asset) => asset.kind === 'video').length,
+      expectedReferenceUploadCalls: (laneState.providerRequests || []).filter(check => pending.some(asset => asset.asset_id === check.assetId))
+        .reduce((sum, check) => sum + (check.transportPlan?.uploadCalls ?? check.referenceUploadMaximum ?? 0), 0),
       expectedAudioGenerations: pending.filter((asset) => asset.kind === 'voice' || asset.kind === 'audio').length,
       audioProvider: audioProfile.provider || null,
       audioModel: audioProfile.model || null,

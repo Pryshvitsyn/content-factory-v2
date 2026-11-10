@@ -12,6 +12,8 @@ function conflict(code, message, details = null) {
 const STAGE_ORDER = Object.freeze(['SCRIPT', 'STORYBOARD', 'LOOK', 'PILOT']);
 
 class QualityScriptFirstPostgresRepository extends V210PostgresRepository {
+  get requiresHumanPilotReview() { return true; }
+
   async saveQualityScriptRevision({ draftId, workspaceId, brandId, script, validation, actor }) {
     const contentFingerprint = fingerprint(script);
     const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
@@ -178,13 +180,55 @@ class QualityScriptFirstPostgresRepository extends V210PostgresRepository {
     return row;
   }
 
-  async recordFirstVideoResult({ workflowId, workspaceId, brandId, accepted, result }) {
+  async markLockedStageBoundary({ attemptId, providerRequestId = null }) {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const scoped = Object.create(this); scoped.db = client;
+      const attempt = await super.markLockedStageBoundary.call(scoped, { attemptId, providerRequestId });
+      if (attempt.stage === 'FIRST_VIDEO') {
+        const updated = await client.query(`UPDATE v2_10.locked_keyframe_workflows SET state='FIRST_VIDEO_RUNNING'
+          WHERE id=$1 AND workspace_id=$2 AND brand_id=$3
+            AND state IN ('KEYFRAME_APPROVED','FIRST_VIDEO_RUNNING') RETURNING id`,
+        [attempt.workflow_id, attempt.workspace_id, attempt.brand_id]);
+        if (!updated.rows[0]) throw conflict('PILOT_START_STATE_CONFLICT',
+          'Pilot cannot start in this workflow state; no provider request was submitted');
+      }
+      await client.query('COMMIT');
+      return attempt;
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { client.release(); }
+  }
+
+  async recordFirstVideoResult({ workflowId, workspaceId, brandId, accepted, result, attemptId = null }) {
     const state = accepted ? 'FIRST_VIDEO_REVIEW' : 'FIRST_VIDEO_FAILED';
     const client = typeof this.db.connect === 'function' ? await this.db.connect() : this.db;
     try {
       await client.query('BEGIN');
+      // Match approval writers' lock order: draft, then workflow.
+      await client.query(`SELECT d.id FROM v2_10.creative_drafts d
+        JOIN v2_10.locked_keyframe_workflows w ON w.draft_id=d.id
+        WHERE w.id=$1 AND w.workspace_id=$2 AND w.brand_id=$3
+          AND d.workspace_id=$2 AND d.brand_id=$3 FOR UPDATE OF d`, [workflowId, workspaceId, brandId]);
+      const current = (await client.query(`SELECT * FROM v2_10.locked_keyframe_workflows
+        WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 FOR UPDATE`, [workflowId, workspaceId, brandId])).rows[0];
+      const attempt = (await client.query(`SELECT * FROM v2_10.locked_stage_attempts
+        WHERE workflow_id=$1 AND workspace_id=$2 AND brand_id=$3 AND stage='FIRST_VIDEO'
+        ORDER BY started_at DESC,id DESC LIMIT 1`, [workflowId, workspaceId, brandId])).rows[0];
+      if (!current || !attempt || (attemptId && attempt.id !== attemptId)
+        || attempt.boundary_state !== 'COMPLETED' || attempt.status !== (accepted ? 'SUCCEEDED' : 'FAILED')
+        || attempt.result?.accepted !== accepted) throw conflict('PILOT_RESULT_EVIDENCE_REQUIRED',
+        'The exact completed pilot result must be persisted before advancing review');
+      // Repeating this local projection never changes terminal evidence or human decisions.
+      if (current.state === state || ['FIRST_VIDEO_ACCEPTED','FIRST_VIDEO_REJECTED','CONTINUATION_STARTED'].includes(current.state)) {
+        await client.query('COMMIT');
+        return { ...current, firstVideoResult: attempt.result, humanPilotApprovalRequired: current.state === 'FIRST_VIDEO_REVIEW' };
+      }
+      // Recovery of the historical missing transition is justified only by the completed journal above.
+      if (current.state === 'KEYFRAME_APPROVED') await client.query(`UPDATE v2_10.locked_keyframe_workflows
+        SET state='FIRST_VIDEO_RUNNING' WHERE id=$1 AND workspace_id=$2 AND brand_id=$3`, [workflowId, workspaceId, brandId]);
       const updated = await client.query(`UPDATE v2_10.locked_keyframe_workflows SET state=$4
-        WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND state IN ('KEYFRAME_APPROVED','FIRST_VIDEO_RUNNING') RETURNING *`,
+        WHERE id=$1 AND workspace_id=$2 AND brand_id=$3 AND state='FIRST_VIDEO_RUNNING' RETURNING *`,
       [workflowId, workspaceId, brandId, state]);
       if (!updated.rows[0]) throw conflict('LOCKED_WORKFLOW_STATE_CONFLICT',
         'First-video result cannot be recorded in the current workflow state');
@@ -192,7 +236,7 @@ class QualityScriptFirstPostgresRepository extends V210PostgresRepository {
         preflight_fingerprint=NULL,preflight_request=NULL WHERE id=$1 AND workspace_id=$2 AND brand_id=$3
           AND status='PREFLIGHT_READY'`, [updated.rows[0].draft_id, workspaceId, brandId]);
       await client.query('COMMIT');
-      return { ...updated.rows[0], firstVideoResult: result, humanPilotApprovalRequired: accepted };
+      return { ...updated.rows[0], firstVideoResult: attempt.result, humanPilotApprovalRequired: accepted };
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
     finally { if (client !== this.db) client.release(); }
   }

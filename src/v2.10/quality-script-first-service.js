@@ -68,6 +68,9 @@ class QualityScriptFirstService {
     const draft = await this.draft(id, scope);
     const script = canonicalScript(raw, draft.creative_brief);
     const validation = validateScript(script, draft.creative_brief);
+    const previous = await this.repository.getLatestQualityScript({ draftId: id, ...scope });
+    if (previous?.fingerprint === fingerprint(script)) return Object.freeze({ script: publicRevision(previous), validation,
+      reused: true, downstreamInvalidated: false, externalCalls: 0 });
     const saved = await this.repository.saveQualityScriptRevision({ draftId: id, ...scope,
       script, validation, actor: this.actor });
     await this.repository.invalidateQualityStages({ draftId: id, ...scope, fromStage: 'STORYBOARD',
@@ -87,6 +90,9 @@ class QualityScriptFirstService {
     if (!row) throw new QualityDirectorError('SCRIPT_REVISION_REQUIRED', 'Save a script revision before approval');
     if (row.validation?.status !== 'PASS') throw new QualityDirectorError('SCRIPT_INCOMPLETE',
       'Script must pass deterministic completeness before approval', row.validation, 422);
+    const state = await this.repository.getQualityDirectorState({ draftId: id, ...scope });
+    if (state.script.approved && state.script.revision.id === row.id) return Object.freeze({ approved: true, stage: 'SCRIPT',
+      revision: publicRevision(row), approvalEventId: state.script.eventId, reused: true, externalCalls: 0 });
     const event = await this.repository.recordQualityApproval({ draftId: id, ...scope, stage: 'SCRIPT',
       subjectType: 'SCRIPT_REVISION', subjectId: row.id, subjectFingerprint: row.fingerprint,
       decision: 'APPROVED', reason, actor: this.actor });
@@ -120,6 +126,9 @@ class QualityScriptFirstService {
       throw new QualityDirectorError('STORYBOARD_SCRIPT_MISMATCH',
         'Storyboard must be regenerated or rebased on the currently approved script');
     }
+    const previous = await this.repository.getLatestQualityStoryboard({ draftId: id, ...scope });
+    if (previous?.fingerprint === fingerprint(storyboard)) return Object.freeze({ storyboard: publicRevision(previous), validation,
+      reused: true, downstreamInvalidated: false, externalCalls: 0 });
     const saved = await this.repository.saveQualityStoryboardRevision({ draftId: id, ...scope,
       scriptRevisionId: state.script.revision.id, storyboard, validation, actor: this.actor });
     await this.repository.invalidateQualityStages({ draftId: id, ...scope, fromStage: 'LOOK',
@@ -144,6 +153,8 @@ class QualityScriptFirstService {
     if (row.content?.scriptFingerprint !== state.script.fingerprint) throw new QualityDirectorError('STORYBOARD_SCRIPT_MISMATCH',
       'Storyboard is not based on the currently approved script');
 
+    if (state.storyboard.approved && state.storyboard.revision.id === row.id) return Object.freeze({ approved: true, stage: 'STORYBOARD',
+      revision: publicRevision(row), approvalEventId: state.storyboard.eventId, reused: true, externalCalls: 0 });
     const updatedBrief = this.applyStoryboardToBrief(draft.creative_brief, row.content, state.script.revision.content);
     const updatedDraft = await this.repository.applyApprovedQualityStoryboard({ id, ...scope, brief: updatedBrief });
     if (!updatedDraft) throw new QualityDirectorError('STORYBOARD_BINDING_REJECTED',
@@ -174,7 +185,7 @@ class QualityScriptFirstService {
         environment: shot.environment,
         framing: shot.camera.framing,
         camera: shot.camera.movement,
-        lensComposition: [shot.camera.angle, shot.camera.lensIntent, shot.camera.composition].filter(Boolean).join('; '),
+        lensComposition: require('./creative-contract').uniqueCameraInstructions(shot.camera.angle, shot.camera.lensIntent, shot.camera.composition),
         lighting: shot.lighting,
         startState: shot.startState,
         intendedEndState: shot.intendedEndState,
@@ -192,16 +203,9 @@ class QualityScriptFirstService {
       qualityScript: script, qualityStoryboardFingerprint: fingerprint(storyboard) });
   }
 
-  async approveLook({ id, brandId, keyframe, reason = null }) {
-    const scope = await this.scope(brandId);
-    const state = await this.repository.getQualityDirectorState({ draftId: id, ...scope });
-    assertApprovedGate(state, ['SCRIPT', 'STORYBOARD']);
-    const event = await this.repository.recordQualityApproval({ draftId: id, ...scope, stage: 'LOOK',
-      subjectType: 'KEYFRAME', subjectId: keyframe.id,
-      subjectFingerprint: fingerprint({ id: keyframe.id, version: keyframe.version,
-        contentHash: keyframe.content_hash || keyframe.contentHash, storageKey: keyframe.storage_key || keyframe.storageKey }),
-      decision: 'APPROVED', reason, actor: this.actor });
-    return event;
+  async approveLook() {
+    throw new QualityDirectorError('EXACT_KEYFRAME_APPROVAL_REQUIRED',
+      'Use the exact keyframe approval route after reviewing the current Script, Storyboard and frame.');
   }
 
   async approvePilot({ id, brandId, workflowId, confirmation, reason = null }) {
@@ -250,3 +254,5 @@ class QualityScriptFirstService {
 }
 
 module.exports = { QualityScriptFirstService, publicRevision };
+
+// installer fixture: unrelated local change

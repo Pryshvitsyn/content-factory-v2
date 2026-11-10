@@ -78,19 +78,38 @@ async function main() {
     const winner = claims.find(Boolean);
     assert.equal(claims.filter(Boolean).length, 1, 'only one worker may cross the per-asset claim');
     await repository.markBoundary({ id: winner.id, workerId: winner.worker_id });
+    const transportEvidence = { version: 'replicate-files/1', phase: 'PREDICTION_PREPARED',
+      canonicalFingerprint: 'canonical', wirePayloadSha256: 'wire', uploadCalls: 1,
+      files: [{ fileId: 'file-1', sha256: 'original-hash', bytes: 3124757 }] };
+    await assert.rejects(() => repository.recordProviderRequestEvidence({ id: winner.id, workerId: 'wrong-worker', evidence: transportEvidence }),
+      { code: 'MEDIA_EXECUTION_FENCED' });
+    const uploaded = await repository.recordProviderRequestEvidence({ id: winner.id, workerId: winner.worker_id, evidence: transportEvidence });
+    assert.equal(uploaded.provider_request_id, null, 'file ID must never become a prediction ID');
+    assert.deepEqual(uploaded.provenance.providerRequestTransport, transportEvidence);
     await repository.recordProviderRequest({ id: winner.id, workerId: winner.worker_id, requestId: 'prediction-durable', providerStatus: 'processing' });
     const adopted = await repository.adopt({ id: winner.id, workerId: winner.worker_id,
       artifact: { artifactId: 'brand:asset:video-1', version: 1, storageKey: 'artifacts/video-1.bin', contentHash: 'hash-1' },
       media: { contentType: 'video/mp4', requestId: 'prediction-durable', provenance: { provider: 'replicate' } },
       probe: { durationMs: 3000, size: 1000, videoCodec: 'h264', hasAudio: false } });
     assert.equal(adopted.status, 'SUCCEEDED'); assert.equal(adopted.provider_request_id, 'prediction-durable');
+    assert.deepEqual(adopted.provenance.providerRequestTransport, transportEvidence, 'artifact adoption preserves upload evidence');
     assert.equal((await repository.list(PRODUCTION_ID)).length, 1);
 
     await assert.rejects(() => repository.ensure({ ...args, fingerprint: 'different-fingerprint' }),
       (error) => error.code === 'MEDIA_EXECUTION_CONFLICT');
     await assert.rejects(() => repository.ensure({ ...args, asset: videoAsset('cross-brand'), brandId: OTHER_BRAND_ID }),
       /ownership does not match production ownership/);
-    console.log('V2.5 PostgreSQL clean/repeatable migration, ownership, concurrency, and provider-boundary integration passed.');
+    const failedRow = await repository.ensure({ ...args, asset: videoAsset('failed-video'), fingerprint: 'failed-fingerprint', idempotencyKey: 'failed-request' });
+    await repository.claim({ id: failedRow.id, workerId: 'failure-worker' });
+    await repository.markBoundary({ id: failedRow.id, workerId: 'failure-worker' });
+    await repository.markFailure({ id: failedRow.id, workerId: 'failure-worker', boundaryCrossed: true, terminal: true,
+      error: Object.assign(new Error('provider refused'), { code: 'PROVIDER_FAILED', predictionId: 'accepted-before-failure',
+        details: { providerStatus: 'failed', providerExecutionOutcome: 'TERMINAL_FAILURE' } }) });
+    const failure = (await db.query('SELECT * FROM v2_5.media_executions WHERE id=$1', [failedRow.id])).rows[0];
+    assert.equal(failure.status, 'FAILED');
+    assert.equal(failure.provider_request_id, 'accepted-before-failure');
+    assert.equal(failure.provider_status, 'failed');
+    console.log('V2.5 PostgreSQL clean/repeatable migration, ownership, concurrency, accepted-ID persistence and provider-boundary integration passed.');
   } finally {
     await db.query('DROP SCHEMA IF EXISTS v2_5 CASCADE').catch(() => {});
     await db.query('DROP SCHEMA IF EXISTS v2_2 CASCADE').catch(() => {});

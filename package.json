@@ -3,7 +3,9 @@
   "version": "2.0.0",
   "description": "Content Factory V2 production architecture for controlled AI content generation.",
   "main": "index.js",
-  "directories": { "test": "tests" },
+  "directories": {
+    "test": "tests"
+  },
   "scripts": {
     "test:v2.11": "node tests/v2.11-sphere-motion-master-test.js",
     "test:v2.10.3": "node tests/v2.10.3-cross-shot-continuity-test.js && node tests/v2.10.3-dashboard-continuity-ui-test.js && node tests/v2.10.3-dashboard-quality-recovery-wiring-test.js",
@@ -83,9 +85,15 @@
     "test:v2.1:master-renderer": "node tests/v2.1-ffmpeg-master-renderer-test.js",
     "test:v2.1:replicate-video": "node tests/v2.1-replicate-wan-video-adapter-test.js",
     "test:v2.1:replicate-master": "node tests/v2.1-replicate-master-integration-test.js",
-    "test:v2.2:growth-foundation": "node tests/v2.2-growth-foundation-test.js && node tests/v2.2-brand-brain-opportunity-test.js"
+    "test:v2.2:growth-foundation": "node tests/v2.2-growth-foundation-test.js && node tests/v2.2-brand-brain-opportunity-test.js",
+    "test:provider-readiness": "node tests/replicate-file-transport-test.js && node tests/provider-contract-audit-regression-test.js && node tests/prompt-budget-regression-test.js && node tests/production-readiness-test.js && node tests/provider-rejection-recovery-test.js"
   },
-  "keywords": ["content-factory", "ai", "pipeline", "production"],
+  "keywords": [
+    "content-factory",
+    "ai",
+    "pipeline",
+    "production"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",

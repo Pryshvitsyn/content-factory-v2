@@ -142,6 +142,8 @@ async function main() {
     if (ttsAttempts === 1) return response({ status: 429, json: { detail: 'synthetic rate limit' } });
     return response({ bytes: Buffer.from('mock-audio'), headers: { 'request-id': 'tts-1', 'character-cost': '12' } });
   } });
+  await assert.rejects(() => tts.generate({ capability: 'speech-generation', model: 'eleven_v3', prompt: JSON.stringify({generation_requirements:{text:'Approved spoken copy.',voice_id:'voice-synthetic'}}) }));
+  assert.equal(ttsAttempts, 1, 'one POST only; a subsequent call here represents a separate explicit request');
   const speech = await tts.generate({ capability: 'speech-generation', model: 'eleven_v3',
     prompt: JSON.stringify({ description: 'fallback', generation_requirements: { text: 'Approved spoken copy.', voice_id: 'voice-synthetic', language: 'en' } }) });
   assert.equal(ttsAttempts, 2);

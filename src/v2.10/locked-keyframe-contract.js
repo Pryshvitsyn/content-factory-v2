@@ -82,6 +82,12 @@ function buildKeyframeStagePlan({ draft, shotId, selection: rawSelection, semant
     ] },
     humanApprovalRequired: true, autoPublish: false,
   };
+  if (imageCalls) {
+    plan.providerRequest = require('../v2.8/provider-request-compiler').compileAuxiliaryRequest({
+      asset: { description: plan.prompt, generation_requirements: { prompt: plan.prompt,
+        size: selection.resolvedSettings?.size || '1024x1536', quality: selection.resolvedSettings?.quality || 'high' } },
+      capability: 'image-generation', provider: selection.provider, model: selection.model }).summary;
+  }
   plan.fingerprint = fingerprint(plan);
   return freeze(plan);
 }
@@ -118,6 +124,7 @@ function buildFirstVideoStagePlan({ draft, canonical, keyframe, executionAsset, 
     || reference.contentHash !== identity.contentHash || reference.storageKey !== identity.storageKey) {
     throw new LockedKeyframeError('KEYFRAME_REFERENCE_MISMATCH', 'Prepared video does not reference the exact approved keyframe version');
   }
+  const referenceUploads = executionAsset.generation_requirements?.provider_request_preflight?.transportPlan?.uploadCalls ?? 0;
   const plan = {
     schemaVersion: 'locked-keyframe/1', stage: STAGES.FIRST_VIDEO, draftId: draft.id,
     draftRevision: Number(draft.revision), productionId: keyframe.production_id,
@@ -131,7 +138,7 @@ function buildFirstVideoStagePlan({ draft, canonical, keyframe, executionAsset, 
     capability: executionAsset.generation_requirements?.capability,
     resolvedSettings: executionAsset.generation_requirements?.resolved_settings || {},
     externalCalls: { imageGeneration: 0, video: 1, semanticVideoEvaluation: 1, semanticRetries: 0,
-      voice: 0, continuity: 0, renderer: 0, maximum: 2, alreadyMade: 0 },
+      voice: 0, continuity: 0, renderer: 0, referenceUploads, maximum: 2 + referenceUploads, alreadyMade: 0 },
     cost: { knownUsd: null, status: 'UNKNOWN', unknownComponents: [
       `${executionAsset.generation_requirements?.provider}/${executionAsset.generation_requirements?.model} video generation`,
       `${semantic.provider || 'configured-semantic-provider'}/${semantic.model || 'configured-semantic-model'} video evaluation`,

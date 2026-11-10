@@ -1,439 +1,63 @@
 # Content Factory V2
 
-A controlled production system for AI-assisted content generation.
+## What it is
+A multi-brand, provider-neutral system for producing advertising videos with durable execution, immutable media artifacts, quality gates and explicit human review.
 
-## Start Content Factory
+## Current status
+Development / live-pilot validation. Implementation exists; a completed, accepted MP4 for the current pilot is not verified. See [PRODUCT_SNAPSHOT.md](PRODUCT_SNAPSHOT.md) for current evidence and next action.
 
-For normal local operation, use the Dashboard:
+## Stack
+Node.js 22, PostgreSQL, React 19 / Vite, FFmpeg / ffprobe; capability-routed media providers and configurable artifact storage.
 
-```bash
-LIVE_PAID_GENERATION=false npm run dashboard:local
-```
-
-Open `http://127.0.0.1:3000`, then:
-
-```text
-New Production
-  → Choose Brand
-  → Choose FAST or QUALITY
-  → Enter creative brief
-  → Preflight (zero generation calls)
-  → Start Production (separate explicit action)
-  → Watch durable progress
-  → Preview immutable master
-  → Approve / Reject / Regenerate
-```
-
-Approval does not publish. Every Dashboard production requires human approval and has auto publication disabled. A real external production requires restarting the local Dashboard with `LIVE_PAID_GENERATION=true` and the existing provider/renderer configuration; opening the Dashboard alone never starts generation. See [`docs/V2.7-OPERATOR-CONSOLE.md`](docs/V2.7-OPERATOR-CONSOLE.md).
-
-QUALITY production now defaults to STANDARD and uses independent source technical, visual, temporal, creative, final-master, and human-review gates. STANDARD/PREMIUM fail closed before paid generation when semantic visual QA is not configured; ECONOMY remains available as an explicit DRAFT tier. See [`docs/V2.9-WORLD-CLASS-VISUAL-QUALITY.md`](docs/V2.9-WORLD-CLASS-VISUAL-QUALITY.md).
-
-V2.9.1 supplies a real, configurable OpenAI semantic visual critic behind that provider-neutral gate, with strict structured output, independent paid authorization, bounded retries/timeouts, cost-aware source/final policy, and visible call accounting. See [`docs/V2.9.1-REAL-SEMANTIC-VISUAL-EVALUATION.md`](docs/V2.9.1-REAL-SEMANTIC-VISUAL-EVALUATION.md).
-
-V2.9.2 adds a universal media stack with explicit provider model families, provider-specific capability/configuration status, unlocked presets, native/external/hybrid audio ownership, optional ElevenLabs TTS, direct durable Alibaba Wan 3 execution, and provider-specific pricing provenance. See [`docs/V2.9.2-UNIVERSAL-MEDIA-STACK.md`](docs/V2.9.2-UNIVERSAL-MEDIA-STACK.md).
-
-## Current Status
-
-- **Architecture:** V2
-- **Development line:** V2.1
-- **Stable branch:** `main`
-- **Primary text provider:** NVIDIA-first
-- **Database:** PostgreSQL
-- **Runtime:** Node.js 22
-
-V2 is built as a durable execution system rather than a single AI script. Production state, stage state, attempts, ownership, artifacts, validation, provider routing, storage, and publication state are explicit and persistent.
-
-## What Is Implemented
-
-The current `main` branch contains a certified execution foundation plus the first real content-production layers.
-
-### Execution foundation
-
-- PostgreSQL-backed production/job/stage state
-- deterministic canonical stage ordering
-- attempts and retry handling
-- concurrent job/stage ownership
-- lease fencing and stale-owner protection
-- crash/recovery paths
-- heartbeat support for long-running stages
-- stage input propagation and input fingerprints
-
-### Provider boundary
-
-```text
-Production Stage
-      ↓
-Provider Gateway / Routing
-      ↓
-Provider Adapter
-      ↓
-Normalized Provider Result
-```
-
-Provider-specific logic stays behind the gateway/adapter boundary. The registry supports capability-aware selection, provider availability, explicit providers, priorities, and fallbacks. Additional providers can be added without changing the execution contract.
-
-### Artifact and storage layer
-
-- immutable artifact versions
-- deterministic artifact idempotency
-- artifact provenance
-- storage adapter boundary
-- durable input hydration between stages
-- PostgreSQL system truth plus external artifact storage
-
-### Validation and publication
-
-- explicit validation records and publication gates
-- database-backed publication idempotency
-- duplicate-publication protection under concurrency
-- durable `UNKNOWN` publication state
-- reconciliation of ambiguous external publication outcomes
-
-### Master video production
-
-The repository includes an executable social-video production path from approved structured plans to a real MP4 master. QUALITY productions can export either vertical 9:16 (1080×1920) or horizontal 16:9 (1920×1080); FAST renderer support remains vertical 9:16 only:
-
-- provider-routed image, video and speech generation;
-- deterministic media timeline;
-- FFmpeg render with synchronized video and audio;
-- editorial and technical quality checks;
-- immutable master artifact;
-- mandatory human review before publication.
-
-The default composition uses NVIDIA for text/video and can use OpenAI for image/speech when configured. Missing capabilities fail closed; the factory does not substitute placeholder media. See [`docs/V2.1-MASTER-PRODUCTION.md`](docs/V2.1-MASTER-PRODUCTION.md).
-
-Replicate Wan 2.2 T2V Fast is also available as a real video provider. Set `VIDEO_PROVIDER=replicate` with `REPLICATE_API_TOKEN` to prefer it while keeping NVIDIA Cosmos registered as an alternative. See [`docs/V2.1-REPLICATE-WAN-VIDEO.md`](docs/V2.1-REPLICATE-WAN-VIDEO.md).
-
-## Real Production Pipeline
-
-The canonical V2.1 production graph is:
-
-```text
-SIGNAL
-  ↓
-IDEA
-  ↓
-BRIEF
-  ↓
-BIBLE
-  ↓
-CONCEPT
-  ↓
-SCRIPT
-  ↓
-SHOT_PLAN
-  ↓
-ASSET_PLAN
-  ↓
-ASSETS
-  ↓
-EDIT
-  ↓
-PLATFORM_ADAPTATION
-  ↓
-VALIDATION
-  ↓
-PUBLISH
-  ↓
-ANALYZE
-  ↓
-LEARN
-```
-
-The first real vertical production slice is implemented through `SCRIPT`. Structured production planning then extends the pipeline through `SHOT_PLAN` and `ASSET_PLAN`.
-
-Continuity is currently represented as a required structured object in the shot plan rather than as a separate database stage. This keeps the canonical stage graph stable while making continuity constraints explicit and machine-checkable.
-
-## Structured Production Planning
-
-Planning outputs are no longer treated as arbitrary free-form text for the structured stages.
-
-```text
-SCRIPT
-  ↓
-SHOT_PLAN
-  ├── shots
-  └── continuity
-        ↓
-ASSET_PLAN
-  └── assets
-```
-
-The structured contracts validate required fields and cross-stage references before a stage can complete. This is the content-plane foundation for downstream asset generation and rendering.
-
-## Asset Orchestrator
-
-The current asset layer is reuse-first:
-
-```text
-ASSET_PLAN
-    ↓
-Find reusable asset
-    ├── found → reuse
-    └── missing
-          ↓
-      Provider routing
-          ↓
-       Generate
-          ↓
- Immutable artifact version
-          ↓
- Durable asset registry
-```
-
-The asset orchestrator is capability-aware for text, image, video, voice, and audio. It uses deterministic idempotency keys and the existing immutable Artifact Service. Existing reusable assets are selected before generation; missing assets are generated through the Provider Gateway.
-
-The architecture does **not** claim that every media provider is already connected. The orchestrator provides the production boundary so concrete image/video/voice/audio adapters can be added independently.
-
-## Production Readiness and Remaining Work
-
-The repository contains a durable video-ad production path, configured provider adapters, explicit 9:16/16:9 QUALITY
-master profiles, FFmpeg rendering, technical and perceptual validation, immutable artifacts, and human review. This
-is a production workflow implementation; it is not proof that a particular local installation has working database
-connectivity, credentials, model access, storage capacity, or acceptable creative output. A live pilot must pass the
-operator preflight and the real media, audio, final-master, and human-review checks before it can be called ready.
-
-Current limits that remain visible to the operator:
-
-1. Provider support is capability- and credential-specific. Not every catalog entry is configured or verified with a live account, and the system does not silently switch providers.
-2. The V2.10 locked-opening-keyframe pilot is portrait 9:16 only; the standard QUALITY production supports 9:16 and 16:9.
-3. Audio quality still needs human listening for intelligibility, clipping, loudness, masking, and natural delivery; current automated gates do not claim all of these checks.
-4. TikTok/YouTube delivery is MP4 export for manual upload. Direct channel OAuth, upload, scheduling, and post-publication analytics are not implemented.
-5. Automatic publishing and automatic promotion/certification remain disabled by policy.
-6. Product-specific brand truth, rights to media/voices, factual claims, and final ad quality require review by the operator.
-
-Schemas, catalog entries, and passing mocked tests do not count as proof of a live provider run. Record the exact
-provider/model, cost boundary, output artifact, validation evidence, and human decision for each pilot.
-
-See [the open-source video ad factory comparison](docs/OPEN-SOURCE-VIDEO-AD-FACTORY-COMPARISON.md) for a code-backed
-feature map against relevant public projects and the acceptance evidence required for the first real ad.
-
-## Provider Architecture
-
-```text
-Execution / Orchestrator
-        ↓
-Provider Gateway
-        ↓
-Capability-aware routing
-        ↓
-Provider Registry
-        ↓
-NVIDIA / OpenAI / Claude / other enabled adapters
-        ↓
-Normalized Provider Result
-```
-
-The Factory is intentionally provider-agnostic at the execution boundary. One stage may use one model while another stage uses a different provider or model according to capability, availability, routing policy, cost, or quality requirements.
-
-See [`docs/PROVIDER-CONTRACT-V2.1.md`](docs/PROVIDER-CONTRACT-V2.1.md).
-
-## Artifact Architecture
-
-Artifacts are independent from execution state and are immutable.
-
-```text
-Artifact
-   ├── Version 1
-   ├── Version 2
-   └── Version 3
-```
-
-Regeneration creates a new version instead of destructively overwriting a previous result. Deterministic idempotency keys protect the system from duplicate artifact creation during retries or concurrent execution.
-
-## Storage
-
-Storage is accessed through an adapter boundary rather than directly from business logic.
-
-- PostgreSQL stores durable system truth and metadata.
-- Large artifact bytes are stored through the configured storage backend.
-- The adapter boundary supports filesystem development and future S3-compatible, MinIO, NAS, or cloud storage backends without changing artifact semantics.
-
-See:
-
-- [`docs/STORAGE-ARCHITECTURE.md`](docs/STORAGE-ARCHITECTURE.md)
-- [`docs/STORAGE-ADAPTER-V2.1.md`](docs/STORAGE-ADAPTER-V2.1.md)
-
-## Database
-
-V2.1 uses PostgreSQL as the source of truth for execution and production state.
-
-Important durable concepts include:
-
-```text
-productions
-jobs
-stage_definitions
-stage_runs
-attempts / retry state
-artifacts / artifact versions
-validation state
-publication state
-asset registry
-provider configuration
-```
-
-All schema changes must be represented by migrations. Production behavior must not depend on undocumented schema changes.
-
-The canonical stage contract is defined in [`worker/v2.1-production-contract.js`](worker/v2.1-production-contract.js).
-
-## Testing and Certification
-
-Install dependencies:
-
+## Run
 ```bash
 npm ci
+# Configure a local .env using .env.example; never commit credentials.
+LIVE_PAID_GENERATION=false npm run dashboard:local
 ```
+Requires the configured local PostgreSQL database and artifact storage. The local runner prepares the schema and checks readiness; inspect its migration behavior before using an existing database. See [operator setup](docs/V2.7-OPERATOR-CONSOLE.md) and [local runtime](docs/V2.3-CONTROL-DASHBOARD.md).
 
-`npm test` is an operator-invoked live smoke test, not a CI-safe unit test. It requires a prepared local `content_os`, a real `NVIDIA_API_KEY`, and an enabled NVIDIA model; its worker may make a billable provider request. Review the configured database and provider boundary before running it:
+QUALITY workflow: Brand / Idea → approved Script → approved Storyboard → Visual Lock → approved Pilot → remaining shots → Master Review. See [script-first workflow](docs/QUALITY-SCRIPT-FIRST-WORKFLOW.md). Preflight and Start are separate actions; approval does not publish.
 
+## Test
+Safe local entry points after dependency installation:
 ```bash
-npm test
-```
-
-GitHub CI does not execute this live smoke command and never receives provider credentials. It checks the smoke-test source syntax and runs the mocked/local certification suites below instead.
-
-Run the V2.1 contract suite:
-
-```bash
+LIVE_PAID_GENERATION=false node tests/quality-script-first-test.js
+LIVE_PAID_GENERATION=false node tests/v2.10-runtime-integration-test.js
 npm run test:v2.1
-```
-
-CI also verifies runtime syntax, provider routing, artifact/storage integration, multi-stage execution, PostgreSQL lifecycle, retries and recovery, concurrency ownership, lease fencing, artifact idempotency, crash recovery, reconciliation, validation, publication, structured production planning, and asset orchestration.
-
-## V2.7 Operator Production Console
-
-V2.7 makes the localhost Dashboard the primary operator interface. It builds canonical V2.6 production requests from a simple form, loads safe Brand Brain context, runs mandatory zero-generation preflight, and routes an explicit Start through the same production runtime used by the CLI. Durable PostgreSQL state survives browser refresh/closure, and retry is kept distinct from immutable whole-production regeneration.
-
-```bash
-npm run test:v2.7
+npm run test:provider-readiness
 npm run dashboard:build
 ```
+Run affected suites from [package.json](package.json) and relevant CI workflows. PostgreSQL suites require a prepared test database. `npm test` is an operator-invoked live smoke test that may incur provider cost; it is not the default unit-test command. Mock tests do not certify a live production.
 
-See [`docs/V2.7-OPERATOR-CONSOLE.md`](docs/V2.7-OPERATOR-CONSOLE.md) for architecture, local startup, provider boundaries, recovery, and controlled real certification.
+## Deploy / URLs
+No production or staging service URL is verified in this handoff. Run locally using the command above; a frontend build alone does not deploy the full system. Prepare and verify deployment configuration before an explicitly authorized release under [AGENTS.md](AGENTS.md).
 
-## V2.3 Control Dashboard
+- Dashboard: http://127.0.0.1:3000 (when running).
+- API: http://127.0.0.1:3001 (default loopback binding).
+- Repository: https://github.com/Pryshvitsyn/content-factory-v2
+- Final MP4 export is available for manual upload; direct channel publishing, scheduling and analytics are not implemented.
 
-The local Control Dashboard exposes persisted brand, production, stage, artifact, review and provider state through a thin Node API and five-screen React interface. Exact immutable master versions can be approved or rejected without publishing them.
+## Structure
+| Path | Owns |
+| --- | --- |
+| `apps/dashboard/` | Operator UI and local API |
+| `src/` | Production, providers, artifacts, storage and validation |
+| `worker/` | Canonical execution contracts and workers |
+| `migrations/` | Versioned persistent schema changes |
+| `config/`, `schemas/` | Production inputs and schemas |
+| `scripts/`, `tests/` | Runtime tools and verification |
+| `docs/` | Existing architecture, contracts and workflow details |
 
-After applying the V2.3 review migration to a development database, use the placeholder-safe local runner:
+## Project brain
+- [GOAL.md](GOAL.md): destination and milestone proof.
+- [PRODUCT_SNAPSHOT.md](PRODUCT_SNAPSHOT.md): current state only.
+- [TASKS.md](TASKS.md): executable work.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): existing architecture entry point; later implementation details live in the versioned documents below.
+- [Provider contract](docs/PROVIDER-CONTRACT-V2.1.md), [storage](docs/STORAGE-ARCHITECTURE.md), [universal media](docs/V2.9.2-UNIVERSAL-MEDIA-STACK.md), [continuity](docs/V2.10.3-CROSS-SHOT-CONTINUITY-GATE.md).
 
-```bash
-npm install
-npm run dashboard:local
-```
+## Agent rules
+See [AGENTS.md](AGENTS.md). Existing workflow decisions remain in their authoritative documents; no parallel decision log, architecture copy, role files or skills are created without a concrete need.
 
-Open `http://127.0.0.1:3000`. The API binds to `127.0.0.1:3001` by default. The runner discovers `content_os`, uses the production artifact root, validates schema readiness, and rejects placeholder database URLs or occupied ports safely. See [`docs/V2.3-CONTROL-DASHBOARD.md`](docs/V2.3-CONTROL-DASHBOARD.md).
-
-## V2.4 Controlled Live Production
-
-V2.4 adds one CLI-only, operator-invoked path for a minimal Replicate video → immutable media → FFmpeg master → validation → V2.3 Review Queue run. It is never called by dashboard startup, tests, CI, migrations or workers. Live execution requires the explicit `LIVE_PAID_GENERATION=true` gate; `false` performs a non-paid dry-run. See [`docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md`](docs/V2.4-CONTROLLED-LIVE-PRODUCTION.md).
-
-For a legacy local Content OS database, `npm run live:production:local` first applies the deterministic row-preserving compatibility bridge and then runs the full pre-paid schema/write/storage gate. Schema ownership and recovery details are documented in [`docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md`](docs/V2.4-LEGACY-SCHEMA-COMPATIBILITY.md).
-
-## V2.5 Reusable Real Content Production
-
-V2.5 accepts an external creative brief with variable-count shots and voiceover, tracks every paid media asset behind its own durable idempotency/reconciliation fence, assembles a real FFmpeg video+audio master, validates media streams, and sends the exact immutable master to human review.
-
-Safe local pre-paid plan (provider calls remain zero):
-
-```bash
-LIVE_PAID_GENERATION=false \
-REAL_PRODUCTION_INPUT=config/productions/attune-dont-guess-tune-in.json \
-VIDEO_PROVIDER=replicate AUDIO_PROVIDER=openai-media \
-npm run real:production:local
-```
-
-See [`docs/V2.5-REAL-CONTENT-PRODUCTION.md`](docs/V2.5-REAL-CONTENT-PRODUCTION.md) for the operator contract, recovery states, paid boundary, and certification commands.
-
-## V2.6 FAST Rendering
-
-V2.6 adds an explicit renderer router. Existing inputs remain on the unchanged `QUALITY` lane; new `FAST` inputs can use a pinned external MoneyPrinterTurbo service. FAST output is copied into the same immutable artifact store, validated with ffprobe, and registered in the same human Review Queue. No FAST job is started by dry-run or CI.
-
-```bash
-LIVE_PAID_GENERATION=false \
-REAL_PRODUCTION_INPUT=config/productions/attune-fast-example.json \
-RENDER_MODE=FAST FAST_RENDERER=moneyprinterturbo \
-MPT_ENABLED=true MPT_BASE_URL=http://127.0.0.1:8080 \
-MPT_AUTO_PUBLISH_DISABLED=true \
-npm run real:production:local
-```
-
-See [`docs/V2.6-FAST-RENDERING.md`](docs/V2.6-FAST-RENDERING.md) for the pinned upstream API/image, localhost companion, recovery rules, safe dry-run, and operator-controlled real command.
-
-## Environment
-
-Create a local `.env` from `.env.example`.
-
-```text
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/content_os
-NVIDIA_API_KEY=your_nvidia_api_key_here
-```
-
-Never commit `.env`, API keys, database passwords, credentials, or generated secrets.
-
-## Repository Structure
-
-```text
-content-factory-v2/
-├── .github/workflows/       # CI
-├── apps/dashboard/          # V2.3 browser UI and local Control API
-├── docs/                    # architecture and contract documents
-├── migrations/              # versioned PostgreSQL changes
-├── src/                     # provider, artifact, storage and validation services
-├── worker/                  # V2.1 execution and orchestration workers
-├── tests/                   # smoke, contract, integration and certification tests
-├── build-v2.sh              # controlled V2 build
-├── package.json
-├── package-lock.json
-├── .env.example
-├── .gitignore
-└── README.md
-```
-
-## Development Rules
-
-1. `main` is the stable V2 line.
-2. Development happens on dedicated branches.
-3. Database changes require migrations.
-4. Certified execution boundaries are changed deliberately and re-certified.
-5. Provider-specific logic stays behind provider boundaries.
-6. Artifacts are immutable; revisions create new versions.
-7. Validation is recorded separately from production output.
-8. Secrets never enter Git.
-9. Every meaningful change must pass CI before it is considered certified.
-10. Architecture and contracts in `docs/` and canonical runtime contracts must stay synchronized with implementation.
-
-## Roadmap to a Full Media Factory
-
-The remaining path is intentionally ordered from production semantics to media output:
-
-1. concrete media provider adapters;
-2. production-scale asset generation;
-3. continuity enforcement and asset reuse improvements;
-4. deterministic edit manifest;
-5. media assembly and rendering;
-6. platform adaptation;
-7. objective QA and human approval;
-8. publication operations;
-9. analytics and learning feedback.
-
-The goal is not merely to execute jobs reliably. The goal is a Factory that can accept a production request, create coherent structured plans, resolve or generate the required assets, assemble them into a finished result, validate that result, and publish it with durable provenance and recovery semantics.
-
-## Security
-
-Never commit:
-
-- `.env`
-- API keys
-- database passwords
-- production credentials
-- generated secrets
-- local backups
-- private data
-
-Use `.env.example` as the safe configuration template.
-
-## License
-
-No open-source license has been selected yet. Public visibility does not grant permission to reuse or redistribute the code beyond rights granted by applicable law.
+## Security / license
+Never commit secrets, private data or populated environment files. No open-source license has been selected; public visibility alone does not grant reuse or redistribution rights. The package metadata license field is not a substitute for an approved repository license.

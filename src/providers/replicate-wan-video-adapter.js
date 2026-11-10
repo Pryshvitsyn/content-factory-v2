@@ -155,6 +155,7 @@ class ReplicateWanVideoAdapter {
       }
       if (!response.ok) {
         lastError = providerError(`Replicate request failed with HTTP ${response.status}: ${payload?.detail || payload?.error || 'unknown error'}`, 'REPLICATE_HTTP_ERROR', { model: this.model, cause: payload });
+        lastError.httpStatus = response.status;
         if (retryable && (response.status === 429 || response.status >= 500) && attempt < this.maxHttpRetries) {
           await this.sleep(this.pollIntervalMs);
           continue;
@@ -211,13 +212,19 @@ class ReplicateWanVideoAdapter {
         method: 'GET',
         headers: { Authorization: headers.Authorization, Accept: 'application/json' },
       }, { retryable: true });
-      if (!prediction.id || typeof prediction.status !== 'string') {
+      if (prediction.id !== predictionId || typeof prediction.status !== 'string') {
         throw providerError('Replicate polling returned a malformed prediction', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model, predictionId });
       }
     }
 
     if (prediction.status === 'failed') {
-      throw providerError(`Replicate prediction failed: ${prediction.error || 'unknown error'}`, 'REPLICATE_PREDICTION_FAILED', { model: this.model, predictionId, cause: prediction.error });
+      const error = providerError(`Replicate prediction failed: ${prediction.error || 'unknown error'}`, 'REPLICATE_PREDICTION_FAILED', { model: this.model, predictionId, cause: prediction.error });
+      const privacy = String(prediction.error || '').includes('InputImageSensitiveContentDetected.PrivacyInformation');
+      error.details = { providerExecutionOutcome: 'TERMINAL_FAILURE', providerStatus: 'failed', requestId: predictionId,
+        failureKind: privacy ? 'REFERENCE_PRIVACY_REFUSAL' : 'GENERATION_FAILED',
+        ...(privacy ? { providerErrorCode: 'InputImageSensitiveContentDetected.PrivacyInformation',
+          operatorAction: 'REVIEW_REFERENCE_ELIGIBILITY', automaticRetryAllowed: false } : {}) };
+      throw error;
     }
     if (CANCELED_STATUSES.has(prediction.status)) {
       throw providerError(`Replicate prediction ${prediction.status}`, 'REPLICATE_PREDICTION_CANCELED', { model: this.model, predictionId });
@@ -243,7 +250,7 @@ class ReplicateWanVideoAdapter {
         model: this.model,
         predictionId,
         origin: 'replicate-api',
-        ...(input ? { input } : {}),
+        ...(input ? { input: require('./request-evidence').redactInlineMedia(input) } : {}),
         outputUrl: mediaUrl,
         idempotencyKey: idempotencyKey || null,
       },
@@ -261,16 +268,26 @@ class ReplicateWanVideoAdapter {
       'Cancel-After': `${Math.max(5, Math.ceil(this.timeoutMs / 1000))}s`,
     };
     const predictionUrl = `${this.baseURL}/models/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/predictions`;
-    let prediction = await this.requestJson(predictionUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ input }),
-    });
-    if (!prediction.id || typeof prediction.status !== 'string') {
-      throw providerError('Replicate prediction response is missing id or status', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model });
+    let prediction;
+    try {
+      prediction = await this.requestJson(predictionUrl, {
+        method: 'POST', headers, body: JSON.stringify({ input }),
+      });
+    } catch (error) {
+      // Only an explicit validation rejection of the creation POST proves no prediction was created.
+      if (error.code === 'REPLICATE_HTTP_ERROR' && [400,422].includes(error.httpStatus) && !error.cause?.id) {
+        error.details = { httpStatus: error.httpStatus, operation: 'CREATE_PREDICTION',
+          providerExecutionOutcome: 'REJECTED_BEFORE_CREATION' };
+      }
+      throw error;
     }
-    if (onProviderRequest) await onProviderRequest({ requestId: prediction.id, status: prediction.status, provider: 'replicate', model: this.model });
-    return this.finishPrediction({ prediction, headers, input, idempotencyKey });
+    if (!prediction.id) throw providerError('Replicate prediction response is missing id', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model });
+    try {
+      if (onProviderRequest) await onProviderRequest({ requestId: prediction.id, status: prediction.status || 'unknown', provider: 'replicate', model: this.model });
+      if (typeof prediction.status !== 'string') throw providerError('Replicate prediction response is missing status', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model, predictionId: prediction.id });
+      return await this.finishPrediction({ prediction, headers, input, idempotencyKey });
+    }
+    catch (error) { error.predictionId = error.predictionId || prediction.id; throw error; }
   }
 
   async recover({ capability, model, requestId } = {}) {
@@ -280,23 +297,25 @@ class ReplicateWanVideoAdapter {
     if (!this.apiToken) throw providerError('REPLICATE_API_TOKEN is required for video recovery', 'REPLICATE_TOKEN_REQUIRED', { model: this.model });
     if (!requestId || typeof requestId !== 'string') throw providerError('Replicate requestId is required for recovery', 'REPLICATE_REQUEST_ID_REQUIRED', { model: this.model });
     const headers = { Authorization: `Bearer ${this.apiToken}`, Accept: 'application/json' };
+    try {
     const prediction = await this.requestJson(`${this.baseURL}/predictions/${encodeURIComponent(requestId)}`, {
       method: 'GET', headers,
     }, { retryable: true });
     if (!prediction.id || prediction.id !== requestId || typeof prediction.status !== 'string') {
       throw providerError('Replicate recovery returned a malformed prediction', 'REPLICATE_MALFORMED_RESPONSE', { model: this.model, predictionId: requestId });
     }
-    return this.finishPrediction({ prediction, headers });
+    return await this.finishPrediction({ prediction, headers });
+    } catch (error) { error.predictionId ||= requestId; throw error; }
   }
 
   async generate({ capability, prompt, model, idempotencyKey, ...options } = {}) {
     if (!this.supports({ capability, model })) {
       throw providerError(`Replicate Wan does not support capability '${capability}'`, 'REPLICATE_CAPABILITY_UNSUPPORTED', { model: model || this.model });
     }
-    const parsed = parseGenerationPrompt(prompt);
+    const parsed = options.canonicalRequest ? { prompt: options.canonicalRequest.providerPrompt, requirements: {} } : parseGenerationPrompt(prompt);
     const canonicalRequest = options.canonicalRequest || null;
     const requirements = parsed.requirements;
-    const input = buildWanInput({
+    const input = canonicalRequest ? require('../v2.8/provider-request-compiler').compileVideoRequest(canonicalRequest, { endpoint: `${this.baseURL}/models/${this.model}/predictions` }).payload.input : buildWanInput({
       prompt: canonicalRequest?.providerPrompt || options.videoPrompt || parsed.prompt,
       resolution: canonicalRequest?.resolution ?? options.resolution ?? requirements.resolution ?? '720p',
       aspectRatio: canonicalRequest?.aspectRatio ?? options.aspectRatio ?? options.aspect_ratio ?? requirements.aspect_ratio ?? requirements.aspectRatio ?? '9:16',

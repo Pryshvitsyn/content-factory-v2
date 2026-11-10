@@ -1,5 +1,7 @@
 'use strict';
 
+const { isDeepStrictEqual } = require('node:util');
+
 const DEFAULT_NEGATIVE_INTENT = Object.freeze({
   composition: Object.freeze({ coherentFullFrame: true, singleCameraView: true,
     prohibitedLayouts: Object.freeze(['split-screen', 'diptych', 'triptych', 'quadrants', 'collage', 'storyboard', 'contact-sheet', 'picture-in-picture', 'divided-panels']) }),
@@ -26,24 +28,32 @@ function canonicalGuidance(intent = DEFAULT_NEGATIVE_INTENT) {
   return statements.join(' ');
 }
 
-function translateProviderPrompt({ canonicalPrompt, negativeIntent = DEFAULT_NEGATIVE_INTENT, provider, model } = {}) {
+function translateProviderPrompt({ canonicalPrompt, negativeIntent = DEFAULT_NEGATIVE_INTENT, provider, model, capability, promptCompilerVersion } = {}) {
   const base = String(canonicalPrompt || '').trim();
   if (!base) throw new Error('canonicalPrompt is required');
   const shared = canonicalGuidance(negativeIntent);
-  const providerInstruction = {
-    replicate: 'Wan instruction: treat this as one continuous cinematic shot, never a montage or layout.',
-    fal: 'Seedance instruction: preserve a single continuous scene and stable subject identity.',
-    runway: 'Runway instruction: use one uninterrupted camera composition with no graphic overlays.',
-    google: 'Veo instruction: maintain one coherent cinematic world and exclude typography or interface elements.',
-    luma: 'Luma instruction: keep a single full-frame camera view with continuous geometry.',
-  }[String(provider || '').toLowerCase()] || 'Provider instruction: preserve one coherent full-frame scene.';
+  const family = /(?:wan[-/]|wan3)/i.test(model || '') ? 'Wan'
+    : /seedance/i.test(model || '') ? 'Seedance'
+    : /^gen4/.test(model || '') ? 'Runway'
+    : /^veo/.test(model || '') ? 'Veo'
+    : /^ray-/.test(model || '') ? 'Luma' : null;
+  const video = !capability || /VIDEO/.test(capability);
+  // This compact rendering is allowed only for the versioned shot compiler
+  // and the exact default policy. Custom policy and historical inputs retain
+  // their existing translation; never discard custom instructions to fit.
+  const compact = video && promptCompilerVersion === 'shot/4'
+    && isDeepStrictEqual(negativeIntent, DEFAULT_NEGATIVE_INTENT);
+  const compactGuidance = 'One full-frame take; safe margins. No panels, text, bad anatomy or duplicate subjects; copy in post.';
+  const providerInstruction = video && family
+    ? `${family} instruction: render one continuous cinematic shot; preserve the specified shot states, action and continuous geometry.` : '';
   return Object.freeze({
     canonicalPrompt: base,
-    providerPrompt: `${base}\n\nProduction constraints: ${shared} ${providerInstruction}`.trim(),
+    providerPrompt: compact ? `${base}\n${compactGuidance}`
+      : video ? `${base}\n\nProduction constraints: ${shared} ${providerInstruction}`.trim() : base,
     provider: String(provider || '').toLowerCase() || null,
     model: model || null,
     negativeIntent: structuredClone(negativeIntent),
-    adapterVersion: 'v2.9',
+    adapterVersion: compact ? 'provider-prompt/3' : 'provider-prompt/2',
   });
 }
 

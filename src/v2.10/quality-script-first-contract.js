@@ -123,7 +123,7 @@ function canonicalCamera(raw, legacy = {}) {
       framing: text(raw.framing) || text(legacy.framing),
       angle: text(raw.angle),
       movement: text(raw.movement) || text(legacy.camera),
-      lensIntent: text(raw.lensIntent) || text(legacy.lensComposition),
+      lensIntent: text(raw.lensIntent),
       composition: text(raw.composition) || text(legacy.lensComposition),
     });
   }
@@ -131,7 +131,7 @@ function canonicalCamera(raw, legacy = {}) {
     framing: text(legacy.framing),
     angle: '',
     movement: text(raw) || text(legacy.camera),
-    lensIntent: text(legacy.lensComposition),
+    lensIntent: '',
     composition: text(legacy.lensComposition),
   });
 }

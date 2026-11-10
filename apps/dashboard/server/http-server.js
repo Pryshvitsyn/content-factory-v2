@@ -15,8 +15,31 @@ function json(response, status, payload) {
 
 function safeErrorDetails(error) {
   const validation = error?.details?.validation || error?.details?.quality;
-  if (!validation) return undefined;
-  return { validation, providerExecutions: Number(error.details?.providerExecutions || 0) };
+  const batch = error?.details?.providerPreflight;
+  const details = validation ? { validation, providerExecutions: Number(error.details?.providerExecutions || 0) } : {};
+  if (batch && Array.isArray(batch.results)) {
+    // Explicit allowlist: never serialize prompts, credentials, reference URLs/bytes or raw payloads.
+    const textFields = ['assetId','kind','provider','model','status','code','unit','promptLimitUnit','promptLimitSource','promptSha256','resolution','capability'];
+    const numberFields = ['actual','maximum','promptCharacters','canonicalPromptCharacters','promptLimit','promptLengthActual','durationSeconds'];
+    details.providerPreflight = {
+      checkedAssets: batch.results.length,
+      blockedAssets: batch.results.filter(row => row.status === 'BLOCKED').length,
+      results: batch.results.map(row => {
+        const out = {};
+        for (const key of textFields) if (typeof row[key] === 'string') out[key] = row[key].slice(0,512);
+        for (const key of numberFields) if (Number.isFinite(row[key])) out[key] = row[key];
+        if (Array.isArray(row.sourceSections)) out.sourceSections = row.sourceSections.map(section => ({
+          field: String(section.field || '').slice(0,80), characters: Number.isFinite(section.characters) ? section.characters : null }));
+        return out;
+      }),
+    };
+    details.providerExecutions = Number(error.details?.providerExecutions || 0);
+  }
+  for (const field of ['failureKind','providerErrorCode','providerStatus','requestId','operatorAction','providerExecutionOutcome']) {
+    if (typeof error.details?.[field] === 'string') details[field] = error.details[field].slice(0,512);
+  }
+  if (typeof error.details?.automaticRetryAllowed === 'boolean') details.automaticRetryAllowed = error.details.automaticRetryAllowed;
+  return Object.keys(details).length ? details : undefined;
 }
 
 async function readJson(request, limit = BODY_LIMIT) {
@@ -51,11 +74,38 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         && segments[2] === 'creative-drafts' && segments[4] === 'quality-director' && segments.length === 5) {
         return json(response, 200, await qualityDirectorService.state({ id: segments[3], brandId: url.searchParams.get('brandId') }));
       }
+      if (qualityDirectorService && ['GET','HEAD'].includes(request.method) && segments[0] === 'api'
+        && segments[1] === 'v2.10' && segments[2] === 'creative-drafts' && segments[4] === 'pilot'
+        && segments[6] === 'content' && segments.length === 7) {
+        const content = await qualityDirectorService.pilotContent({ id: segments[3], brandId: url.searchParams.get('brandId'), attemptId: segments[5] });
+        return require('./video-response').sendVideo(request, response, content);
+      }
       if (lockedKeyframeStateService && request.method === 'GET' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments[4] === 'locked-keyframe' && segments[5] === 'state'
         && segments.length === 6) {
         return json(response, 200, await lockedKeyframeStateService.state({ draftId: segments[3],
           brandId: url.searchParams.get('brandId') }));
+      }
+      if (lockedKeyframeStateService && request.method === 'GET' && segments[0] === 'api'
+        && segments[1] === 'v2.10' && segments[2] === 'creative-drafts'
+        && segments[4] === 'locked-keyframe' && segments[6] === 'content' && segments.length === 7) {
+        const content = await lockedKeyframeStateService.content({ draftId: segments[3],
+          brandId: url.searchParams.get('brandId'), keyframeId: segments[5] });
+        response.writeHead(200, { 'Content-Type': content.contentType,
+          'Content-Length': content.bytes.length, 'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff' });
+        return response.end(content.bytes);
+      }
+      if (creativeService && request.method === 'GET' && segments[0] === 'api'
+        && segments[1] === 'v2.10' && segments[2] === 'creative-drafts'
+        && segments[4] === 'voice-content' && segments.length === 6) {
+        const content = await creativeService.voiceContent({ id: segments[3],
+          brandId: url.searchParams.get('brandId'), artifactId: segments[5],
+          source: url.searchParams.get('source') });
+        response.writeHead(200, { 'Content-Type': content.contentType,
+          'Content-Length': content.bytes.length, 'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff' });
+        return response.end(content.bytes);
       }
       if (creativeService && request.method === 'POST' && url.pathname === '/api/v2.10/creative-drafts') {
         return json(response, 201, await creativeService.createDraft(await readJson(request)));
@@ -68,6 +118,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         && segments[2] === 'creative-drafts' && segments.length === 5) {
         const args = { id: segments[3], ...await readJson(request, segments[4] === 'voice-upload' ? 70 * 1024 * 1024 : BODY_LIMIT) };
         if (segments[4] === 'preflight') return json(response, 200, await creativeService.preflight(args));
+        if (segments[4] === 'voice-preview-lookup') return json(response, 200, await creativeService.lookupVoicePreview(args));
         if (segments[4] === 'voice-preview') return json(response, 200, await creativeService.generateVoicePreview(args));
         if (segments[4] === 'voice-approve') return json(response, 200, await creativeService.approveVoice(args));
         if (segments[4] === 'voice-upload') return json(response, 201, await creativeService.uploadVoice(args));
@@ -85,6 +136,7 @@ function createControlServer({ service, creativeService = null, lockedKeyframeSe
         if (action === 'storyboard-approve') return json(response, 200, await qualityDirectorService.approveStoryboard(args));
         if (action === 'pilot-approve') return json(response, 200, await qualityDirectorService.approvePilot(args));
         if (action === 'pilot-reject') return json(response, 200, await qualityDirectorService.rejectPilot(args));
+        if (action === 'pilot-restore-review') return json(response, 200, await qualityDirectorService.restorePilotReview(args));
       }
       if (lockedKeyframeService && request.method === 'POST' && segments[0] === 'api' && segments[1] === 'v2.10'
         && segments[2] === 'creative-drafts' && segments[4] === 'locked-keyframe' && segments.length === 6) {

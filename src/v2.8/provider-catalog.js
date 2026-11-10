@@ -96,7 +96,12 @@ class ProviderCatalog {
       experimental: row.experimental !== false, costStatus: 'UNKNOWN', source: 'workspace-registration' };
   }
 
-  allModels() { return [...this.builtinModels, ...this.customModels.map((row) => this.modelFromCustom(row))]; }
+  allModels() { return [...this.builtinModels, ...this.customModels.map((row) => this.modelFromCustom(row))].map(model => {
+    if (model.provider === 'google' && model.modelId === 'veo-3.1-generate-preview') return { ...model, supportStatus: 'RETIRED' };
+    if (model.provider === 'openai' && model.modelId === 'gpt-image-1') return { ...model, supportStatus: 'UNVERIFIED' };
+    if (model.source === 'workspace-registration' && !require('./provider-request-compiler').CONTRACTS[`${model.provider}/${model.modelId}`]) return { ...model, supportStatus: 'UNVERIFIED' };
+    return model;
+  }); }
   listProviders() {
     return this.providers.map((provider) => {
       const models = this.listModels(provider.id);

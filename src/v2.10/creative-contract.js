@@ -164,19 +164,33 @@ function storyboardSourceFingerprint(briefInput = {}) {
   });
 }
 
-function buildShotPrompt(briefInput, shotInput) {
+const SHOT_PROMPT_COMPILER_VERSION = 'shot/4';
+
+// Lens/angle/composition are one static scope. Remove only exact repeated
+// semicolon-delimited components, preserving order and every distinct component.
+// Never apply this operation to START, ACTION, END or arbitrary prose.
+function uniqueCameraInstructions(...values) {
+  const parts = values.flatMap(value => text(value).split(/;\s+/)).map(text).filter(Boolean);
+  return [...new Set(parts)].join('; ');
+}
+
+// Preserve the existing opening-still prompt bytes.
+function buildStillPrompt(briefInput, shotInput) {
+  const still = true;
   const brief = canonicalCreativeBrief(briefInput);
   const shot = canonicalShot(shotInput);
   const negative = Array.isArray(shot.negativeGuidance) ? shot.negativeGuidance.join(', ') : shot.negativeGuidance;
   const mustKeep = shot.mustKeep.length ? shot.mustKeep.join('; ') : 'approved continuity only';
   const mayChange = shot.mayChange.length ? shot.mayChange.join('; ') : 'only changes explicitly required by the action';
   return [
-    `Advertising objective: ${brief.objective}. Creative concept: ${brief.creativeConcept}.`,
+    // Whole-film narrative remains in the approved brief; it is not an action for this shot.
+    brief.visualStyle ? `Visual style: ${brief.visualStyle}.` : '',
+    shot.referencePolicy !== 'NONE' ? 'Use the approved reference for identity, appearance and composition; animate only the specified shot action.' : '',
     `Required full-frame output composition: ${brief.aspectRatio}; keep the subject and important action inside platform-safe framing.`,
     `Shot purpose: ${shot.purpose}. Subject: ${shot.subject}. Environment: ${shot.environment}.`,
     shot.startState ? `START STATE: ${shot.startState}.` : '',
-    `ACTION: ${shot.action}.`,
-    shot.intendedEndState ? `INTENDED END STATE: ${shot.intendedEndState}.` : '',
+    still ? '' : `ACTION: ${shot.action}.`,
+    !still && shot.intendedEndState ? `INTENDED END STATE: ${shot.intendedEndState}.` : '',
     `Emotional intent: ${shot.emotionalIntent}. Framing: ${shot.framing}. Camera: ${shot.camera}. Lens/composition: ${shot.lensComposition}. Lighting: ${shot.lighting}.`,
     `Transition from previous: ${shot.transitionFromPrevious}. Transition to next: ${shot.transitionToNext}.`,
     `MUST KEEP: ${mustKeep}. MAY CHANGE: ${mayChange}.`,
@@ -185,9 +199,46 @@ function buildShotPrompt(briefInput, shotInput) {
   ].filter(Boolean).join(' ');
 }
 
+// Compact only the compiler-owned envelope. Approved field text is retained verbatim.
+// In particular START, ACTION and END are separate scopes: never deduplicate across time.
+function shotPromptSections(briefInput, shotInput, { still = false } = {}) {
+  if (still) return freeze([{ field: 'openingStill', text: buildStillPrompt(briefInput, shotInput) }]);
+  const brief = canonicalCreativeBrief(briefInput);
+  const shot = canonicalShot(shotInput);
+  const sections = [];
+  const add = (field, value, label = '') => {
+    const content = text(value);
+    if (content) sections.push({ field, text: label ? `${label}: ${content}` : content });
+  };
+  add('compositionPolicy', `${brief.aspectRatio}.`);
+  if (shot.referencePolicy !== 'NONE') add('reference', 'Use approved reference for identity and composition.');
+  add('visualStyle', brief.visualStyle);
+  for (const field of ['purpose','subject','environment','emotionalIntent','framing','camera']) add(field, shot[field]);
+  add('lensComposition', uniqueCameraInstructions(shot.lensComposition));
+  add('lighting', shot.lighting);
+  add('continuityScope', 'Context; follow START/ACTION/END:');
+  for (const field of ['identity','appearance','wardrobe','environment','props','lightingColorLanguage','cameraLanguage']) {
+    add(`continuity.${field}`, brief.continuity[field]);
+  }
+  add('continuity', shot.continuity);
+  add('negativeGuidance', Array.isArray(shot.negativeGuidance) ? shot.negativeGuidance.join('\n') : shot.negativeGuidance, 'Avoid');
+  if (shot.mustKeep.length) add('mustKeep', shot.mustKeep.join('; '), 'MUST KEEP');
+  if (shot.mayChange.length) add('mayChange', shot.mayChange.join('; '), 'MAY CHANGE');
+  // Transition enums remain structured plan/QA metadata, not repeated prose.
+  // Default negative intent is added exactly once by the provider translator.
+  add('startState', shot.startState, 'START');
+  add('action', shot.action, 'ACTION');
+  add('intendedEndState', shot.intendedEndState, 'END');
+  return freeze(sections);
+}
+
+function buildShotPrompt(briefInput, shotInput, options = {}) {
+  return shotPromptSections(briefInput, shotInput, options).map(section => section.text).join('\n');
+}
+
 module.exports = {
-  SCHEMA_VERSION, SHOT_ROLES, REFERENCE_POLICIES, TRANSITION_POLICIES, VOICE_SOURCE_TYPES, REQUIRED_SHOT_FIELDS,
-  canonicalCreativeBrief, canonicalContinuity, canonicalShot, canonicalVoice,
+  SHOT_PROMPT_COMPILER_VERSION, SCHEMA_VERSION, SHOT_ROLES, REFERENCE_POLICIES, TRANSITION_POLICIES, VOICE_SOURCE_TYPES, REQUIRED_SHOT_FIELDS,
+  canonicalCreativeBrief, canonicalContinuity, canonicalShot, canonicalVoice, shotPromptSections, uniqueCameraInstructions,
   creativeInputFingerprint, buildShotPrompt, fingerprint, freeze,
   scriptSourceFingerprint, storyboardSourceFingerprint,
 };
